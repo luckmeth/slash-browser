@@ -1,75 +1,109 @@
-import { app, type Session } from 'electron'
+import { app, type Session, type WebContents } from 'electron'
+import type { PermissionKind } from '@shared/types/permission'
 import { createLogger } from '../logger'
+import { isSilentlyGranted, toPermissionKinds } from '../permissions/PermissionManager'
 
 const log = createLogger('session')
 
 /**
- * A permission decision. Phase 1 answers every request with `deny`; Phase 4
- * replaces this single function with the real PermissionManager.
+ * What SessionHardening needs from the permission layer.
  *
- * Modelled as an injectable callback from the start so that swap is one
- * assignment rather than a rewrite of the handler wiring — and so the wiring
- * (which must be applied to *every* session, including Phase 2's per-workspace
- * partitions) is written and tested once.
+ * An interface rather than the concrete manager so the session wiring can be
+ * reasoned about — and, if ever needed, tested — without a database.
  */
-export type PermissionDecider = (request: {
-  origin: string
-  permission: string
-  webContentsId: number | null
-}) => boolean
-
-/** Phase 1 default: deny everything and say so in the log. */
-export const denyAllPermissions: PermissionDecider = ({ origin, permission }) => {
-  log.info(`permission "${permission}" denied for ${origin} (Phase 4 adds real handling)`)
-  return false
+export interface PermissionResolver {
+  request(
+    partition: string,
+    origin: string,
+    kinds: readonly PermissionKind[],
+    tabId: string | null,
+    tabTitle: string
+  ): Promise<boolean>
+  check(partition: string, origin: string, kind: PermissionKind, tabId: string | null): boolean
+  /** Which tab a requesting WebContents belongs to, for tab-scoped grants. */
+  identifyTab(webContentsId: number): { tabId: string; title: string } | null
 }
 
 /**
  * Applies the security posture that must hold for every session the app creates.
  *
- * Called for the default session and, from Phase 2, for each `persist:ws-<id>`
- * partition. Forgetting one would give an isolated workspace weaker rules than
- * the default one, which is exactly the kind of gap that does not show up in
- * manual testing — so `SessionRegistry` is the only way to obtain a session and
- * it always hardens before handing one out.
+ * Called for the default session and for each `persist:ws-<id>` partition.
+ * Forgetting one would give an isolated workspace weaker rules than the default
+ * one — exactly the kind of gap that does not show up in manual testing — so
+ * `SessionRegistry` is the only way to obtain a session and it always hardens
+ * before handing one out.
  */
 export class SessionHardening {
-  private decider: PermissionDecider = denyAllPermissions
+  private resolver: PermissionResolver | null = null
 
-  /** Phase 4 calls this with the real PermissionManager-backed decider. */
-  setPermissionDecider(decider: PermissionDecider): void {
-    this.decider = decider
+  /**
+   * Installed once the permission layer exists.
+   *
+   * Until then every request is denied. That ordering is deliberate: a session
+   * created during startup must not be permissive for the window between being
+   * created and being wired up.
+   */
+  setResolver(resolver: PermissionResolver): void {
+    this.resolver = resolver
   }
 
-  apply(target: Session, label: string): void {
+  apply(target: Session, partition: string): void {
     target.setPermissionRequestHandler((contents, permission, callback, details) => {
-      const origin = originOf(details?.requestingUrl ?? contents?.getURL() ?? '')
-      callback(
-        this.decider({
-          origin,
-          permission,
-          webContentsId: contents?.id ?? null
+      if (isSilentlyGranted(permission)) {
+        callback(true)
+        return
+      }
+
+      const resolver = this.resolver
+      if (!resolver) {
+        log.warn(`"${permission}" denied — permission layer not ready`)
+        callback(false)
+        return
+      }
+
+      const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined
+      const kinds = toPermissionKinds(permission, mediaTypes)
+      if (kinds.length === 0) {
+        callback(true)
+        return
+      }
+
+      const origin = originOf(details.requestingUrl || contents?.getURL() || '')
+      const tab = contents ? resolver.identifyTab(contents.id) : null
+
+      void resolver
+        .request(partition, origin, kinds, tab?.tabId ?? null, tab?.title ?? origin)
+        .then(callback)
+        .catch((error: unknown) => {
+          // A failure in our own code must not become an accidental grant.
+          log.error('permission request failed; denying', error)
+          callback(false)
         })
-      )
     })
 
-    // Synchronous counterpart, consulted by navigator.permissions.query() and by
-    // getUserMedia before it prompts. It must answer from stored state without
-    // prompting — returning true here would grant access with no request at all.
+    // Synchronous counterpart, consulted by navigator.permissions.query() and as
+    // a pre-flight before some requests. It must answer from stored state and
+    // never prompt — returning true here would grant access with no request.
     target.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
-      return this.decider({
-        origin: requestingOrigin || originOf(contents?.getURL() ?? ''),
-        permission,
-        webContentsId: contents?.id ?? null
-      })
+      const resolver = this.resolver
+      if (!resolver) return false
+      if (isSilentlyGranted(permission)) return true
+
+      const kinds = toPermissionKinds(permission)
+      if (kinds.length === 0) return true
+
+      const origin = originOf(requestingOrigin || contents?.getURL() || '')
+      const tab = contents ? resolver.identifyTab(contents.id) : null
+      // Every kind must already be allowed; a partial grant is not a yes.
+      return kinds.every((kind) => resolver.check(partition, origin, kind, tab?.tabId ?? null))
     })
 
-    // Device pickers (WebUSB/WebHID/serial). Denied outright in Phase 1; these
-    // are not part of the Phase 4 permission set either, so the honest answer
-    // stays "no" until there is a considered design for them.
+    // Device pickers (WebUSB/WebHID/serial) stay denied. They are not part of the
+    // Phase 4 permission set, and the honest answer is "no" until there is a
+    // considered design for them rather than a prompt that cannot explain itself.
     target.setDevicePermissionHandler(() => false)
 
-    log.debug(`hardened session: ${label}`)
+    log.debug(`hardened session: ${partition}`)
   }
 
   /**
@@ -103,3 +137,5 @@ function originOf(url: string): string {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+export type { WebContents }

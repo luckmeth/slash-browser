@@ -26,6 +26,21 @@ export function hostOf(url: string): string {
   }
 }
 
+/**
+ * Scheme + host + port — the unit permissions are keyed by.
+ *
+ * Permissions are per *origin*, not per URL: granting the camera on one page of
+ * a site grants it for the whole origin, which is how the web platform defines
+ * it and what users are implicitly agreeing to.
+ */
+export function originOf(url: string): string {
+  try {
+    return new URL(url).origin
+  } catch {
+    return url || 'unknown'
+  }
+}
+
 /** True when the origin is one Chromium treats as a secure context. */
 export function isSecureUrl(url: string): boolean {
   try {

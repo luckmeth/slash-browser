@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
+import { originOf } from '@shared/url'
 import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
@@ -426,6 +427,44 @@ export function registerHandlers(ctx: AppContext): void {
     const next = !window.isFullScreen()
     window.setFullScreen(next)
     return ok({ fullScreen: next })
+  })
+
+  // --- permissions ----------------------------------------------------------
+
+  ipc.handle('permissions:respond', (request) => {
+    ctx.permissions.respond(request.requestId, request.policy)
+    return ok(undefined)
+  })
+
+  ipc.handle('permissions:getPending', (_req, context) =>
+    ok(windowOf(context.sender)?.pendingPermission ?? null)
+  )
+
+  ipc.handle('permissions:list', () => ok(ctx.permissions.listGrants()))
+
+  ipc.handle('permissions:revoke', (request) => {
+    ctx.permissions.revoke(request.partition, request.origin, request.kind)
+
+    // Chromium caches some grants renderer-side, so a page already holding a
+    // stream keeps it until the document is torn down. Reloading is the only
+    // way to make revocation take effect immediately — the UI offers it rather
+    // than doing it silently, because a reload discards page state.
+    if (request.reloadTabs) {
+      for (const window of ctx.allWindows()) {
+        for (const tab of window.tabs.allTabs()) {
+          if (originOf(tab.snapshot.url) !== request.origin) continue
+          window.tabs.reload(tab.id, false)
+        }
+      }
+    }
+    return ok(ctx.permissions.listGrants())
+  })
+
+  ipc.handle('permissions:events', (request) => ok(ctx.permissions.listEvents(request.limit)))
+
+  ipc.handle('permissions:clearEvents', () => {
+    ctx.permissionRepository.clearEvents()
+    return ok(undefined)
   })
 
   // --- history --------------------------------------------------------------

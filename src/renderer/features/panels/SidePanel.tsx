@@ -7,6 +7,7 @@ import { DownloadsPanel } from './DownloadsPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { WorkspaceEditor } from '../workspaces/WorkspaceEditor'
 import { PerformancePanel } from '../performance/PerformancePanel'
+import { PermissionsPanel } from '../permissions/PermissionsPanel'
 
 export const SIDE_PANEL_WIDTH = 380
 
@@ -15,7 +16,8 @@ const TITLES = {
   bookmarks: 'Bookmarks',
   downloads: 'Downloads',
   settings: 'Settings',
-  performance: 'Performance'
+  performance: 'Performance',
+  permissions: 'Permissions'
 } as const
 
 /**
@@ -82,6 +84,7 @@ export function SidePanel(): React.JSX.Element | null {
             {panel === 'downloads' && <DownloadsPanel />}
             {panel === 'settings' && <SettingsPanel />}
             {panel === 'performance' && <PerformancePanel />}
+            {panel === 'permissions' && <PermissionsPanel />}
           </>
         )}
       </div>

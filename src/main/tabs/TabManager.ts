@@ -44,6 +44,14 @@ export interface TabManagerHooks {
    * bookmarks and the search engine setting, which the menu needs.
    */
   installPageContextMenu: (contents: WebContents) => void
+  /**
+   * A tab is gone or has navigated away.
+   *
+   * Anything scoped to it must be dropped: a permission prompt still on screen
+   * would be attributing a request to a page that no longer exists, and an
+   * allow-for-tab grant must not outlive the tab that was granted it.
+   */
+  onTabDiscarded: (tabId: string) => void
 }
 
 /**
@@ -225,6 +233,8 @@ export class TabManager {
 
     const snap = tab.snapshot
     const visibleIndex = this.visibleTabs.indexOf(tab)
+
+    this.hooks.onTabDiscarded(id)
 
     // Internal pages are not worth reopening — Ctrl+Shift+T should bring back
     // something the user actually lost.

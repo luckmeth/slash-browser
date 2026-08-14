@@ -168,6 +168,87 @@ async function captureOmniboxDropdown(
 }
 
 /**
+ * Dev-only Phase 4 verification.
+ *
+ * Triggers a real `navigator.geolocation` request from a real page, so the whole
+ * chain runs: Chromium's permission handler → PermissionManager → overlay prompt
+ * → user answer → the page's own callback. Checking the manager in isolation
+ * would not prove the session handler is actually wired to it.
+ */
+export async function runPermissionCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  permissions: {
+    respond: (requestId: string, policy: 'allow-once' | 'block') => void
+    pendingIds: () => string[]
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(4000)
+
+  const page = window.tabs.findById(activeId)?.contents
+  if (!page) {
+    log.error('permission probe: no page')
+    app.quit()
+    return
+  }
+
+  // Fire the request but do not await it — it only settles once answered.
+  void page.executeJavaScript(`
+    window.__permissionOutcome = 'pending';
+    navigator.geolocation.getCurrentPosition(
+      () => { window.__permissionOutcome = 'granted'; },
+      (error) => { window.__permissionOutcome = 'denied:' + error.code; }
+    );
+    'requested'
+  `)
+
+  await delay(1500)
+
+  const prompt = window.pendingPermission
+  if (!prompt) {
+    log.error('permission probe: FAIL — no prompt was raised')
+    app.quit()
+    return
+  }
+  log.info(`permission probe: prompt raised for ${prompt.origin} (${prompt.kinds.join('+')})`)
+
+  const overlay = window.overlay.webContents
+  if (overlay) {
+    const text = (await overlay.executeJavaScript(
+      `(document.body.innerText || '').replace(/\\n+/g, ' | ').slice(0, 200)`
+    )) as string
+    log.info(`permission probe: prompt text — ${text}`)
+  }
+
+  await captureWindowTo(window, outputPath)
+
+  // Refuse, and confirm the refusal actually reaches the page's error callback.
+  permissions.respond(prompt.requestId, 'block')
+  await delay(1200)
+
+  const outcome = (await page.executeJavaScript(`window.__permissionOutcome`)) as string
+  // PERMISSION_DENIED is code 1.
+  if (outcome.startsWith('denied:1')) {
+    log.info('permission probe: PASS — denial reached the page (PERMISSION_DENIED)')
+  } else {
+    log.error(`permission probe: FAIL — page saw "${outcome}"`)
+  }
+
+  if (permissions.pendingIds().length > 0) {
+    log.error('permission probe: FAIL — a request was left unsettled')
+  }
+
+  app.quit()
+}
+
+/**
  * Verifies the dropdown by reading the overlay's DOM.
  *
  * A screenshot is not a reliable check here: driving focus programmatically into

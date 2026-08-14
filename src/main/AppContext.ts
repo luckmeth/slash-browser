@@ -10,6 +10,9 @@ import { SessionRegistry } from './sessions/SessionRegistry'
 import { DownloadManager } from './downloads/DownloadManager'
 import { IpcRegistry } from './ipc/registry'
 import { installContentSignalListener } from './tabs/contentSignals'
+import type { EventChannel, EventPayload } from '@shared/ipc/contracts'
+import { PermissionRepository } from './db/repositories/PermissionRepository'
+import { PermissionManager } from './permissions/PermissionManager'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -32,6 +35,8 @@ export class AppContext {
   readonly history: HistoryRepository
   readonly bookmarks: BookmarkRepository
   readonly workspaces: WorkspaceRepository
+  readonly permissionRepository: PermissionRepository
+  readonly permissions: PermissionManager
   readonly downloads: DownloadManager
   readonly sessions: SessionRegistry
   private readonly hardening = new SessionHardening()
@@ -47,6 +52,14 @@ export class AppContext {
     this.history = new HistoryRepository(this.db)
     this.bookmarks = new BookmarkRepository(this.db)
     this.workspaces = new WorkspaceRepository(this.db)
+    this.permissionRepository = new PermissionRepository(this.db)
+    // Hooks are replaced in start() once windows can exist; until then a prompt
+    // has nowhere to render and the manager denies rather than hangs.
+    this.permissions = new PermissionManager(this.permissionRepository, {
+      showPrompt: () => false,
+      dismissPrompt: () => {},
+      onGrantsChanged: () => {}
+    })
     this.downloadRepository = new DownloadRepository(this.db)
     this.sessions = new SessionRegistry(this.hardening)
     this.downloads = new DownloadManager(this.downloadRepository, this.settings, {
@@ -76,6 +89,37 @@ export class AppContext {
       return null
     })
 
+    // Prompts render in the window that owns the requesting tab; grant changes
+    // are announced to every window so two dashboards cannot disagree.
+    this.permissions.setHooks({
+      showPrompt: (request) => {
+        const window = request.tabId ? this.windowForTab(request.tabId) : this.windows[0]
+        if (!window) return false
+        window.showPermissionPrompt(request)
+        return true
+      },
+      dismissPrompt: (requestId) => {
+        for (const window of this.windows) window.dismissPermissionPrompt(requestId)
+      },
+      onGrantsChanged: () => this.broadcastAll('permissions:changed', this.permissions.listGrants())
+    })
+
+    // Only now can a permission be answered by anything other than "no".
+    this.hardening.setResolver({
+      request: (partition, origin, kinds, tabId, tabTitle) =>
+        this.permissions.request(partition, origin, kinds, tabId, tabTitle),
+      check: (partition, origin, kind, tabId) =>
+        this.permissions.check(partition, origin, kind, tabId),
+      identifyTab: (webContentsId) => {
+        for (const window of this.windows) {
+          const match = window.tabs.allTabs().find((tab) => tab.contents?.id === webContentsId)
+          if (match) return { tabId: match.id, title: match.snapshot.title || match.snapshot.url }
+        }
+        return null
+      }
+    })
+    this.permissions.start()
+
     registerHandlers(this)
 
     this.settings.onChange((next) => {
@@ -96,6 +140,7 @@ export class AppContext {
       workspaces: this.workspaces,
       settings: this.settings,
       downloads: this.downloads,
+      onTabDiscarded: (tabId) => this.permissions.cancelForTab(tabId),
       onBookmarkRequested: (url, title) => {
         if (this.bookmarks.findByUrl(url)) return
         this.bookmarks.create({ url, title, faviconUrl: null, parentId: null, isFolder: false })
@@ -113,6 +158,15 @@ export class AppContext {
     return window
   }
 
+  allWindows(): readonly BrowserWindowController[] {
+    return this.windows
+  }
+
+  /** The window containing a given tab. */
+  windowForTab(tabId: string): BrowserWindowController | undefined {
+    return this.windows.find((window) => window.tabs.findById(tabId) !== null)
+  }
+
   /** Maps a privileged sender back to the window that owns it. */
   windowFor(sender: WebContents): BrowserWindowController | undefined {
     return this.windows.find((w) => w.privilegedContents().some((c) => c.id === sender.id))
@@ -122,12 +176,16 @@ export class AppContext {
     return this.windows.find((w) => w.isFocused) ?? this.windows[0]
   }
 
-  private broadcastAll<C extends 'settings:changed' | 'downloads:changed'>(
-    channel: C,
-    payload: Parameters<IpcRegistry['broadcast']>[1]
-  ): void {
+  /**
+   * Pushes an event to every window's privileged views.
+   *
+   * Generic over the channel so the payload is checked against that channel's
+   * contract — the previous hand-listed union needed a `never` cast, which meant
+   * a mismatched payload would have compiled.
+   */
+  private broadcastAll<C extends EventChannel>(channel: C, payload: EventPayload<C>): void {
     for (const window of this.windows) {
-      this.ipc.broadcast(channel, payload as never, window.privilegedContents())
+      this.ipc.broadcast(channel, payload, window.privilegedContents())
     }
   }
 
@@ -142,6 +200,9 @@ export class AppContext {
     this.windows.length = 0
     this.disposeContentSignals?.()
     this.disposeContentSignals = null
+    // Settles every pending prompt as denied; an unresolved permission promise
+    // would leave the page's callback hanging.
+    this.permissions.stop()
     this.downloads.dispose()
     this.ipc.dispose()
     this.db.close()

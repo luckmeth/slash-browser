@@ -122,7 +122,54 @@ const m003_workspaces: Migration = {
   `
 }
 
-export const migrations: readonly Migration[] = [m001_init, m002_browsing, m003_workspaces]
+const m004_permissions: Migration = {
+  version: 4,
+  name: 'permissions',
+  sql: /* sql */ `
+    -- Only decisions that outlive the process are stored. allow-once,
+    -- allow-for-tab and allow-for-session are deliberately memory-only: writing
+    -- them would turn a deliberately temporary grant into a durable one, which
+    -- is the opposite of what the user chose.
+    --
+    -- Keyed by partition as well as origin, so an isolated workspace's grants
+    -- cannot leak into the shared session or into another workspace.
+    CREATE TABLE permission_grants (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      partition  TEXT    NOT NULL,
+      origin     TEXT    NOT NULL,
+      kind       TEXT    NOT NULL,
+      policy     TEXT    NOT NULL,
+      expires_at INTEGER,
+      tab_id     TEXT,
+      created_at INTEGER NOT NULL,
+      UNIQUE (partition, origin, kind)
+    );
+    CREATE INDEX idx_grants_lookup ON permission_grants (partition, origin, kind);
+    CREATE INDEX idx_grants_expiry ON permission_grants (expires_at)
+      WHERE expires_at IS NOT NULL;
+
+    -- Append-only activity log. Never updated, never deleted by normal use:
+    -- "what did I agree to, and when" is only trustworthy if the record cannot
+    -- be quietly rewritten. Clearing it is an explicit user action.
+    CREATE TABLE permission_events (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      partition TEXT    NOT NULL,
+      origin    TEXT    NOT NULL,
+      kind      TEXT    NOT NULL,
+      action    TEXT    NOT NULL,
+      policy    TEXT,
+      at        INTEGER NOT NULL
+    );
+    CREATE INDEX idx_permission_events_at ON permission_events (at DESC);
+  `
+}
+
+export const migrations: readonly Migration[] = [
+  m001_init,
+  m002_browsing,
+  m003_workspaces,
+  m004_permissions
+]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(
   (max, m) => (m.version > max ? m.version : max),

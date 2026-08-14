@@ -4,6 +4,13 @@ import { TabsSnapshotSchema, TabSchema } from '../types/tab'
 import { WorkspacesSnapshotSchema, WORKSPACE_COLORS } from '../types/workspace'
 import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
+import {
+  PermissionEventSchema,
+  PermissionGrantSchema,
+  PermissionKindSchema,
+  PermissionPolicySchema,
+  PermissionRequestSchema
+} from '../types/permission'
 import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types/browsing'
 import type { InvokeChannel, EventChannel } from './channels'
 
@@ -269,6 +276,36 @@ export const invokeContracts = {
     response: z.object({ applied: z.number().int() })
   },
 
+  'permissions:respond': {
+    request: z.object({ requestId: z.string(), policy: PermissionPolicySchema }),
+    response: z.void()
+  },
+  /**
+   * Pulled by the overlay on mount — the prompt that caused the overlay to load
+   * was announced before its document existed to hear it.
+   */
+  'permissions:getPending': { request: z.void(), response: PermissionRequestSchema.nullable() },
+  'permissions:list': { request: z.void(), response: z.array(PermissionGrantSchema) },
+  'permissions:revoke': {
+    request: z.object({
+      partition: z.string(),
+      origin: z.string(),
+      kind: PermissionKindSchema,
+      /**
+       * Chromium caches some grants renderer-side, so revoking mid-page is not
+       * always immediate. Reloading is the only way to be certain — offered
+       * rather than forced, since it discards page state.
+       */
+      reloadTabs: z.boolean().default(false)
+    }),
+    response: z.array(PermissionGrantSchema)
+  },
+  'permissions:events': {
+    request: z.object({ limit: z.number().int().min(1).max(500).default(100) }),
+    response: z.array(PermissionEventSchema)
+  },
+  'permissions:clearEvents': { request: z.void(), response: z.void() },
+
   'history:search': {
     request: HistoryQuerySchema,
     response: z.array(HistoryEntrySchema)
@@ -345,6 +382,7 @@ export const UiCommandSchema = z.object({
     'open-settings',
     'open-performance',
     'open-find',
+    'open-permissions',
     'bookmark-current-tab',
     'close-panel'
   ])
@@ -361,6 +399,8 @@ export const eventContracts = {
   'workspaces:snapshot': WorkspacesSnapshotSchema,
   'performance:changed': PerformanceSnapshotSchema,
   'omnibox:state': OmniboxStateSchema,
+  'permissions:prompt': PermissionRequestSchema.nullable(),
+  'permissions:changed': z.array(PermissionGrantSchema),
   'ui:command': UiCommandSchema
 } as const satisfies Record<EventChannel, z.ZodType>
 

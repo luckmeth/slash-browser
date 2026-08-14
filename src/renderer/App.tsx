@@ -75,6 +75,9 @@ export function App(): React.JSX.Element {
         case 'open-find':
           openFind()
           break
+        case 'open-permissions':
+          togglePanel('permissions')
+          break
         case 'close-panel':
           setPanel('none')
           break

@@ -78,6 +78,14 @@ export const INVOKE_CHANNELS = [
   'performance:restore',
   'performance:applyRecommendation',
 
+  // --- permissions ---
+  'permissions:respond',
+  'permissions:getPending',
+  'permissions:list',
+  'permissions:revoke',
+  'permissions:events',
+  'permissions:clearEvents',
+
   // --- history ---
   'history:search',
   'history:delete',
@@ -114,6 +122,8 @@ export const EVENT_CHANNELS = [
   'performance:changed',
   /** Chrome → overlay, so the dropdown can render outside the chrome document. */
   'omnibox:state',
+  'permissions:prompt',
+  'permissions:changed',
   /** Menu accelerators that must be handled by the UI, not the main process. */
   'ui:command'
 ] as const

@@ -4,6 +4,7 @@ import { VIEW_KIND, WORKSPACE_RAIL_WIDTH, TITLE_BAR_HEIGHT } from '@shared/const
 import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
 import type { OmniboxState } from '@shared/types/omnibox'
+import type { PermissionRequest } from '@shared/types/permission'
 import type { IpcRegistry } from '../ipc/registry'
 import type { SessionRegistry } from '../sessions/SessionRegistry'
 import type { HistoryRepository } from '../db/repositories/HistoryRepository'
@@ -29,6 +30,8 @@ export interface WindowDeps {
   downloads: { hasActiveDownloadFrom: (webContentsId: number) => boolean }
   /** Invoked by the tab context menu's "Bookmark this tab". */
   onBookmarkRequested: (url: string, title: string) => void
+  /** A tab closed — drop anything scoped to it. */
+  onTabDiscarded: (tabId: string) => void
 }
 
 /**
@@ -59,6 +62,8 @@ export class BrowserWindowController {
    * `omnibox:getState` contract for why a push alone is not enough.
    */
   omniboxState: OmniboxState | null = null
+  /** Prompt currently on screen, pulled by the overlay when it mounts. */
+  pendingPermission: PermissionRequest | null = null
 
   constructor(private readonly deps: WindowDeps) {
     this.window = new BaseWindow({
@@ -146,7 +151,8 @@ export class BrowserWindowController {
           this.deps.history.updateMetadata(url, title, faviconUrl)
         },
         installPageContextMenu: (contents) =>
-          installPageContextMenu(contents, this.contextMenuDeps())
+          installPageContextMenu(contents, this.contextMenuDeps()),
+        onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId)
       }
     )
 
@@ -257,6 +263,30 @@ export class BrowserWindowController {
   setRightPanelWidth(width: number): void {
     this.layout.setRightPanelWidth(width)
     this.applyLayout()
+  }
+
+  /**
+   * Shows a permission prompt over the page.
+   *
+   * Modal and full-bounds on purpose: a permission decision should not be
+   * dismissible by clicking past it onto the page that asked.
+   */
+  showPermissionPrompt(request: PermissionRequest): void {
+    this.pendingPermission = request
+    const state = this.overlay.show('permission-prompt', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+    this.deps.ipc.broadcast('permissions:prompt', request, this.privilegedContents())
+  }
+
+  dismissPermissionPrompt(requestId: string): void {
+    if (this.pendingPermission?.requestId !== requestId) return
+    this.pendingPermission = null
+    const state = this.overlay.hide()
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+    this.deps.ipc.broadcast('permissions:prompt', null, this.privilegedContents())
   }
 
   /** Chrome grew or shrank — e.g. the find bar opened. */

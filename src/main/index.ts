@@ -34,6 +34,16 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const permPath = process.env['ADAPTIVE_PERMISSION_CAPTURE']
+    if (permPath) {
+      void import('./dev/spikeCapture').then(({ runPermissionCapture }) =>
+        runPermissionCapture(window, permPath, {
+          respond: (requestId, policy) => context.permissions.respond(requestId, policy),
+          pendingIds: () => (window.pendingPermission ? [window.pendingPermission.requestId] : [])
+        })
+      )
+    }
+
     const perfPath = process.env['ADAPTIVE_PERF_CAPTURE']
     if (perfPath) {
       void import('./dev/spikeCapture').then(({ runPerformanceCapture }) =>

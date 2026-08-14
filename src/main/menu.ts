@@ -291,6 +291,7 @@ export function buildApplicationMenu(ctx: AppContext): void {
           accelerator: 'CommandOrControl+Shift+P',
           click: send('open-performance')
         },
+        { label: 'Site Permissions', click: send('open-permissions') },
         { label: 'Settings', accelerator: 'CommandOrControl+,', click: send('open-settings') }
       ]
     }

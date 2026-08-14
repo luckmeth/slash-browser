@@ -11,6 +11,7 @@ export type PanelId =
   | 'downloads'
   | 'settings'
   | 'performance'
+  | 'permissions'
 
 interface BrowserState {
   tabs: Tab[]
