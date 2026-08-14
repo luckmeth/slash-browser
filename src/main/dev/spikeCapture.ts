@@ -42,7 +42,11 @@ export async function runSpikeCapture(
     thumbnailSize: { width, height }
   })
 
-  const source = sources.find((s) => s.name === 'Adaptive Browser') ?? sources[0]
+  // Substring, not equality: the window title now follows the active tab, so it
+  // reads "Example Domain — Adaptive Browser". An exact match silently fell
+  // through to sources[0] and captured whatever unrelated window happened to be
+  // first.
+  const source = sources.find((s) => s.name.includes('Adaptive Browser'))
   if (!source) {
     log.error('spike capture: no window source found')
     app.quit()
@@ -103,6 +107,10 @@ export async function runUiCapture(
   ipcBroadcastUiCommand(window, 'close-panel')
   await delay(400)
 
+  // Omnibox first: the find bar changes the chrome height, and leaving it open
+  // would offset every later frame.
+  await captureOmniboxDropdown(window, outputPath.replace(/\.png$/, '-omnibox.png'))
+
   // Find bar: confirms the chrome-height round trip insets the native page view
   // rather than the bar being drawn over a page that still owns the full height.
   const activeId2 = window.tabs.snapshot().activeTabId
@@ -115,6 +123,112 @@ export async function runUiCapture(
   await captureWindowTo(window, outputPath.replace(/\.png$/, '-find.png'))
 
   app.quit()
+}
+
+/**
+ * Types into the real omnibox and captures the dropdown.
+ *
+ * Sets the value through the native setter rather than assigning `.value`:
+ * React installs its own property descriptor on the input, so a plain assignment
+ * updates the DOM without React ever seeing a change, and no suggestions would
+ * be requested.
+ */
+async function captureOmniboxDropdown(
+  window: BrowserWindowController,
+  outputPath: string
+): Promise<void> {
+  const chrome = window.privilegedContents()[0]
+  if (!chrome) return
+
+  // Raise the window *before* typing, since raising it afterwards would blur the
+  // field and dismiss the dropdown.
+  window.browserWindow.show()
+  window.browserWindow.moveTop()
+  window.browserWindow.focus()
+  chrome.focus()
+  await delay(600)
+
+  await chrome.executeJavaScript(`
+    (() => {
+      const input = document.querySelector('input[aria-label="Address and search bar"]');
+      if (!input) return 'no input';
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value'
+      ).set;
+      setter.call(input, 'wiki');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'typed';
+    })()
+  `)
+
+  await delay(1600)
+  await captureWindowTo(window, outputPath, { front: false })
+  await assertDropdownRendered(window)
+}
+
+/**
+ * Verifies the dropdown by reading the overlay's DOM.
+ *
+ * A screenshot is not a reliable check here: driving focus programmatically into
+ * a WebContentsView is fragile, and a blur tears the dropdown down before the
+ * frame is taken. Publishing the state from main and then counting the rendered
+ * rows tests the part that actually matters — that the overlay document mounts
+ * the list and paints it over the page.
+ */
+async function assertDropdownRendered(window: BrowserWindowController): Promise<void> {
+  const suggestions = [
+    {
+      id: 'probe:1',
+      kind: 'navigate' as const,
+      title: 'example.com',
+      subtitle: 'Open this address',
+      url: 'https://example.com',
+      tabId: null,
+      faviconUrl: null
+    },
+    {
+      id: 'probe:2',
+      kind: 'history' as const,
+      title: 'Wikipedia',
+      subtitle: 'www.wikipedia.org',
+      url: 'https://www.wikipedia.org',
+      tabId: null,
+      faviconUrl: null
+    }
+  ]
+
+  window.omniboxState = {
+    query: 'wiki',
+    suggestions,
+    selectedIndex: 0,
+    bounds: { x: 200, y: 90, width: 700, height: 104 }
+  }
+  window.overlay.show('command-bar', window.omniboxState.bounds)
+
+  const overlay = window.overlay.webContents
+  if (!overlay) {
+    log.error('dropdown probe: no overlay contents')
+    return
+  }
+  for (const contents of window.privilegedContents()) {
+    contents.send('overlay:stateChanged', { visible: true, surface: 'command-bar' })
+    contents.send('omnibox:state', window.omniboxState)
+  }
+
+  await delay(1200)
+  const rows = (await overlay.executeJavaScript(
+    `document.querySelectorAll('[role="option"]').length`
+  )) as number
+  const text = (await overlay.executeJavaScript(
+    `(document.body.innerText || '').replace(/\\n/g, ' | ').slice(0, 120)`
+  )) as string
+
+  if (rows === suggestions.length) {
+    log.info(`dropdown probe: PASS — ${rows} rows rendered in the overlay: ${text}`)
+  } else {
+    log.error(`dropdown probe: FAIL — expected ${suggestions.length} rows, found ${rows}`)
+  }
 }
 
 /**
@@ -194,14 +308,34 @@ function delay(ms: number): Promise<void> {
 
 async function captureWindowTo(
   window: BrowserWindowController,
-  outputPath: string
+  outputPath: string,
+  options: { front?: boolean } = {}
 ): Promise<void> {
+  // Windows Graphics Capture returns a blank frame for an occluded window, so
+  // the window has to be fronted first. Without this the capture silently
+  // succeeds and writes an empty dark rectangle — which reads as a compositing
+  // bug in the app rather than a limitation of the harness.
+  //
+  // `front: false` is for frames that depend on where keyboard focus is: raising
+  // the window blurs the omnibox, which clears the draft and tears the
+  // suggestion dropdown down before it can be photographed.
+  if (options.front !== false) {
+    window.browserWindow.show()
+    window.browserWindow.moveTop()
+    window.browserWindow.focus()
+    await delay(500)
+  }
+
   const { width, height } = window.browserWindow.getBounds()
   const sources = await desktopCapturer.getSources({
     types: ['window'],
     thumbnailSize: { width, height }
   })
-  const source = sources.find((s) => s.name === 'Adaptive Browser') ?? sources[0]
+  // Substring, not equality: the window title now follows the active tab, so it
+  // reads "Example Domain — Adaptive Browser". An exact match silently fell
+  // through to sources[0] and captured whatever unrelated window happened to be
+  // first.
+  const source = sources.find((s) => s.name.includes('Adaptive Browser'))
   if (!source) {
     log.error('capture: no window source found')
     return

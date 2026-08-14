@@ -30,6 +30,7 @@ const log = createLogger('overlay')
 export class OverlayController {
   private view: WebContentsView | null = null
   private attached = false
+  private modal = true
   private state: OverlayState = { visible: false, surface: 'none' }
 
   constructor(
@@ -67,12 +68,22 @@ export class OverlayController {
   }
 
   /**
-   * @param bounds Region the overlay may draw in and will capture input within.
-   *               Omit for a modal surface spanning the whole content area.
+   * @param bounds  Region the overlay may draw in and will capture input within.
+   * @param options `modal` keeps the overlay matched to the window on resize;
+   *                a bounded surface such as the omnibox dropdown keeps its own
+   *                rect. `takeFocus` must be false for surfaces that appear
+   *                *while the user is typing elsewhere* — focusing the overlay
+   *                would pull the caret out of the omnibox mid-keystroke.
    */
-  show(surface: Exclude<OverlayState['surface'], 'none'>, bounds: Rectangle): OverlayState {
+  show(
+    surface: Exclude<OverlayState['surface'], 'none'>,
+    bounds: Rectangle,
+    options: { modal?: boolean; takeFocus?: boolean } = {}
+  ): OverlayState {
+    const { modal = surface !== 'command-bar', takeFocus = surface !== 'command-bar' } = options
     const view = this.create()
     view.setBounds(bounds)
+    this.modal = modal
 
     if (!this.attached) {
       // Re-adding also reorders to topmost, which is what we want: the overlay
@@ -81,10 +92,10 @@ export class OverlayController {
       this.attached = true
     }
     view.setVisible(true)
-    view.webContents.focus()
+    if (takeFocus) view.webContents.focus()
 
     this.state = { visible: true, surface }
-    log.debug(`overlay shown: ${surface}`)
+    log.debug(`overlay shown: ${surface} (modal=${modal})`)
     return this.state
   }
 
@@ -99,9 +110,14 @@ export class OverlayController {
     return this.state
   }
 
-  /** Keeps a visible modal overlay matched to the window as it resizes. */
+  /**
+   * Keeps a visible **modal** overlay matched to the window as it resizes.
+   *
+   * A bounded surface is skipped: stretching the omnibox dropdown to the full
+   * window on resize would swallow every click on the page behind it.
+   */
   relayout(fullBounds: Rectangle): void {
-    if (this.view && this.state.visible) this.view.setBounds(fullBounds)
+    if (this.view && this.state.visible && this.modal) this.view.setBounds(fullBounds)
   }
 
   getState(): OverlayState {

@@ -5,6 +5,7 @@ import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
 import { showTabContextMenu } from '../menus/ContextMenus'
+import { buildSuggestions } from '../navigation/SuggestionEngine'
 
 /**
  * Registers every Phase 1 channel. Each must already exist in
@@ -46,6 +47,75 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('settings:getAll', () => ok(ctx.settings.getAll()))
   ipc.handle('settings:update', (patch) => ok(ctx.settings.update(patch)))
+
+  // --- omnibox suggestions --------------------------------------------------
+
+  ipc.handle('omnibox:suggest', (request, context) => {
+    const window = windowOf(context.sender)
+    return ok(
+      buildSuggestions(request.query, {
+        history: ctx.history.suggest(request.query, 12),
+        bookmarks: ctx.bookmarks.list(),
+        openTabs: window ? window.tabs.snapshot().tabs : [],
+        engineId: ctx.settings.getAll().searchEngineId
+      })
+    )
+  })
+
+  ipc.handle('omnibox:setState', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    window.omniboxState = request.suggestions.length === 0 ? null : request
+
+    if (request.suggestions.length === 0) {
+      const hidden = window.overlay.hide()
+      ipc.broadcast('overlay:stateChanged', hidden, window.privilegedContents())
+    } else {
+      // Sized to the list, not the window: overlay hit-testing is rectangular,
+      // so a full-screen overlay would make the whole page unclickable while
+      // the dropdown is open.
+      const shown = window.overlay.show('command-bar', request.bounds)
+      // The overlay document picks its surface from this event; without it the
+      // dropdown data arrives but nothing is mounted to render it.
+      ipc.broadcast('overlay:stateChanged', shown, window.privilegedContents())
+      ipc.broadcast('omnibox:state', request, window.privilegedContents())
+    }
+    return ok(undefined)
+  })
+
+  ipc.handle('omnibox:accept', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.overlay.hide()
+
+    // Switching to an already-open tab rather than opening a duplicate is the
+    // point of the 'open-tab' suggestion kind.
+    if (request.suggestion.kind === 'open-tab' && request.suggestion.tabId) {
+      window.tabs.activate(request.suggestion.tabId)
+    } else {
+      // The overlay document does not track which tab is active, so an empty
+      // tabId means "the current one" rather than being an error.
+      const target = request.tabId || window.tabs.snapshot().activeTabId
+      if (!target) return err('NOT_FOUND', 'No active tab to navigate')
+      window.tabs.navigate(target, request.suggestion.url)
+    }
+    window.tabs.emitNow()
+    return ok(undefined)
+  })
+
+  ipc.handle('omnibox:getState', (_req, context) =>
+    ok(windowOf(context.sender)?.omniboxState ?? null)
+  )
+
+  ipc.handle('omnibox:dismiss', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return ok(undefined)
+    window.omniboxState = null
+    const hidden = window.overlay.hide()
+    ipc.broadcast('overlay:stateChanged', hidden, window.privilegedContents())
+    return ok(undefined)
+  })
 
   // --- overlay --------------------------------------------------------------
 

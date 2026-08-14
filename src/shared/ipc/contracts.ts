@@ -3,6 +3,7 @@ import { SettingsSchema } from '../types/settings'
 import { TabsSnapshotSchema, TabSchema } from '../types/tab'
 import { WorkspacesSnapshotSchema, WORKSPACE_COLORS } from '../types/workspace'
 import { PerformanceSnapshotSchema } from '../types/performance'
+import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types/browsing'
 import type { InvokeChannel, EventChannel } from './channels'
 
@@ -80,6 +81,32 @@ export const invokeContracts = {
 
   'settings:getAll': { request: z.void(), response: SettingsSchema },
   'settings:update': { request: SettingsSchema.partial(), response: SettingsSchema },
+
+  /** Ranked suggestions for what has been typed so far. */
+  'omnibox:suggest': {
+    request: z.object({ query: z.string() }),
+    response: z.array(SuggestionSchema)
+  },
+  /**
+   * Chrome publishes the dropdown state; main sizes and shows the overlay and
+   * forwards the state to it. Keeping selection in the chrome document means the
+   * arrow keys keep working while focus stays in the text field.
+   */
+  'omnibox:setState': { request: OmniboxStateSchema, response: z.void() },
+  /**
+   * Pulled by the overlay document when it mounts.
+   *
+   * `overlay.show()` creates the view and loads its document asynchronously, so
+   * the first pushed state arrives before any listener exists and is lost. The
+   * overlay therefore asks for the current state rather than relying on having
+   * caught the push.
+   */
+  'omnibox:getState': { request: z.void(), response: OmniboxStateSchema.nullable() },
+  'omnibox:accept': {
+    request: z.object({ tabId: z.string(), suggestion: SuggestionSchema }),
+    response: z.void()
+  },
+  'omnibox:dismiss': { request: z.void(), response: z.void() },
 
   'overlay:setState': { request: OverlayStateSchema, response: OverlayStateSchema },
 
@@ -333,6 +360,7 @@ export const eventContracts = {
   'bookmarks:changed': z.array(BookmarkSchema),
   'workspaces:snapshot': WorkspacesSnapshotSchema,
   'performance:changed': PerformanceSnapshotSchema,
+  'omnibox:state': OmniboxStateSchema,
   'ui:command': UiCommandSchema
 } as const satisfies Record<EventChannel, z.ZodType>
 

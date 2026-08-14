@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  SUGGESTION_ROW_HEIGHT,
+  SUGGESTION_LIST_PADDING,
+  type Suggestion
+} from '@shared/types/omnibox'
 import { isInternalUrl, NEW_TAB_URL } from '@shared/types/tab'
 import { formatUrlForDisplay, isSecureUrl } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
@@ -12,14 +17,70 @@ export function Toolbar(): React.JSX.Element {
   const focusToken = useBrowserStore((s) => s.focusOmniboxToken)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [selectedIndex, setSelectedIndex] = useState(0)
   const tabId = activeTab?.id ?? null
   const url = activeTab?.url ?? ''
   const isNewTab = url === NEW_TAB_URL
 
   // While the user is typing, `draft` owns the field. Clearing it on tab switch
   // or navigation is what stops a half-typed address leaking into another tab.
-  useEffect(() => setDraft(null), [tabId, url])
+  useEffect(() => {
+    setDraft(null)
+    setSuggestions([])
+  }, [tabId, url])
+
+  // Fetch suggestions as the user types. Debounced, because each keystroke
+  // otherwise runs a LIKE query and rebuilds the ranking.
+  useEffect(() => {
+    if (draft === null || draft.trim() === '') {
+      setSuggestions([])
+      return
+    }
+    const timer = setTimeout(() => {
+      void window.browser.invoke('omnibox:suggest', { query: draft }).then((result) => {
+        if (result.ok) {
+          setSuggestions(result.value)
+          setSelectedIndex(0)
+        }
+      })
+    }, 90)
+    return () => clearTimeout(timer)
+  }, [draft])
+
+  /**
+   * Publish the dropdown to the overlay, positioned under the field.
+   *
+   * The list is measured here rather than in the overlay because only this
+   * document knows where the omnibox actually is, and the overlay must be sized
+   * to the list — a larger rect would swallow clicks on the page behind it.
+   */
+  useEffect(() => {
+    const field = fieldRef.current
+    if (!field) return
+
+    if (suggestions.length === 0) {
+      void window.browser.invoke('omnibox:dismiss', undefined)
+      return
+    }
+
+    const rect = field.getBoundingClientRect()
+    const height =
+      suggestions.length * SUGGESTION_ROW_HEIGHT + SUGGESTION_LIST_PADDING * 2
+    void window.browser.invoke('omnibox:setState', {
+      query: draft ?? '',
+      suggestions,
+      selectedIndex,
+      bounds: {
+        x: Math.round(rect.left),
+        y: Math.round(rect.bottom + 4),
+        width: Math.round(rect.width),
+        height: Math.round(height)
+      }
+    })
+  }, [suggestions, selectedIndex, draft])
 
   useEffect(() => {
     if (focusToken === 0) return
@@ -34,9 +95,41 @@ export function Toolbar(): React.JSX.Element {
 
   async function submit(): Promise<void> {
     if (!tabId || draft === null) return
-    await window.browser.invoke('nav:navigate', { tabId, input: draft })
+
+    // Enter takes the highlighted suggestion. The first row is always the
+    // literal reading of what was typed, so pressing Enter immediately does
+    // exactly what the field says — never a surprise redirect to a history hit.
+    const chosen = suggestions[selectedIndex]
+    setSuggestions([])
+    if (chosen) {
+      await window.browser.invoke('omnibox:accept', { tabId, suggestion: chosen })
+    } else {
+      await window.browser.invoke('nav:navigate', { tabId, input: draft })
+    }
     setDraft(null)
     inputRef.current?.blur()
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Enter') {
+      void submit()
+      return
+    }
+    if (event.key === 'Escape') {
+      setDraft(null)
+      setSuggestions([])
+      inputRef.current?.blur()
+      return
+    }
+    if (suggestions.length === 0) return
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setSelectedIndex((i) => (i + 1) % suggestions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setSelectedIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
+    }
   }
 
   async function toggleBookmark(): Promise<void> {
@@ -82,7 +175,7 @@ export function Toolbar(): React.JSX.Element {
         }}
       />
 
-      <div className="relative mx-1 flex flex-1 items-center">
+      <div ref={fieldRef} className="relative mx-1 flex flex-1 items-center">
         <span className="pointer-events-none absolute left-3 text-[var(--color-text-muted)]">
           {isNewTab ? (
             <Icon name="search" size={14} />
@@ -106,14 +199,14 @@ export function Toolbar(): React.JSX.Element {
             if (draft === null && !isNewTab) setDraft(url)
             event.target.select()
           }}
-          onBlur={() => setDraft(null)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') void submit()
-            if (event.key === 'Escape') {
-              setDraft(null)
-              inputRef.current?.blur()
-            }
+          onBlur={() => {
+            setDraft(null)
+            setSuggestions([])
           }}
+          onKeyDown={onKeyDown}
+          role="combobox"
+          aria-expanded={suggestions.length > 0}
+          aria-controls="omnibox-suggestions"
           className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] py-1.5 pr-9 pl-9 text-sm outline-none transition focus:border-[var(--color-accent)] disabled:opacity-50"
         />
 

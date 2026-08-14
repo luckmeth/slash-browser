@@ -21,6 +21,13 @@ export const INVOKE_CHANNELS = [
   'settings:getAll',
   'settings:update',
 
+  // --- omnibox suggestions ---
+  'omnibox:suggest',
+  'omnibox:setState',
+  'omnibox:getState',
+  'omnibox:accept',
+  'omnibox:dismiss',
+
   // --- overlay / layout ---
   'overlay:setState',
   'layout:setRightPanelWidth',
@@ -105,6 +112,8 @@ export const EVENT_CHANNELS = [
   'bookmarks:changed',
   'workspaces:snapshot',
   'performance:changed',
+  /** Chrome → overlay, so the dropdown can render outside the chrome document. */
+  'omnibox:state',
   /** Menu accelerators that must be handled by the UI, not the main process. */
   'ui:command'
 ] as const

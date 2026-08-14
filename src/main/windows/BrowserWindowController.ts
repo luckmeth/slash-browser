@@ -3,6 +3,7 @@ import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'el
 import { VIEW_KIND, WORKSPACE_RAIL_WIDTH, TITLE_BAR_HEIGHT } from '@shared/constants'
 import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
+import type { OmniboxState } from '@shared/types/omnibox'
 import type { IpcRegistry } from '../ipc/registry'
 import type { SessionRegistry } from '../sessions/SessionRegistry'
 import type { HistoryRepository } from '../db/repositories/HistoryRepository'
@@ -51,6 +52,13 @@ export class BrowserWindowController {
   readonly overlay: OverlayController
   readonly tabs: TabManager
   readonly performance: TabPerformanceManager
+  /**
+   * Last published omnibox dropdown state.
+   *
+   * Held here so the overlay document can pull it on mount — see the
+   * `omnibox:getState` contract for why a push alone is not enough.
+   */
+  omniboxState: OmniboxState | null = null
 
   constructor(private readonly deps: WindowDeps) {
     this.window = new BaseWindow({
@@ -87,6 +95,16 @@ export class BrowserWindowController {
         nodeIntegration: false,
         webSecurity: true
       }
+    })
+
+    // Surface renderer errors in the main log. A React exception in the chrome
+    // document blanks the entire UI while the window frame stays up, which looks
+    // like a compositing failure and is otherwise invisible without devtools.
+    this.chromeView.webContents.on('console-message', (event) => {
+      if (event.level === 'error') log.error(`chrome console: ${event.message}`)
+    })
+    this.chromeView.webContents.on('render-process-gone', (_e, details) => {
+      log.error(`chrome renderer gone: ${details.reason}`)
     })
 
     this.window.contentView.addChildView(this.chromeView)
