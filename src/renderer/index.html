@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      No remote script and no remote connect target. 'unsafe-inline' is required
+      by Vite's dev-time HMR preamble; the production build emits no inline
+      scripts, and tightening this to a nonce is tracked as Phase 1 hardening.
+
+      img-src allows remote images so the tab strip can show real favicons, whose
+      URLs come from `page-favicon-updated` and point at the visited host. An
+      <img> cannot execute script, so the exposure is that the chrome document
+      contacts hosts the user has already visited — the same behaviour as every
+      mainstream browser. Fetching favicons in main and caching them as data URLs
+      would remove even that, and is the honest improvement for a later phase.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ws: wss: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Adaptive Browser</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

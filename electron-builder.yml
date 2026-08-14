@@ -1,0 +1,57 @@
+appId: dev.slash.adaptivebrowser
+productName: Adaptive Browser
+copyright: Copyright © 2026 Slash Developments
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+  # better-sqlite3 ships a prebuild for every platform (~17 MB total). A Windows
+  # x64 build needs exactly one of them; the rest are 15 MB of dead weight in the
+  # installer. ADDING A PLATFORM TARGET MEANS UPDATING THIS LIST.
+  - '!**/node_modules/better-sqlite3/prebuilds/darwin-*.node'
+  - '!**/node_modules/better-sqlite3/prebuilds/linux-*.node'
+  - '!**/node_modules/better-sqlite3/prebuilds/linuxmusl-*.node'
+  - '!**/node_modules/better-sqlite3/prebuilds/win32-arm64.node'
+
+# better-sqlite3 is a native module: keep it unpacked so the .node binary is a
+# real file on disk rather than an entry inside app.asar, which cannot be dlopen'd.
+asar: true
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+
+# better-sqlite3 v13 ships N-API prebuilds (prebuilds/win32-x64.node, resolved by
+# platform+arch with no ABI version in the name). N-API binaries are ABI-stable
+# across both Node and Electron, so the shipped binary loads in Electron as-is.
+#
+# Rebuilding is therefore not merely unnecessary, it is actively harmful here:
+# node-gyp refuses to build any module whose path contains a space, and this
+# project lives under "Projects - Slash Developments\Slash Browser".
+# See https://github.com/nodejs/node-gyp/issues/65
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+# Cross-platform targets are intentionally left unconfigured until the browser is
+# stable on Windows. Adding them is a config change, not a code change — nothing
+# in src/ may assume a Windows-only API.
+#
+# mac:
+#   target: [dmg]
+#   category: public.app-category.productivity
+# linux:
+#   target: [AppImage, deb]
+#   category: Network

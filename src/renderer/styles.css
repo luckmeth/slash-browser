@@ -1,0 +1,32 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-surface: #0b0d12;
+  --color-surface-raised: #151922;
+  --color-border-subtle: #232936;
+  --color-text-primary: #e8eaf0;
+  --color-text-muted: #98a1b3;
+  --color-accent: #6ea8fe;
+  --color-good: #58d39b;
+  --color-bad: #f2777a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The chrome document is opaque; the overlay document overrides this to stay
+   transparent so page content shows through. */
+body {
+  background: var(--color-surface);
+}
