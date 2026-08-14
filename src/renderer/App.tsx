@@ -1,6 +1,12 @@
 import { useEffect } from 'react'
 import { NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
-import { CHROME_HEIGHT } from '@shared/constants'
+import {
+  CHROME_HEIGHT,
+  TITLE_BAR_HEIGHT,
+  TOOLBAR_HEIGHT,
+  WINDOW_CONTROLS_WIDTH
+} from '@shared/constants'
+import { FindBar, FIND_BAR_HEIGHT } from './features/find/FindBar'
 import { useBrowserStore } from './stores/browserStore'
 import { TabStrip } from './features/tabs/TabStrip'
 import { Toolbar } from './features/omnibox/Toolbar'
@@ -26,10 +32,21 @@ export function App(): React.JSX.Element {
   const togglePanel = useBrowserStore((s) => s.togglePanel)
   const requestOmniboxFocus = useBrowserStore((s) => s.requestOmniboxFocus)
   const refreshHistory = useBrowserStore((s) => s.refreshHistory)
+  const openFind = useBrowserStore((s) => s.openFind)
+  const findOpen = useBrowserStore((s) => s.findOpen)
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  // The chrome grows when the find bar opens, so the native page view must inset
+  // by the same amount — otherwise the bar would be drawn over the page it is
+  // searching, and the page would be hidden underneath it.
+  useEffect(() => {
+    void window.browser.invoke('layout:setChromeHeight', {
+      height: CHROME_HEIGHT + (findOpen ? FIND_BAR_HEIGHT : 0)
+    })
+  }, [findOpen])
 
   // Menu accelerators arrive here because a native view — usually the page —
   // holds keyboard focus, so the chrome document never sees the keystroke.
@@ -55,6 +72,9 @@ export function App(): React.JSX.Element {
         case 'open-performance':
           togglePanel('performance')
           break
+        case 'open-find':
+          openFind()
+          break
         case 'close-panel':
           setPanel('none')
           break
@@ -72,33 +92,55 @@ export function App(): React.JSX.Element {
   const hibernated = activeTab?.status === 'hibernated'
 
   return (
-    // The rail spans full height on the left; the header and content sit to its
-    // right, matching the native page view's inset (WORKSPACE_RAIL_WIDTH).
-    <div className="flex h-full bg-[var(--color-surface)]">
-      <WorkspaceRail />
+    <div className="flex h-full flex-col bg-[var(--color-surface)]">
+      {/*
+        Row 1 is the title bar. The window has no OS title bar, so this strip
+        carries the drag region and reserves space on the right for the native
+        minimise/maximise/close buttons Windows draws over it.
+      */}
+      <div
+        className="app-drag flex shrink-0 items-stretch"
+        style={{ height: TITLE_BAR_HEIGHT, paddingRight: WINDOW_CONTROLS_WIDTH }}
+      >
+        <TabStrip />
+      </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header
-          className="shrink-0 border-b border-[var(--color-border-subtle)]"
-          style={{ height: CHROME_HEIGHT }}
-        >
-          <div className="flex h-[42px] items-end px-2">
-            <TabStrip />
+      {/* Row 2: workspace rail on the left, toolbar and content to its right —
+          matching the native page view's inset (WORKSPACE_RAIL_WIDTH). */}
+      <div className="flex min-h-0 flex-1">
+        <WorkspaceRail />
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div
+            className="relative shrink-0 border-b border-[var(--color-border-subtle)]"
+            style={{ height: TOOLBAR_HEIGHT }}
+          >
+            <Toolbar />
+            {/*
+              Loading indicator. Chromium reports no load percentage, so an
+              indeterminate sweep is the honest form — a fake percentage that
+              creeps to 90% and waits is worse than none.
+            */}
+            {activeTab?.isLoading && (
+              <div className="absolute inset-x-0 -bottom-px h-0.5 overflow-hidden">
+                <div className="h-full w-1/3 animate-[loading_1.1s_ease-in-out_infinite] bg-[var(--color-accent)]" />
+              </div>
+            )}
           </div>
-          <Toolbar />
-        </header>
+          <FindBar />
 
-        <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1">
-            {crashed ? (
-              <SadTab />
-            ) : hibernated ? (
-              <HibernatedTab />
-            ) : showNewTab ? (
-              <NewTabPage />
-            ) : null}
-          </main>
-          <SidePanel />
+          <div className="flex min-h-0 flex-1">
+            <main className="min-w-0 flex-1">
+              {crashed ? (
+                <SadTab />
+              ) : hibernated ? (
+                <HibernatedTab />
+              ) : showNewTab ? (
+                <NewTabPage />
+              ) : null}
+            </main>
+            <SidePanel />
+          </div>
         </div>
       </div>
     </div>

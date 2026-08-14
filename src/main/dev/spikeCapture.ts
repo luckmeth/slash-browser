@@ -100,6 +100,19 @@ export async function runUiCapture(
   ipcBroadcastUiCommand(window, 'open-history')
   await delay(1200)
   await captureWindowTo(window, panelPath)
+  ipcBroadcastUiCommand(window, 'close-panel')
+  await delay(400)
+
+  // Find bar: confirms the chrome-height round trip insets the native page view
+  // rather than the bar being drawn over a page that still owns the full height.
+  const activeId2 = window.tabs.snapshot().activeTabId
+  ipcBroadcastUiCommand(window, 'open-find')
+  await delay(600)
+  if (activeId2) {
+    window.tabs.findInPage(activeId2, 'domain', { forward: true, findNext: false })
+  }
+  await delay(1400)
+  await captureWindowTo(window, outputPath.replace(/\.png$/, '-find.png'))
 
   app.quit()
 }

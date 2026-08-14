@@ -4,6 +4,7 @@ import { isInternalUrl } from '@shared/types/tab'
 import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
+import { showTabContextMenu } from '../menus/ContextMenus'
 
 /**
  * Registers every Phase 1 channel. Each must already exist in
@@ -63,6 +64,11 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('layout:setRightPanelWidth', (request, context) => {
     windowOf(context.sender)?.setRightPanelWidth(request.width)
+    return ok(undefined)
+  })
+
+  ipc.handle('layout:setChromeHeight', (request, context) => {
+    windowOf(context.sender)?.setChromeHeight(request.height)
     return ok(undefined)
   })
 
@@ -309,6 +315,47 @@ export function registerHandlers(ctx: AppContext): void {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
     return ok({ applied: window.performance.applyRecommendation(request.tabIds) })
+  })
+
+  // --- native browser behaviours --------------------------------------------
+
+  ipc.handle('menu:showTabContextMenu', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    showTabContextMenu(request.tabId, window.contextMenuDeps())
+    return ok(undefined)
+  })
+
+  ipc.handle('view:setZoomLevel', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok({ level: window.tabs.setZoomLevel(request.tabId, request.level) })
+  })
+
+  ipc.handle('view:find', (request, context) => {
+    windowOf(context.sender)?.tabs.findInPage(request.tabId, request.text, {
+      forward: request.forward,
+      findNext: request.findNext
+    })
+    return ok(undefined)
+  })
+
+  ipc.handle('view:stopFind', (request, context) => {
+    windowOf(context.sender)?.tabs.stopFindInPage(request.tabId, request.keepSelection)
+    return ok(undefined)
+  })
+
+  ipc.handle('view:print', (request, context) => {
+    windowOf(context.sender)?.tabs.print(request.tabId)
+    return ok(undefined)
+  })
+
+  ipc.handle('window:toggleFullScreen', (_req, context) => {
+    const window = windowOf(context.sender)?.browserWindow
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const next = !window.isFullScreen()
+    window.setFullScreen(next)
+    return ok({ fullScreen: next })
   })
 
   // --- history --------------------------------------------------------------

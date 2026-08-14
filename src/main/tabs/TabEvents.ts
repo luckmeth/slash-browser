@@ -87,6 +87,20 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
     hooks.onChanged()
   })
 
+  contents.on('found-in-page', (_event, result) => {
+    tab.patch({
+      findResult: { activeMatch: result.activeMatchOrdinal, totalMatches: result.matches }
+    })
+    hooks.onChanged()
+  })
+
+  // Zoom survives navigation within an origin but not a rebuilt view, so the
+  // snapshot is refreshed from Chromium rather than tracked independently.
+  contents.on('zoom-changed', () => {
+    tab.patch({ zoomLevel: contents.getZoomLevel() })
+    hooks.onChanged()
+  })
+
   contents.on('media-started-playing', () => {
     tab.patch({ isAudible: contents.isCurrentlyAudible() })
     hooks.onChanged()

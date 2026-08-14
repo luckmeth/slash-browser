@@ -30,3 +30,74 @@ body {
 body {
   background: var(--color-surface);
 }
+
+/*
+ * Window dragging.
+ *
+ * The window has no OS title bar (`titleBarStyle: 'hidden'`), so the tab strip
+ * has to provide the drag surface itself — otherwise the window cannot be moved
+ * at all. `app-region: drag` also gives double-click-to-maximise for free.
+ *
+ * Every interactive element inside a drag region must opt out, or it becomes
+ * unclickable: the drag handler swallows the press before it reaches the button.
+ */
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Chrome-only scrollbars. Thin and dark, so panels do not show the default
+   light Windows scrollbar against a dark UI. Web pages are unaffected — they
+   render in their own view with their own styles. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+  background-clip: content-box;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+/* Indeterminate page-load sweep. Chromium exposes no load percentage, so a
+   moving band is the honest indicator. */
+@keyframes loading {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+/* The chrome is an application surface, not a document: dragging its text or
+   accidentally selecting a tab label is never wanted. Inputs and the notes
+   textarea opt back in below. */
+#root {
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+}

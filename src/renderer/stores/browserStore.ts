@@ -24,6 +24,8 @@ interface BrowserState {
   /** Workspace id being edited, 'new' for the create form, or null when closed. */
   workspaceEditorId: string | 'new' | null
   panel: PanelId
+  findOpen: boolean
+  findQuery: string
   /**
    * Incremented to ask the omnibox to focus and select itself.
    *
@@ -38,6 +40,9 @@ interface BrowserState {
   setPanel: (panel: PanelId) => void
   togglePanel: (panel: Exclude<PanelId, 'none'>) => void
   setWorkspaceEditor: (id: string | 'new' | null) => void
+  openFind: () => void
+  closeFind: () => void
+  setFindQuery: (query: string) => void
   requestOmniboxFocus: () => void
   applySnapshot: (snapshot: TabsSnapshot) => void
   refreshHistory: (query?: string) => Promise<void>
@@ -57,6 +62,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   activeWorkspaceId: DEFAULT_WORKSPACE_ID,
   workspaceEditorId: null,
   panel: 'none',
+  findOpen: false,
+  findQuery: '',
   focusOmniboxToken: 0,
 
   activeTab: () => {
@@ -80,6 +87,20 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     })),
 
   setWorkspaceEditor: (workspaceEditorId) => set({ workspaceEditorId, panel: 'none' }),
+
+  openFind: () => set({ findOpen: true }),
+
+  closeFind: () => {
+    // Clear the highlight in the page too, or the last search stays marked up
+    // after the bar is gone.
+    const { activeTabId } = get()
+    if (activeTabId) {
+      void window.browser.invoke('view:stopFind', { tabId: activeTabId, keepSelection: false })
+    }
+    set({ findOpen: false, findQuery: '' })
+  },
+
+  setFindQuery: (findQuery) => set({ findQuery }),
 
   requestOmniboxFocus: () => set((state) => ({ focusOmniboxToken: state.focusOmniboxToken + 1 })),
 

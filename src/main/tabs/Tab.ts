@@ -68,6 +68,8 @@ export class Tab {
       isMuted: false,
       isProtected: false,
       isFrozen: false,
+      zoomLevel: 0,
+      findResult: null,
       status: 'live',
       error: null,
       lastActiveAt: now,

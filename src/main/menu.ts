@@ -134,6 +134,55 @@ export function buildApplicationMenu(ctx: AppContext): void {
         },
         { type: 'separator' },
         {
+          label: 'Find in Page…',
+          accelerator: 'CommandOrControl+F',
+          click: send('open-find')
+        },
+        { type: 'separator' },
+        {
+          label: 'Zoom In',
+          accelerator: 'CommandOrControl+Plus',
+          click: withTabs((tabs) => stepZoom(tabs, 1))
+        },
+        {
+          // Ctrl+= is what an unshifted "+" key actually produces.
+          label: 'Zoom In ',
+          accelerator: 'CommandOrControl+=',
+          visible: false,
+          click: withTabs((tabs) => stepZoom(tabs, 1))
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CommandOrControl+-',
+          click: withTabs((tabs) => stepZoom(tabs, -1))
+        },
+        {
+          label: 'Actual Size',
+          accelerator: 'CommandOrControl+0',
+          click: withTabs((tabs) => {
+            const id = tabs.snapshot().activeTabId
+            if (id) tabs.setZoomLevel(id, 0)
+          })
+        },
+        { type: 'separator' },
+        {
+          label: 'Print…',
+          accelerator: 'CommandOrControl+P',
+          click: withTabs((tabs) => {
+            const id = tabs.snapshot().activeTabId
+            if (id) tabs.print(id)
+          })
+        },
+        {
+          label: 'Full Screen',
+          accelerator: 'F11',
+          click: () => {
+            const window = ctx.focusedWindow()?.browserWindow
+            if (window) window.setFullScreen(!window.isFullScreen())
+          }
+        },
+        { type: 'separator' },
+        {
           // Devtools for the *page*, not for our chrome UI — that is what a user
           // pressing F12 in a browser expects to inspect.
           label: 'Developer Tools',
@@ -249,6 +298,16 @@ export function buildApplicationMenu(ctx: AppContext): void {
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   app.setName('Adaptive Browser')
+}
+
+/** One Chromium zoom step is a factor of 1.2, which is 0.5 in level units. */
+function stepZoom(
+  tabs: NonNullable<ReturnType<AppContext['focusedWindow']>>['tabs'],
+  direction: 1 | -1
+): void {
+  const id = tabs.snapshot().activeTabId
+  if (!id) return
+  tabs.setZoomLevel(id, tabs.getZoomLevel(id) + direction * 0.5)
 }
 
 function cycleWorkspace(ctx: AppContext, direction: 1 | -1): void {

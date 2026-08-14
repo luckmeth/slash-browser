@@ -91,6 +91,15 @@ export const invokeContracts = {
     request: z.object({ width: z.number().int().min(0).max(1200) }),
     response: z.void()
   },
+  /**
+   * Chrome height changes when a row appears or disappears — the find bar being
+   * the first case. The page view insets to match, so the bar never covers the
+   * matches it is highlighting.
+   */
+  'layout:setChromeHeight': {
+    request: z.object({ height: z.number().int().min(0).max(600) }),
+    response: z.void()
+  },
 
   // Tab mutations return the resulting snapshot as well as broadcasting it. The
   // caller then updates from its own response instead of racing the broadcast.
@@ -182,6 +191,28 @@ export const invokeContracts = {
     response: z.void()
   },
   'nav:stop': { request: TabIdSchema, response: z.void() },
+
+  'menu:showTabContextMenu': { request: TabIdSchema, response: z.void() },
+  'view:setZoomLevel': {
+    // Chromium's usable range; each step is a factor of 1.2.
+    request: z.object({ tabId: z.string(), level: z.number().min(-5).max(5) }),
+    response: z.object({ level: z.number() })
+  },
+  'view:find': {
+    request: z.object({
+      tabId: z.string(),
+      text: z.string(),
+      forward: z.boolean().default(true),
+      findNext: z.boolean().default(false)
+    }),
+    response: z.void()
+  },
+  'view:stopFind': {
+    request: z.object({ tabId: z.string(), keepSelection: z.boolean().default(false) }),
+    response: z.void()
+  },
+  'view:print': { request: TabIdSchema, response: z.void() },
+  'window:toggleFullScreen': { request: z.void(), response: z.object({ fullScreen: z.boolean() }) },
 
   'performance:snapshot': { request: z.void(), response: PerformanceSnapshotSchema },
   'performance:setMode': {
@@ -286,6 +317,7 @@ export const UiCommandSchema = z.object({
     'open-downloads',
     'open-settings',
     'open-performance',
+    'open-find',
     'bookmark-current-tab',
     'close-panel'
   ])

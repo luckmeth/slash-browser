@@ -95,7 +95,15 @@ export class AppContext {
       history: this.history,
       workspaces: this.workspaces,
       settings: this.settings,
-      downloads: this.downloads
+      downloads: this.downloads,
+      onBookmarkRequested: (url, title) => {
+        if (this.bookmarks.findByUrl(url)) return
+        this.bookmarks.create({ url, title, faviconUrl: null, parentId: null, isFolder: false })
+        const all = this.bookmarks.list()
+        for (const window of this.windows) {
+          this.ipc.broadcast('bookmarks:changed', all, window.privilegedContents())
+        }
+      }
     })
     this.windows.push(window)
     window.browserWindow.on('closed', () => {

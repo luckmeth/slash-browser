@@ -1,6 +1,7 @@
 import { join } from 'node:path'
-import { BaseWindow, WebContentsView, shell, type WebContents } from 'electron'
-import { VIEW_KIND, WORKSPACE_RAIL_WIDTH } from '@shared/constants'
+import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'electron'
+import { VIEW_KIND, WORKSPACE_RAIL_WIDTH, TITLE_BAR_HEIGHT } from '@shared/constants'
+import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
 import type { IpcRegistry } from '../ipc/registry'
 import type { SessionRegistry } from '../sessions/SessionRegistry'
@@ -9,6 +10,7 @@ import type { WorkspaceRepository } from '../db/repositories/WorkspaceRepository
 import type { SettingsStore } from '../settings/SettingsStore'
 import { TabManager } from '../tabs/TabManager'
 import { TabPerformanceManager } from '../performance/TabPerformanceManager'
+import { installPageContextMenu, type ContextMenuDeps } from '../menus/ContextMenus'
 import { createLogger } from '../logger'
 import { OverlayController } from './OverlayController'
 import { ViewLayoutManager } from './ViewLayoutManager'
@@ -24,6 +26,8 @@ export interface WindowDeps {
   settings: SettingsStore
   /** Narrow view of DownloadManager, for the performance engine's guard. */
   downloads: { hasActiveDownloadFrom: (webContentsId: number) => boolean }
+  /** Invoked by the tab context menu's "Bookmark this tab". */
+  onBookmarkRequested: (url: string, title: string) => void
 }
 
 /**
@@ -56,7 +60,23 @@ export class BrowserWindowController {
       minHeight: 400,
       show: false,
       backgroundColor: '#0b0d12',
-      title: 'Adaptive Browser'
+      title: 'Adaptive Browser',
+      icon: appIconPath(),
+
+      // No OS title bar: the tab strip is the title bar, as in every mainstream
+      // browser. Windows still draws the minimise/maximise/close buttons itself
+      // through the overlay, so they behave exactly like a native window's —
+      // including snap layouts on hover — rather than being HTML imitations.
+      titleBarStyle: 'hidden',
+      titleBarOverlay: {
+        color: '#0b0d12',
+        symbolColor: '#98a1b3',
+        height: TITLE_BAR_HEIGHT
+      },
+      // The menu is kept for its accelerators but its bar stays hidden until Alt,
+      // which is how Firefox behaves. A permanent File/Edit/View bar is the most
+      // obvious sign of a desktop app that is not a browser.
+      autoHideMenuBar: true
     })
 
     this.chromeView = new WebContentsView({
@@ -96,6 +116,7 @@ export class BrowserWindowController {
       {
         onSnapshot: (snapshot) => {
           this.deps.ipc.broadcast('tabs:snapshot', snapshot, this.privilegedContents())
+          this.syncWindowTitle(snapshot)
         },
         onNavigated: (url, title, faviconUrl) => {
           if (!this.deps.settings.getAll().recordHistory) return
@@ -105,7 +126,9 @@ export class BrowserWindowController {
         onMetadata: (url, title, faviconUrl) => {
           if (!this.deps.settings.getAll().recordHistory) return
           this.deps.history.updateMetadata(url, title, faviconUrl)
-        }
+        },
+        installPageContextMenu: (contents) =>
+          installPageContextMenu(contents, this.contextMenuDeps())
       }
     )
 
@@ -156,9 +179,71 @@ export class BrowserWindowController {
     })
   }
 
+  /**
+   * Dependencies the context menus need. Built lazily so the menu always
+   * reflects current workspaces and settings rather than a snapshot from
+   * construction time.
+   */
+  contextMenuDeps(): ContextMenuDeps {
+    return {
+      tabs: this.tabs,
+      window: this.window,
+      workspaces: this.deps.workspaces,
+      searchEngineId: () => this.deps.settings.getAll().searchEngineId,
+      bookmarkUrl: (url, title) => this.deps.onBookmarkRequested(url, title),
+      moveTabToWorkspace: (tabId, workspaceId) => {
+        const from = this.tabs.findById(tabId)?.snapshot.workspaceId
+        const target = this.deps.workspaces.findById(workspaceId)
+        const source = from ? this.deps.workspaces.findById(from) : null
+        const crosses = (target?.isolated ?? false) || (source?.isolated ?? false)
+
+        // The same warning the drag path gives: the target workspace has its own
+        // cookie partition, so the page reloads signed out and nothing can carry
+        // the session across.
+        if (crosses) {
+          const choice = dialog.showMessageBoxSync(this.window, {
+            type: 'question',
+            buttons: ['Move', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            title: 'Move tab to another workspace?',
+            message: `Move this tab to "${target?.name}"?`,
+            detail:
+              'That workspace keeps its own cookies and storage, so the page will reload and ' +
+              'you will be signed out of it there. Anything unsaved on the page will be lost.',
+            noLink: true
+          })
+          if (choice !== 0) return
+        }
+        this.tabs.moveToWorkspace(tabId, workspaceId)
+        this.tabs.emitNow()
+      }
+    }
+  }
+
+  /**
+   * Keeps the window title on the active tab, the way a browser does.
+   *
+   * It shows in the taskbar preview and in Alt+Tab, so a static "Adaptive
+   * Browser" there is a small but constant reminder that this is an app window
+   * rather than a browser.
+   */
+  private syncWindowTitle(snapshot: { tabs: { id: string; title: string; url: string }[]; activeTabId: string | null }): void {
+    if (this.window.isDestroyed()) return
+    const active = snapshot.tabs.find((t) => t.id === snapshot.activeTabId)
+    const label = active?.title?.trim()
+    this.window.setTitle(label ? `${label} — Adaptive Browser` : 'Adaptive Browser')
+  }
+
   /** Reserves space on the right for a side panel and re-lays out the views. */
   setRightPanelWidth(width: number): void {
     this.layout.setRightPanelWidth(width)
+    this.applyLayout()
+  }
+
+  /** Chrome grew or shrank — e.g. the find bar opened. */
+  setChromeHeight(height: number): void {
+    this.layout.setChromeHeight(height)
     this.applyLayout()
   }
 

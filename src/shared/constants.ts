@@ -1,5 +1,24 @@
-/** Height of the browser chrome (tab strip + toolbar) in CSS pixels. */
-export const CHROME_HEIGHT = 88
+/**
+ * Title bar row. Tabs live here, as in every mainstream browser — the window has
+ * no OS title bar of its own (`titleBarStyle: 'hidden'`), so this strip *is* the
+ * title bar and must contain the draggable region.
+ */
+export const TITLE_BAR_HEIGHT = 40
+
+/** Navigation toolbar row, directly below the title bar. */
+export const TOOLBAR_HEIGHT = 44
+
+/** Total chrome above the page. */
+export const CHROME_HEIGHT = TITLE_BAR_HEIGHT + TOOLBAR_HEIGHT
+
+/**
+ * Space reserved at the right of the title bar for the native window controls.
+ *
+ * Windows draws minimise/maximise/close itself via `titleBarOverlay`; the tab
+ * strip must not run underneath them or the last tab becomes unclickable. Three
+ * buttons at 46px is the standard Windows metric.
+ */
+export const WINDOW_CONTROLS_WIDTH = 138
 
 /**
  * Width of the workspace switcher rail on the left edge.

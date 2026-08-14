@@ -24,6 +24,7 @@ export const INVOKE_CHANNELS = [
   // --- overlay / layout ---
   'overlay:setState',
   'layout:setRightPanelWidth',
+  'layout:setChromeHeight',
 
   // --- tabs ---
   'tabs:list',
@@ -52,6 +53,14 @@ export const INVOKE_CHANNELS = [
   'nav:goForward',
   'nav:reload',
   'nav:stop',
+
+  // --- native browser behaviours ---
+  'menu:showTabContextMenu',
+  'view:setZoomLevel',
+  'view:find',
+  'view:stopFind',
+  'view:print',
+  'window:toggleFullScreen',
 
   // --- performance ---
   'performance:snapshot',

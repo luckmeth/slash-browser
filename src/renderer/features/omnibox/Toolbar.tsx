@@ -29,6 +29,8 @@ export function Toolbar(): React.JSX.Element {
 
   const displayed = draft ?? (isNewTab ? '' : formatUrlForDisplay(url))
   const bookmarked = bookmarks.some((b) => !b.isFolder && b.url === url)
+  // Chromium zoom levels are logarithmic: each step multiplies by 1.2.
+  const zoomPercent = Math.round(1.2 ** (activeTab?.zoomLevel ?? 0) * 100)
 
   async function submit(): Promise<void> {
     if (!tabId || draft === null) return
@@ -115,25 +117,43 @@ export function Toolbar(): React.JSX.Element {
           className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] py-1.5 pr-9 pl-9 text-sm outline-none transition focus:border-[var(--color-accent)] disabled:opacity-50"
         />
 
-        <button
-          type="button"
-          aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark this tab (Ctrl+D)'}
-          title={bookmarked ? 'Remove bookmark' : 'Bookmark this tab (Ctrl+D)'}
-          disabled={disabled || isInternalUrl(url)}
-          onClick={() => void toggleBookmark()}
-          className="absolute right-2 cursor-pointer rounded p-1 transition hover:bg-white/10 disabled:cursor-default disabled:opacity-30"
-        >
-          <Icon
-            name="star"
-            size={14}
-            filled={bookmarked}
-            className={bookmarked ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)]'}
-          />
-        </button>
+        <div className="absolute right-1.5 flex items-center gap-0.5">
+          {/* Only shown when zoom is not 100%, as Chrome does — a permanent
+              indicator would be noise on every page. */}
+          {zoomPercent !== 100 && tabId && (
+            <button
+              type="button"
+              title={`Zoom ${zoomPercent}% — click to reset (Ctrl+0)`}
+              aria-label={`Zoom ${zoomPercent} percent, click to reset`}
+              onClick={() => void window.browser.invoke('view:setZoomLevel', { tabId, level: 0 })}
+              className="cursor-default rounded px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-accent)] transition hover:bg-white/10"
+            >
+              {zoomPercent}%
+            </button>
+          )}
+
+          <button
+            type="button"
+            aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark this tab (Ctrl+D)'}
+            title={bookmarked ? 'Remove bookmark' : 'Bookmark this tab (Ctrl+D)'}
+            disabled={disabled || isInternalUrl(url)}
+            onClick={() => void toggleBookmark()}
+            className="cursor-default rounded p-1 transition hover:bg-white/10 disabled:cursor-default disabled:opacity-30"
+          >
+            <Icon
+              name="star"
+              size={14}
+              filled={bookmarked}
+              className={
+                bookmarked ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)]'
+              }
+            />
+          </button>
+        </div>
       </div>
 
       <NavButton
-        icon="star"
+        icon="bookmarks"
         label="Bookmarks (Ctrl+Shift+O)"
         active={panel === 'bookmarks'}
         onClick={() => togglePanel('bookmarks')}
@@ -151,7 +171,7 @@ export function Toolbar(): React.JSX.Element {
         onClick={() => togglePanel('downloads')}
       />
       <NavButton
-        icon="clock"
+        icon="activity"
         label="Performance (Ctrl+Shift+P)"
         active={panel === 'performance'}
         onClick={() => togglePanel('performance')}

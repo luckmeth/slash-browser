@@ -1,4 +1,4 @@
-import type { BaseWindow, Rectangle, Session, WebContentsView } from 'electron'
+import type { BaseWindow, Rectangle, Session, WebContents, WebContentsView } from 'electron'
 import { CLOSED_TAB_STACK_LIMIT } from '@shared/constants'
 import {
   NEW_TAB_URL,
@@ -37,6 +37,13 @@ export interface TabManagerHooks {
   onSnapshot: (snapshot: TabsSnapshot) => void
   onNavigated: (url: string, title: string, faviconUrl: string | null) => void
   onMetadata: (url: string, title: string, faviconUrl: string | null) => void
+  /**
+   * Attaches the right-click menu to a newly built page view.
+   *
+   * Injected rather than imported so TabManager stays unaware of workspaces,
+   * bookmarks and the search engine setting, which the menu needs.
+   */
+  installPageContextMenu: (contents: WebContents) => void
 }
 
 /**
@@ -298,6 +305,71 @@ export class TabManager {
     this.create({ url: source.snapshot.url, afterTabId: id })
   }
 
+  /** Closes every other tab in this workspace, keeping pinned ones. */
+  closeOthers(keepId: string): void {
+    // Snapshot the ids first: close() mutates the array being iterated.
+    const doomed = this.visibleTabs
+      .filter((tab) => tab.id !== keepId && !tab.snapshot.isPinned)
+      .map((tab) => tab.id)
+    for (const id of doomed) this.close(id)
+  }
+
+  /** Closes tabs after this one in the strip, keeping pinned ones. */
+  closeToRight(fromId: string): void {
+    const visible = this.visibleTabs
+    const index = visible.findIndex((tab) => tab.id === fromId)
+    if (index < 0) return
+    const doomed = visible
+      .slice(index + 1)
+      .filter((tab) => !tab.snapshot.isPinned)
+      .map((tab) => tab.id)
+    for (const id of doomed) this.close(id)
+  }
+
+  // --- zoom -----------------------------------------------------------------
+
+  /**
+   * Chromium's zoom is per-webContents, so it is naturally per-tab. It resets
+   * when a hibernated tab is rebuilt; persisting zoom per origin is a Phase 4
+   * site-settings concern rather than something to fake here.
+   */
+  setZoomLevel(id: string, level: number): number {
+    const contents = this.findById(id)?.contents
+    if (!contents) return 0
+    // Chromium's range; beyond it the page becomes unusable.
+    const clamped = Math.max(-5, Math.min(5, level))
+    contents.setZoomLevel(clamped)
+    this.scheduleEmit()
+    return clamped
+  }
+
+  getZoomLevel(id: string): number {
+    return this.findById(id)?.contents?.getZoomLevel() ?? 0
+  }
+
+  // --- find in page ---------------------------------------------------------
+
+  findInPage(id: string, text: string, options: { forward: boolean; findNext: boolean }): void {
+    const contents = this.findById(id)?.contents
+    if (!contents) return
+    if (text === '') {
+      contents.stopFindInPage('clearSelection')
+      return
+    }
+    contents.findInPage(text, { forward: options.forward, findNext: options.findNext })
+  }
+
+  stopFindInPage(id: string, keepSelection: boolean): void {
+    this.findById(id)?.contents?.stopFindInPage(
+      keepSelection ? 'keepSelection' : 'clearSelection'
+    )
+  }
+
+  print(id: string): void {
+    // Opens Chromium's own print preview, the same dialog Chrome shows.
+    this.findById(id)?.contents?.print()
+  }
+
   // --- ordering -------------------------------------------------------------
 
   setPinned(id: string, pinned: boolean): void {
@@ -532,6 +604,8 @@ export class TabManager {
         this.create({ url, background, afterTabId: tab.id })
       }
     })
+
+    this.hooks.installPageContextMenu(view.webContents)
 
     if (tab.snapshot.isMuted) view.webContents.setAudioMuted(true)
 

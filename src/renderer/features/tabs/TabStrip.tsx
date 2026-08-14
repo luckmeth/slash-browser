@@ -5,13 +5,34 @@ import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 
+const MAX_TAB_WIDTH = 220
+const MIN_TAB_WIDTH = 44
+const PINNED_TAB_WIDTH = 42
+
+/**
+ * The tab strip, which doubles as the window's title bar.
+ *
+ * Two consequences of living in the title bar:
+ *  - every interactive element needs `app-no-drag`, or the window-drag handler
+ *    swallows the click before it arrives
+ *  - tabs shrink to fit rather than scrolling, the way Chrome and Edge do. A
+ *    horizontally scrolling strip is a desktop-app pattern; browsers compress.
+ */
 export function TabStrip(): React.JSX.Element {
   const tabs = useBrowserStore((s) => s.tabs)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+  const [stripWidth, setStripWidth] = useState(0)
 
   const pinnedCount = tabs.filter((t) => t.isPinned).length
+  const flexibleCount = tabs.length - pinnedCount
+  // Leave room for the new-tab button.
+  const available = Math.max(0, stripWidth - pinnedCount * (PINNED_TAB_WIDTH + 2) - 40)
+  const tabWidth =
+    flexibleCount === 0
+      ? MAX_TAB_WIDTH
+      : Math.max(MIN_TAB_WIDTH, Math.min(MAX_TAB_WIDTH, Math.floor(available / flexibleCount) - 2))
 
   async function handleDrop(index: number): Promise<void> {
     if (dragId) await window.browser.invoke('tabs:reorder', { tabId: dragId, toIndex: index })
@@ -20,17 +41,21 @@ export function TabStrip(): React.JSX.Element {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto pt-1.5">
+    <div
+      ref={(node) => {
+        if (node) setStripWidth(node.clientWidth)
+      }}
+      className="flex min-w-0 flex-1 items-end gap-0.5 overflow-hidden px-2 pt-1.5"
+      role="tablist"
+      aria-label="Tabs"
+    >
       {tabs.map((tab, index) => (
         <TabItem
           key={tab.id}
           tab={tab}
-          index={index}
+          width={tab.isPinned ? PINNED_TAB_WIDTH : tabWidth}
           isActive={tab.id === activeTabId}
           isDropTarget={dropIndex === index}
-          // A pinned tab may only be dropped among pinned tabs. The strip renders
-          // them as separate regions, so allowing a cross-boundary drop would
-          // silently flip the tab's pinned state.
           canAcceptDrop={
             dragId !== null &&
             (tabs.find((t) => t.id === dragId)?.isPinned ?? false) === tab.isPinned
@@ -50,19 +75,17 @@ export function TabStrip(): React.JSX.Element {
         title="New tab (Ctrl+T)"
         aria-label="New tab"
         onClick={() => void window.browser.invoke('tabs:create', { background: false })}
-        className="mb-0.5 ml-1 shrink-0 cursor-pointer rounded-md p-1.5 text-[var(--color-text-muted)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
+        className="app-no-drag mb-1 shrink-0 cursor-default rounded-md p-1.5 text-[var(--color-text-muted)] transition hover:bg-white/10 hover:text-[var(--color-text-primary)]"
       >
-        <Icon name="plus" />
+        <Icon name="plus" size={15} />
       </button>
-
-      {pinnedCount > 0 && <div className="sr-only">{pinnedCount} pinned tabs</div>}
     </div>
   )
 }
 
 function TabItem({
   tab,
-  index,
+  width,
   isActive,
   isDropTarget,
   canAcceptDrop,
@@ -72,7 +95,7 @@ function TabItem({
   onDrop
 }: {
   tab: Tab
-  index: number
+  width: number
   isActive: boolean
   isDropTarget: boolean
   canAcceptDrop: boolean
@@ -83,14 +106,14 @@ function TabItem({
 }): React.JSX.Element {
   const internal = isInternalUrl(tab.url)
   const label = tab.title || (internal ? 'New tab' : hostOf(tab.url)) || 'Untitled'
+  // Below this the label is unreadable anyway, so show icon only — the same
+  // thing Chrome does as tabs compress.
+  const compact = width < 90
 
   return (
     <div
       draggable
       onDragStart={(event) => {
-        // Also published on the dataTransfer so the workspace rail can accept a
-        // drop — reordering is in-component state, but a cross-target drag needs
-        // the id to travel with the drag itself.
         event.dataTransfer.setData('text/tab-id', tab.id)
         event.dataTransfer.effectAllowed = 'move'
         onDragStart()
@@ -98,8 +121,6 @@ function TabItem({
       onDragEnd={onDragEnd}
       onDragOver={(event) => {
         if (!canAcceptDrop) return
-        // Default behaviour rejects the drop; preventing it is what makes the
-        // element a valid target.
         event.preventDefault()
         onDragOver()
       }}
@@ -110,28 +131,31 @@ function TabItem({
       }}
       onClick={() => void window.browser.invoke('tabs:activate', { tabId: tab.id })}
       onAuxClick={(event) => {
-        // Middle-click closes, as in every other browser.
         if (event.button === 1) void window.browser.invoke('tabs:close', { tabId: tab.id })
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        void window.browser.invoke('menu:showTabContextMenu', { tabId: tab.id })
       }}
       role="tab"
       aria-selected={isActive}
       tabIndex={0}
-      title={internal ? label : tab.url}
-      data-index={index}
+      title={internal ? label : `${label}\n${tab.url}`}
+      style={{ width }}
       className={[
-        'group relative flex h-9 shrink-0 cursor-default items-center gap-2 rounded-t-lg border-t border-r border-l px-3 text-sm transition',
-        tab.isPinned ? 'w-[52px] justify-center' : 'w-[200px] max-w-[200px] min-w-[52px]',
+        'app-no-drag group relative flex h-[31px] shrink-0 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-[13px] transition-colors',
+        compact ? 'justify-center' : '',
         isActive
-          ? 'border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] text-[var(--color-text-primary)]'
-          : 'border-transparent text-[var(--color-text-muted)] hover:bg-white/5',
+          ? 'bg-[var(--color-surface-raised)] text-[var(--color-text-primary)] shadow-[0_-1px_0_var(--color-border-subtle),1px_0_0_var(--color-border-subtle),-1px_0_0_var(--color-border-subtle)]'
+          : 'text-[var(--color-text-muted)] hover:bg-white/[0.06]',
         isDropTarget ? 'ring-2 ring-[var(--color-accent)] ring-inset' : ''
       ].join(' ')}
     >
       <TabIcon tab={tab} internal={internal} />
 
-      {!tab.isPinned && <span className="flex-1 truncate">{label}</span>}
+      {!compact && <span className="flex-1 truncate">{label}</span>}
 
-      {!tab.isPinned && (
+      {!compact && (
         <button
           type="button"
           aria-label={`Close ${label}`}
@@ -139,9 +163,9 @@ function TabItem({
             event.stopPropagation()
             void window.browser.invoke('tabs:close', { tabId: tab.id })
           }}
-          className="shrink-0 rounded p-0.5 opacity-0 transition group-hover:opacity-100 hover:bg-white/10 focus:opacity-100"
+          className="app-no-drag shrink-0 rounded p-0.5 opacity-0 transition group-hover:opacity-100 hover:bg-white/15 focus:opacity-100"
         >
-          <Icon name="close" size={12} />
+          <Icon name="close" size={11} />
         </button>
       )}
     </div>
@@ -152,15 +176,19 @@ function TabIcon({ tab, internal }: { tab: Tab; internal: boolean }): React.JSX.
   if (tab.isLoading) {
     return (
       <span
-        className="size-4 shrink-0 animate-spin rounded-full border-2 border-[var(--color-text-muted)] border-t-transparent"
+        className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-[var(--color-text-muted)] border-t-transparent"
         aria-label="Loading"
       />
     )
   }
 
   if (tab.status === 'crashed') {
-    return <Icon name="warning" className="shrink-0 text-[var(--color-bad)]" />
+    return <Icon name="warning" size={14} className="shrink-0 text-[var(--color-bad)]" />
   }
+
+  // A sleeping tab is dimmed rather than badged: it is still a normal tab, and a
+  // loud indicator would imply something went wrong.
+  const dimmed = tab.status === 'hibernated' ? 'opacity-40' : ''
 
   if (tab.isAudible || tab.isMuted) {
     return (
@@ -171,22 +199,21 @@ function TabIcon({ tab, internal }: { tab: Tab; internal: boolean }): React.JSX.
           event.stopPropagation()
           void window.browser.invoke('tabs:setMuted', { tabId: tab.id, muted: !tab.isMuted })
         }}
-        className="shrink-0 rounded p-0.5 hover:bg-white/10"
+        className="app-no-drag shrink-0 rounded p-0.5 hover:bg-white/15"
       >
-        <Icon name={tab.isMuted ? 'mute' : 'volume'} size={14} />
+        <Icon name={tab.isMuted ? 'mute' : 'volume'} size={13} />
       </button>
     )
   }
 
-  if (internal) return <Icon name="globe" className="shrink-0 opacity-60" />
+  if (internal) return <Icon name="globe" size={14} className={`shrink-0 opacity-60 ${dimmed}`} />
 
   if (tab.faviconUrl) {
     return (
       <img
         src={tab.faviconUrl}
         alt=""
-        className="size-4 shrink-0 rounded-sm"
-        // A broken favicon must not leave a torn-image glyph in the strip.
+        className={`size-4 shrink-0 rounded-sm ${dimmed}`}
         onError={(event) => {
           event.currentTarget.style.visibility = 'hidden'
         }}
@@ -194,5 +221,5 @@ function TabIcon({ tab, internal }: { tab: Tab; internal: boolean }): React.JSX.
     )
   }
 
-  return <Icon name="globe" className="shrink-0 opacity-60" />
+  return <Icon name="globe" size={14} className={`shrink-0 opacity-60 ${dimmed}`} />
 }

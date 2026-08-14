@@ -40,7 +40,12 @@ export function createPageView(pageSession: Session): WebContentsView {
       // Autoplay: Chromium's default already requires a user gesture for audible
       // media. Phase 4 exposes this per-tab; note that it is fixed at view
       // creation, which is why changing it later requires a reload.
-      autoplayPolicy: 'user-gesture-required'
+      autoplayPolicy: 'user-gesture-required',
+
+      // Spellchecking in text areas, with suggestions offered in the context
+      // menu. Users expect red squiggles in a browser; their absence is a small
+      // but constant reminder that this is not one.
+      spellcheck: true
     }
   })
 }

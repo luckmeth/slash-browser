@@ -50,6 +50,12 @@ export const TabSchema = z.object({
   isProtected: z.boolean(),
   /** Detached and hidden by the performance engine; process still alive. */
   isFrozen: z.boolean(),
+  /** Chromium zoom level. 0 is 100%; each step is a factor of 1.2. */
+  zoomLevel: z.number(),
+  /** Populated while a find-in-page is running. */
+  findResult: z
+    .object({ activeMatch: z.number().int(), totalMatches: z.number().int() })
+    .nullable(),
   status: TabStatusSchema,
   error: TabErrorSchema.nullable(),
   /** Epoch ms. Drives both the reopen stack and Phase 3's idle calculation. */
