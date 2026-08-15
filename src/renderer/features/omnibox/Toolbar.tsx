@@ -249,6 +249,13 @@ export function Toolbar(): React.JSX.Element {
       <ShieldButton />
 
       <NavButton
+        icon="external"
+        label="Open this page in your default browser"
+        disabled={disabled || isNewTab}
+        onClick={() => tabId && void window.browser.invoke('shell:openTabExternally', { tabId })}
+      />
+
+      <NavButton
         icon="bookmarks"
         label="Bookmarks (Ctrl+Shift+O)"
         active={panel === 'bookmarks'}

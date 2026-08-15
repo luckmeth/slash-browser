@@ -261,6 +261,17 @@ export const invokeContracts = {
   },
   'view:print': { request: TabIdSchema, response: z.void() },
   'window:toggleFullScreen': { request: z.void(), response: z.object({ fullScreen: z.boolean() }) },
+  /**
+   * Hands the tab's page to the system default browser.
+   *
+   * Takes a tab id, not a URL. The main process reads the address from the tab
+   * itself, so a compromised renderer cannot use this to make the OS open an
+   * arbitrary link.
+   */
+  'shell:openTabExternally': {
+    request: TabIdSchema,
+    response: z.object({ opened: z.boolean() })
+  },
 
   'performance:snapshot': { request: z.void(), response: PerformanceSnapshotSchema },
   'performance:setMode': {

@@ -54,6 +54,13 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const handoffPath = process.env['SLASH_HANDOFF_CAPTURE']
+    if (handoffPath) {
+      void import('./dev/spikeCapture').then(({ runHandoffCapture }) =>
+        runHandoffCapture(window, handoffPath)
+      )
+    }
+
     const blockPath = process.env['ADAPTIVE_BLOCK_CAPTURE']
     if (blockPath) {
       void import('./dev/spikeCapture').then(({ runBlockingCapture }) =>

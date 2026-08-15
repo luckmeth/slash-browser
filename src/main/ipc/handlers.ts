@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
@@ -469,6 +469,18 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('view:print', (request, context) => {
     windowOf(context.sender)?.tabs.print(request.tabId)
     return ok(undefined)
+  })
+
+  ipc.handle('shell:openTabExternally', (request, context) => {
+    const tab = windowOf(context.sender)?.tabs.findById(request.tabId)
+    const url = tab?.snapshot.url ?? ''
+
+    // Only real web addresses. Handing the OS a file:// path or a custom scheme
+    // from a UI button would be a way to launch arbitrary local handlers.
+    if (!/^https?:\/\//i.test(url)) return ok({ opened: false })
+
+    void shell.openExternal(url)
+    return ok({ opened: true })
   })
 
   ipc.handle('window:toggleFullScreen', (_req, context) => {

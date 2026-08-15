@@ -168,6 +168,63 @@ async function captureOmniboxDropdown(
 }
 
 /**
+ * Dev-only check of the external hand-off.
+ *
+ * Navigates to Google's sign-in — the page that actually rejects this browser —
+ * and confirms the notice appears in the chrome and the page view insets to make
+ * room for it, rather than the notice being drawn under the page.
+ */
+export async function runHandoffCapture(
+  window: BrowserWindowController,
+  outputPath: string
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // Activate explicitly: a restored session can leave the active tab pointing
+  // somewhere else, and the notice is about the tab the user is looking at.
+  window.tabs.activate(activeId)
+  window.tabs.navigate(activeId, 'https://accounts.google.com/signin')
+  await delay(6000)
+
+  const chrome = window.privilegedContents()[0]
+  if (chrome) {
+    const seen = (await chrome.executeJavaScript(
+      `(() => {
+         const el = [...document.querySelectorAll('[role="status"]')]
+           .find((n) => n.textContent && n.textContent.includes('default browser'));
+         return el ? el.textContent.slice(0, 120) : 'not shown';
+       })()`
+    )) as string
+    if (seen === 'not shown') {
+      log.error('handoff probe: FAIL — notice did not appear')
+      const snap = window.tabs.snapshot()
+      log.info(`handoff probe: tab url is ${window.tabs.findById(activeId)?.snapshot.url}`)
+      log.info(
+        `handoff probe: navigated=${activeId} mainActive=${snap.activeTabId} ` +
+          `activeUrl=${snap.tabs.find((t) => t.id === snap.activeTabId)?.url}`
+      )
+      const debug = (await chrome.executeJavaScript(
+        `JSON.stringify({
+           statusNodes: document.querySelectorAll('[role="status"]').length,
+           bodyHas: document.body.innerText.includes('default browser'),
+           firstText: document.body.innerText.slice(0, 200)
+         })`
+      )) as string
+      log.info(`handoff probe: chrome DOM ${debug}`)
+    } else {
+      log.info(`handoff probe: PASS — ${seen}`)
+    }
+  }
+
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
  * Dev-only content-blocker verification.
  *
  * Loads real pages that carry advertising and analytics, and confirms requests

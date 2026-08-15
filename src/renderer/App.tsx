@@ -7,6 +7,8 @@ import {
   WINDOW_CONTROLS_WIDTH
 } from '@shared/constants'
 import { FindBar, FIND_BAR_HEIGHT } from './features/find/FindBar'
+import { HandoffNotice, HANDOFF_NOTICE_HEIGHT } from './features/handoff/HandoffNotice'
+import { handoffHintFor } from '@shared/externalHandoff'
 import { useBrowserStore } from './stores/browserStore'
 import { TabStrip } from './features/tabs/TabStrip'
 import { Toolbar } from './features/omnibox/Toolbar'
@@ -34,6 +36,7 @@ export function App(): React.JSX.Element {
   const refreshHistory = useBrowserStore((s) => s.refreshHistory)
   const openFind = useBrowserStore((s) => s.openFind)
   const findOpen = useBrowserStore((s) => s.findOpen)
+  const handoffDismissedHost = useBrowserStore((s) => s.handoffDismissedHost)
 
   useEffect(() => {
     void hydrate()
@@ -42,11 +45,19 @@ export function App(): React.JSX.Element {
   // The chrome grows when the find bar opens, so the native page view must inset
   // by the same amount — otherwise the bar would be drawn over the page it is
   // searching, and the page would be hidden underneath it.
+  // Both the find bar and the hand-off notice are real chrome rows, so the page
+  // view has to inset by whatever is currently showing.
+  const handoffHint = handoffHintFor(activeTab?.url ?? '')
+  const handoffShowing = handoffHint !== null && handoffDismissedHost !== handoffHint.host
+
   useEffect(() => {
     void window.browser.invoke('layout:setChromeHeight', {
-      height: CHROME_HEIGHT + (findOpen ? FIND_BAR_HEIGHT : 0)
+      height:
+        CHROME_HEIGHT +
+        (findOpen ? FIND_BAR_HEIGHT : 0) +
+        (handoffShowing ? HANDOFF_NOTICE_HEIGHT : 0)
     })
-  }, [findOpen])
+  }, [findOpen, handoffShowing])
 
   // Menu accelerators arrive here because a native view — usually the page —
   // holds keyboard focus, so the chrome document never sees the keystroke.
@@ -142,6 +153,7 @@ export function App(): React.JSX.Element {
             )}
           </div>
           <FindBar />
+          <HandoffNotice />
 
           <div className="flex min-h-0 flex-1">
             <main className="min-w-0 flex-1">

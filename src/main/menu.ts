@@ -1,4 +1,4 @@
-import { Menu, app, type MenuItemConstructorOptions } from 'electron'
+import { Menu, app, shell, type MenuItemConstructorOptions } from 'electron'
 import type { UiCommand } from '@shared/ipc/contracts'
 import type { AppContext } from './AppContext'
 
@@ -163,6 +163,19 @@ export function buildApplicationMenu(ctx: AppContext): void {
             const id = tabs.snapshot().activeTabId
             if (id) tabs.setZoomLevel(id, 0)
           })
+        },
+        { type: 'separator' },
+        {
+          // For sites that refuse browsers they do not recognise — Google
+          // sign-in being the one people hit.
+          label: 'Open in Default Browser',
+          accelerator: 'CommandOrControl+Shift+E',
+          click: () => {
+            const tabs = ctx.focusedWindow()?.tabs
+            const id = tabs?.snapshot().activeTabId
+            const url = id ? (tabs?.findById(id)?.snapshot.url ?? '') : ''
+            if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+          }
         },
         { type: 'separator' },
         {

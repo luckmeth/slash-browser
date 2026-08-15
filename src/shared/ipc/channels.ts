@@ -68,6 +68,7 @@ export const INVOKE_CHANNELS = [
   'view:stopFind',
   'view:print',
   'window:toggleFullScreen',
+  'shell:openTabExternally',
 
   // --- performance ---
   'performance:snapshot',

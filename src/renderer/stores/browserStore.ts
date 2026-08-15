@@ -31,6 +31,14 @@ interface BrowserState {
   findOpen: boolean
   findQuery: string
   /**
+   * Host whose hand-off notice the user dismissed.
+   *
+   * Held here rather than inside the notice because the notice occupies real
+   * layout space — the page view has to inset by its height — so App needs to
+   * know whether it is showing.
+   */
+  handoffDismissedHost: string | null
+  /**
    * Incremented to ask the omnibox to focus and select itself.
    *
    * A counter rather than a boolean because Ctrl+L pressed twice in a row must
@@ -47,6 +55,7 @@ interface BrowserState {
   openFind: () => void
   closeFind: () => void
   setFindQuery: (query: string) => void
+  dismissHandoff: (host: string | null) => void
   requestOmniboxFocus: () => void
   applySnapshot: (snapshot: TabsSnapshot) => void
   refreshHistory: (query?: string) => Promise<void>
@@ -68,6 +77,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   panel: 'none',
   findOpen: false,
   findQuery: '',
+  handoffDismissedHost: null,
   focusOmniboxToken: 0,
 
   activeTab: () => {
@@ -105,6 +115,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   },
 
   setFindQuery: (findQuery) => set({ findQuery }),
+
+  dismissHandoff: (handoffDismissedHost) => set({ handoffDismissedHost }),
 
   requestOmniboxFocus: () => set((state) => ({ focusOmniboxToken: state.focusOmniboxToken + 1 })),
 

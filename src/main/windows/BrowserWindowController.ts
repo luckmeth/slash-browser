@@ -212,7 +212,17 @@ export class BrowserWindowController {
     this.chromeView.webContents.once('did-finish-load', () => {
       // Open the first tab only once the chrome can receive the snapshot, so the
       // strip is never briefly empty.
-      this.tabs.create({ url: NEW_TAB_URL })
+      //
+      // Only when the window is genuinely empty. Session restore runs while this
+      // document is still loading, so an unconditional create added a blank tab
+      // *after* the restored ones and activated it — every launch with a restored
+      // session landed on an empty new tab with a stray extra tab in the strip.
+      if (this.tabs.allTabs().length === 0) {
+        this.tabs.create({ url: NEW_TAB_URL })
+      } else {
+        // Push the restored state now that the chrome can receive it.
+        this.tabs.emitNow()
+      }
       this.window.show()
       log.info('window shown')
     })
