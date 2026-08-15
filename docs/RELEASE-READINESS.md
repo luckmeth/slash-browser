@@ -36,6 +36,13 @@ would be easy to let the first quietly imply the second.
 
 These are deliberate and documented in their phase scripts, not oversights:
 
+- **Google will not let you sign in.** Google gates sign-in on `navigator.userAgentData.brands`, which
+  identifies the browser vendor and is not settable from Electron — it is filled in by Chromium from
+  the embedder's own identity, and Slash is not on Google's approved list. Spoofing the user-agent
+  *string* does not help; that is not the value being read. The honest fix, and what is built, is the
+  hand-off: a notice on those hosts explaining the refusal, plus a toolbar button and Ctrl+Shift+E to
+  open the current page in the default browser. Sites that use "Sign in with Google" as a federated
+  login for their own account will hit the same wall.
 - **Semantic search is not built.** Keyword FTS5 search is complete and always works. `sqlite-vec` is
   installed and verified loading in Electron, but there is no embedding worker — so paraphrase
   queries ("making Postgres handle more traffic") will not find a page that only says "scaling". The
@@ -54,7 +61,7 @@ These are deliberate and documented in their phase scripts, not oversights:
 
 Worth stating too, so the list above is read in proportion:
 
-- 121 tests over the logic whose failure modes are destructive — never-hibernate guards, permission
+- 137 tests over the logic whose failure modes are destructive — never-hibernate guards, permission
   scoping and defaults, the AI action allowlist, URL resolution, query parsing.
 - Every phase has a manual test script that re-runs earlier phases as regression checks.
 - The security posture holds: `contextIsolation`, `sandbox`, `nodeIntegration: false` everywhere
