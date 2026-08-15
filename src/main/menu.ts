@@ -313,7 +313,7 @@ export function buildApplicationMenu(ctx: AppContext): void {
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
-  app.setName('Adaptive Browser')
+  app.setName('Slash')
 }
 
 /** One Chromium zoom step is a factor of 1.2, which is 0.5 in level units. */

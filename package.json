@@ -1,8 +1,8 @@
 {
-  "name": "adaptive-browser",
+  "name": "slash",
   "version": "0.1.0",
   "private": true,
-  "description": "Adaptive Browser — an intelligent, high-performance, privacy-respecting desktop browser",
+  "description": "Slash — an intelligent, high-performance, privacy-respecting desktop browser",
   "author": "Slash Developments",
   "license": "UNLICENSED",
   "main": "./out/main/index.js",

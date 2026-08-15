@@ -94,7 +94,7 @@ export class BrowserWindowController {
        * which is why every surface still defines its own colour.
        */
       backgroundMaterial: 'acrylic',
-      title: 'Adaptive Browser',
+      title: 'Slash',
       icon: appIconPath(),
 
       // No OS title bar: the tab strip is the title bar, as in every mainstream
@@ -290,7 +290,7 @@ export class BrowserWindowController {
     if (this.window.isDestroyed()) return
     const active = snapshot.tabs.find((t) => t.id === snapshot.activeTabId)
     const label = active?.title?.trim()
-    this.window.setTitle(label ? `${label} — Adaptive Browser` : 'Adaptive Browser')
+    this.window.setTitle(label ? `${label} — Slash` : 'Slash')
   }
 
   /** Reserves space on the right for a side panel and re-lays out the views. */

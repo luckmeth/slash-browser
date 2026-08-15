@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { HistoryEntry } from '@shared/types/browsing'
+import { isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { BrandMark } from '../../components/BrandMark'
@@ -53,7 +54,7 @@ export function NewTabPage(): React.JSX.Element {
         <div className="animate-rise flex flex-col items-center">
           <BrandMark size={54} className="text-[var(--color-text-primary)]" />
           <h1 className="mt-4 text-[28px] leading-none font-semibold tracking-tight">
-            Adaptive Browser
+            Slash
           </h1>
           {workspace && (
             <p className="mt-2 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -99,7 +100,7 @@ export function NewTabPage(): React.JSX.Element {
                   title={site.url}
                   onClick={() =>
                     void window.browser.invoke('nav:navigate', {
-                      tabId: tabs.find((t) => t.url.startsWith('adaptive://'))?.id ?? '',
+                      tabId: tabs.find((t) => isInternalUrl(t.url))?.id ?? '',
                       input: site.url
                     })
                   }

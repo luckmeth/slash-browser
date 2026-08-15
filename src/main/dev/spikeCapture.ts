@@ -43,10 +43,10 @@ export async function runSpikeCapture(
   })
 
   // Substring, not equality: the window title now follows the active tab, so it
-  // reads "Example Domain — Adaptive Browser". An exact match silently fell
+  // reads "Example Domain — Slash". An exact match silently fell
   // through to sources[0] and captured whatever unrelated window happened to be
   // first.
-  const source = sources.find((s) => s.name.includes('Adaptive Browser'))
+  const source = sources.find((s) => s.name.includes('Slash'))
   if (!source) {
     log.error('spike capture: no window source found')
     app.quit()
@@ -677,10 +677,10 @@ async function captureWindowTo(
     thumbnailSize: { width, height }
   })
   // Substring, not equality: the window title now follows the active tab, so it
-  // reads "Example Domain — Adaptive Browser". An exact match silently fell
+  // reads "Example Domain — Slash". An exact match silently fell
   // through to sources[0] and captured whatever unrelated window happened to be
   // first.
-  const source = sources.find((s) => s.name.includes('Adaptive Browser'))
+  const source = sources.find((s) => s.name.includes('Slash'))
   if (!source) {
     log.error('capture: no window source found')
     return

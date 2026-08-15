@@ -1,5 +1,5 @@
-appId: dev.slash.adaptivebrowser
-productName: Adaptive Browser
+appId: dev.slash.browser
+productName: Slash
 copyright: Copyright © 2026 Slash Developments
 
 directories:
@@ -51,7 +51,7 @@ nsis:
   uninstallerIcon: build/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Adaptive Browser
+  shortcutName: Slash
 
 # Cross-platform targets are intentionally left unconfigured until the browser is
 # stable on Windows. Adding them is a config change, not a code change — nothing

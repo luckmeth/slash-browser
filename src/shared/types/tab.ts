@@ -78,8 +78,14 @@ export type TabsSnapshot = z.infer<typeof TabsSnapshotSchema>
  * history over the existing IPC surface without registering a scheme or granting
  * a page view any privileges.
  */
-export const NEW_TAB_URL = 'adaptive://newtab'
+export const NEW_TAB_URL = 'slash://newtab'
 
+/**
+ * Both schemes are recognised: the browser was renamed, and restore points and
+ * history written before that still hold `adaptive://` URLs. Dropping the old
+ * prefix would make those tabs look like real web pages and try to navigate to
+ * a scheme nothing can load.
+ */
 export function isInternalUrl(url: string): boolean {
-  return url.startsWith('adaptive://')
+  return url.startsWith('slash://') || url.startsWith('adaptive://')
 }

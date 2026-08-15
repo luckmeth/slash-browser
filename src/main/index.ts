@@ -3,8 +3,13 @@ import { AppContext } from './AppContext'
 import { parseQuery as parseQueryForDev } from './memory/parseQuery'
 import { buildApplicationMenu } from './menu'
 import { createLogger } from './logger'
+import { prepareUserDataPath } from './userData'
 
 const log = createLogger('main')
+
+// Before anything reads a path, and before the single-instance lock, which is
+// itself keyed off the user-data location.
+prepareUserDataPath()
 
 // A browser is a single-instance application: a second launch must hand its
 // arguments to the running copy rather than open a rival process that would

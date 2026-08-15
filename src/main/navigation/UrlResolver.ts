@@ -1,5 +1,5 @@
 import { SEARCH_ENGINES, type SearchEngineId } from '@shared/constants'
-import { NEW_TAB_URL } from '@shared/types/tab'
+import { NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
 
 export type ResolvedInput =
   | { readonly kind: 'url'; readonly url: string }
@@ -37,7 +37,7 @@ export function resolveInput(rawInput: string, engineId: SearchEngineId): Resolv
   const input = rawInput.trim()
 
   if (input === '') return { kind: 'internal', url: NEW_TAB_URL }
-  if (input.startsWith('adaptive://')) return { kind: 'internal', url: input }
+  if (isInternalUrl(input)) return { kind: 'internal', url: input }
 
   // Anything with whitespace inside is prose, not an address.
   const hasWhitespace = /\s/.test(input)
