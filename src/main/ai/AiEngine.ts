@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { safeStorage } from 'electron'
 import { ActionPlanSchema, BrowserActionSchema, type ActionPlan, type AiStatus } from '@shared/types/ai'
 import { z } from 'zod'
+import { WORKSPACE_ICONS } from '@shared/types/workspace'
 import type { SettingsStore } from '../settings/SettingsStore'
 import type { Database } from '../db/Database'
 import { createLogger } from '../logger'
@@ -66,7 +67,11 @@ const OUTPUT_SCHEMA: Record<string, unknown> = {
             }
           },
           name: { type: 'string' },
-          icon: { type: 'string' },
+          icon: {
+            type: 'string',
+            description: 'One of the browser’s workspace icon names.',
+            enum: [...WORKSPACE_ICONS]
+          },
           tabIds: { type: 'array', items: { type: 'string' } },
           orderedTabIds: { type: 'array', items: { type: 'string' } },
           toWorkspaceId: { type: 'string' },

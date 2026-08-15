@@ -207,7 +207,7 @@ export function Toolbar(): React.JSX.Element {
           role="combobox"
           aria-expanded={suggestions.length > 0}
           aria-controls="omnibox-suggestions"
-          className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] py-1.5 pr-9 pl-9 text-sm outline-none transition focus:border-[var(--color-accent)] disabled:opacity-50"
+          className="w-full rounded-xl border border-[var(--glass-edge)] bg-[var(--glass-raised)] py-1.5 pr-9 pl-9 text-sm outline-none transition focus:border-[var(--color-accent)] focus:bg-[var(--glass-high)] disabled:opacity-50"
         />
 
         <div className="absolute right-1.5 flex items-center gap-0.5">

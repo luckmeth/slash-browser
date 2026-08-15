@@ -1,14 +1,64 @@
 @import 'tailwindcss';
 
+/**
+ * Glass design system.
+ *
+ * The window itself is Windows 11 acrylic, so the OS supplies real blur of
+ * whatever is *behind* the window — something CSS cannot do, since
+ * `backdrop-filter` only blurs content inside the same document.
+ *
+ * Everything here layers on top of that:
+ *   - surfaces are translucent, not opaque, so the material reads through
+ *   - each layer is lighter than the one beneath, which is what gives depth
+ *     without drawing hard boxes everywhere
+ *   - hairline top highlights imitate the lit edge of a physical pane
+ *
+ * Colours stay defined even where blur is unsupported (Windows 10, or a machine
+ * with transparency effects switched off), so the UI degrades to a solid dark
+ * theme rather than becoming unreadable.
+ */
 @theme {
-  --color-surface: #0b0d12;
+  --color-surface: #0d0f14;
   --color-surface-raised: #151922;
-  --color-border-subtle: #232936;
-  --color-text-primary: #e8eaf0;
-  --color-text-muted: #98a1b3;
+  --color-border-subtle: #262c3a;
+  --color-text-primary: #eef1f7;
+  --color-text-muted: #949cb0;
   --color-accent: #6ea8fe;
   --color-good: #58d39b;
   --color-bad: #f2777a;
+}
+
+:root {
+  /*
+   * Layered glass fills. Each step up the stack gains a little light.
+   *
+   * Opacity is deliberately high. Acrylic tints toward whatever is *behind the
+   * window* — a light wallpaper drags the whole surface pale and light text
+   * stops being readable. Since we cannot control the user's desktop, each
+   * surface carries enough of its own darkness to guarantee contrast, and the
+   * translucency is what remains on top of that.
+   *
+   * Translucent enough to read as glass; opaque enough that text is never at
+   * the mercy of a wallpaper.
+   */
+  --glass-base: rgba(12, 14, 19, 0.86);
+  --glass-raised: rgba(26, 30, 41, 0.82);
+  --glass-high: rgba(38, 44, 60, 0.86);
+  --glass-hover: rgba(255, 255, 255, 0.07);
+  --glass-active: rgba(255, 255, 255, 0.12);
+  /* Behind full content areas — the new tab page, panels of text. */
+  --glass-page: rgba(11, 13, 18, 0.94);
+
+  /* Hairlines. Brighter on top, so panes look lit from above. */
+  --glass-edge: rgba(255, 255, 255, 0.09);
+  --glass-edge-strong: rgba(255, 255, 255, 0.16);
+
+  --blur-sm: 18px;
+  --blur-md: 30px;
+  --blur-lg: 48px;
+
+  --shadow-panel: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-float: 0 20px 60px rgba(0, 0, 0, 0.55);
 }
 
 html,
@@ -20,26 +70,77 @@ body,
 
 body {
   font-family:
-    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    'Segoe UI Variable Text',
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    sans-serif;
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
+  /* Transparent so the window's acrylic is what you see. */
+  background: transparent;
 }
 
-/* The chrome document is opaque; the overlay document overrides this to stay
-   transparent so page content shows through. */
-body {
-  background: var(--color-surface);
+/*
+ * Reusable glass layers.
+ *
+ * `backdrop-filter` here blurs the layers *below within this document*, which
+ * stacks with the window material underneath to soften edges between panes.
+ */
+.glass {
+  background: var(--glass-base);
+  backdrop-filter: blur(var(--blur-md)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(140%);
+}
+
+.glass-raised {
+  background: var(--glass-raised);
+  backdrop-filter: blur(var(--blur-md)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(150%);
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    inset 0 1px 0 var(--glass-edge-strong),
+    var(--shadow-panel);
+}
+
+/*
+ * Full-height content areas.
+ *
+ * Nearly opaque on purpose: a page of text must be readable over any wallpaper.
+ * The glass effect belongs on the chrome bars, which are thin — a large reading
+ * surface that shifts with the desktop behind it is just hard to read.
+ */
+.glass-page {
+  background: var(--glass-page);
+  backdrop-filter: blur(var(--blur-lg)) saturate(130%);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(130%);
+}
+
+.glass-float {
+  background: var(--glass-high);
+  backdrop-filter: blur(var(--blur-lg)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(160%);
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    inset 0 1px 0 var(--glass-edge-strong),
+    var(--shadow-float);
+}
+
+/* Hairline separators that read as an edge of glass, not a drawn line. */
+.glass-divide-b {
+  border-bottom: 1px solid var(--glass-edge);
+}
+
+.glass-divide-r {
+  border-right: 1px solid var(--glass-edge);
 }
 
 /*
  * Window dragging.
  *
- * The window has no OS title bar (`titleBarStyle: 'hidden'`), so the tab strip
- * has to provide the drag surface itself — otherwise the window cannot be moved
- * at all. `app-region: drag` also gives double-click-to-maximise for free.
- *
- * Every interactive element inside a drag region must opt out, or it becomes
- * unclickable: the drag handler swallows the press before it reaches the button.
+ * The window has no OS title bar, so the tab strip provides the drag surface —
+ * otherwise the window cannot be moved. Every interactive element inside must
+ * opt out, or the drag handler swallows the press before it lands.
  */
 .app-drag {
   -webkit-app-region: drag;
@@ -49,7 +150,7 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Chrome-only scrollbars. Thin and dark, so panels do not show the default
+/* Chrome-only scrollbars: thin and dark, so panels do not show the default
    light Windows scrollbar against a dark UI. Web pages are unaffected — they
    render in their own view with their own styles. */
 ::-webkit-scrollbar {
@@ -62,14 +163,14 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+  background: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+  background: color-mix(in srgb, var(--color-text-muted) 50%, transparent);
   background-clip: content-box;
 }
 
@@ -88,9 +189,23 @@ body {
   }
 }
 
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* The chrome is an application surface, not a document: dragging its text or
-   accidentally selecting a tab label is never wanted. Inputs and the notes
-   textarea opt back in below. */
+   accidentally selecting a tab label is never wanted. Inputs opt back in. */
 #root {
   user-select: none;
   cursor: default;
@@ -100,4 +215,15 @@ input,
 textarea,
 [contenteditable='true'] {
   user-select: text;
+}
+
+/* Respect the system setting. Someone who has turned animation off should not
+   get a browser that ignores them. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -30,7 +30,7 @@ function tab(overrides: Partial<Tab> & { id: string; url: string }): Tab {
 const workspace: Workspace = {
   id: 'default',
   name: 'Personal',
-  icon: '🏠',
+  icon: 'wsHome',
   color: 'slate',
   isolated: false,
   notes: '',
@@ -65,7 +65,7 @@ describe('BrowserActionSchema — prohibited capabilities are unrepresentable', 
   it('accepts only the six declared kinds', () => {
     const allowed = [
       { kind: 'organize-tabs', groups: [{ name: 'Work', tabIds: ['t1'] }] },
-      { kind: 'create-workspace', name: 'Research', icon: '📚', tabIds: ['t1'] },
+      { kind: 'create-workspace', name: 'Research', icon: 'wsReading', tabIds: ['t1'] },
       { kind: 'move-tabs', tabIds: ['t1'], toWorkspaceId: 'ws1' },
       { kind: 'close-tabs', tabIds: ['t1'], reason: 'duplicates' },
       { kind: 'save-tabs', tabIds: ['t1'], toBookmarkFolder: 'Reading' },

@@ -1,10 +1,31 @@
 import { useEffect, useState } from 'react'
-import { DEFAULT_WORKSPACE_ID, WORKSPACE_COLORS, type WorkspaceColor } from '@shared/types/workspace'
+import {
+  DEFAULT_WORKSPACE_ID,
+  DEFAULT_WORKSPACE_ICON,
+  WORKSPACE_COLORS,
+  WORKSPACE_ICONS,
+  type WorkspaceColor,
+  type WorkspaceIcon
+} from '@shared/types/workspace'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { COLOR_CLASSES } from './workspaceColors'
 
-const ICON_CHOICES = ['🏠', '💼', '🎓', '💻', '🔬', '✈️', '🛒', '🎵', '📁', '🎨', '📚', '⚡']
+/** Names for the icon picker — an icon button with no label is a guess. */
+const ICON_LABELS: Record<WorkspaceIcon, string> = {
+  wsHome: 'Home',
+  wsWork: 'Work',
+  wsStudy: 'Study',
+  wsCode: 'Development',
+  wsResearch: 'Research',
+  wsTravel: 'Travel',
+  wsShop: 'Shopping',
+  wsMedia: 'Media',
+  wsDesign: 'Design',
+  wsReading: 'Reading',
+  wsFinance: 'Finance',
+  wsFolder: 'General'
+}
 
 /**
  * Create/edit panel for a workspace.
@@ -22,14 +43,14 @@ export function WorkspaceEditor(): React.JSX.Element | null {
   const existing = isNew ? null : workspaces.find((w) => w.id === editorId)
 
   const [name, setName] = useState('')
-  const [icon, setIcon] = useState('📁')
+  const [icon, setIcon] = useState<WorkspaceIcon>(DEFAULT_WORKSPACE_ICON)
   const [color, setColor] = useState<WorkspaceColor>('slate')
   const [isolated, setIsolated] = useState(false)
   const [notes, setNotes] = useState('')
 
   useEffect(() => {
     setName(existing?.name ?? '')
-    setIcon(existing?.icon || '📁')
+    setIcon(existing?.icon ?? DEFAULT_WORKSPACE_ICON)
     setColor(existing?.color ?? 'slate')
     setIsolated(existing?.isolated ?? false)
     setNotes(existing?.notes ?? '')
@@ -84,18 +105,21 @@ export function WorkspaceEditor(): React.JSX.Element | null {
 
       <Field label="Icon">
         <div className="flex flex-wrap gap-1">
-          {ICON_CHOICES.map((choice) => (
+          {WORKSPACE_ICONS.map((choice) => (
             <button
               key={choice}
               type="button"
               onClick={() => setIcon(choice)}
-              aria-label={`Icon ${choice}`}
+              aria-label={ICON_LABELS[choice]}
+              title={ICON_LABELS[choice]}
               aria-pressed={icon === choice}
-              className={`flex size-8 cursor-pointer items-center justify-center rounded-lg transition ${
-                icon === choice ? 'bg-white/10 ring-1 ring-[var(--color-accent)]' : 'hover:bg-white/5'
+              className={`flex size-8 cursor-default items-center justify-center rounded-lg transition ${
+                icon === choice
+                  ? 'bg-white/12 text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent)]'
+                  : 'text-[var(--color-text-muted)] hover:bg-white/6 hover:text-[var(--color-text-primary)]'
               }`}
             >
-              {choice}
+              <Icon name={choice} size={16} />
             </button>
           ))}
         </div>

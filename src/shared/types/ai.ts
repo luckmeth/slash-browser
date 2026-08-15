@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { WORKSPACE_ICONS, DEFAULT_WORKSPACE_ICON } from './workspace'
 
 /**
  * Everything the AI layer is permitted to propose.
@@ -26,7 +27,9 @@ export const BrowserActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('create-workspace'),
     name: z.string().min(1).max(40),
-    icon: z.string().min(1).max(8),
+    // Constrained to the real icon set: the model picks from what exists rather
+    // than inventing a name that would render as nothing.
+    icon: z.enum(WORKSPACE_ICONS).catch(DEFAULT_WORKSPACE_ICON),
     tabIds: z.array(z.string())
   }),
   z.object({

@@ -65,10 +65,10 @@ export function SidePanel(): React.JSX.Element | null {
   return (
     <aside
       style={{ width: SIDE_PANEL_WIDTH }}
-      className="flex h-full shrink-0 flex-col border-l border-[var(--color-border-subtle)] bg-[var(--color-surface)]"
+      className="glass-page flex h-full shrink-0 flex-col border-l border-[var(--glass-edge)]"
       aria-label={title}
     >
-      <header className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-4 py-3">
+      <header className="glass-divide-b flex items-center justify-between px-4 py-3">
         <h2 className="truncate text-sm font-semibold">{title}</h2>
         <button
           type="button"

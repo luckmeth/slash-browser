@@ -80,8 +80,8 @@ export async function runUiCapture(
   // Seed a couple of workspaces, including an isolated one, so the rail shows
   // real state rather than a single default entry.
   if (ctx.workspaces.list().length < 2) {
-    ctx.workspaces.create({ name: 'Work', icon: '💼', color: 'green', isolated: true })
-    ctx.workspaces.create({ name: 'Research', icon: '🔬', color: 'purple', isolated: false })
+    ctx.workspaces.create({ name: 'Work', icon: 'wsWork', color: 'green', isolated: true })
+    ctx.workspaces.create({ name: 'Research', icon: 'wsResearch', color: 'purple', isolated: false })
   }
   for (const contents of window.privilegedContents()) {
     contents.send('workspaces:snapshot', {

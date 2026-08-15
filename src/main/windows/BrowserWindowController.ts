@@ -74,7 +74,21 @@ export class BrowserWindowController {
       minWidth: 640,
       minHeight: 400,
       show: false,
-      backgroundColor: '#0b0d12',
+      // Fully transparent so Windows' own acrylic shows through. A solid colour
+      // here would sit on top of the material and defeat it entirely.
+      backgroundColor: '#00000000',
+      /**
+       * Real blur, composited by the OS.
+       *
+       * `acrylic` samples what is behind the window, which CSS `backdrop-filter`
+       * cannot do — that only blurs what is inside the same document. The chrome
+       * is translucent over it; page content stays opaque, because a readable
+       * web page matters more than seeing the desktop through it.
+       *
+       * Windows 11 only. On 10 it is ignored and the painted background shows,
+       * which is why every surface still defines its own colour.
+       */
+      backgroundMaterial: 'acrylic',
       title: 'Adaptive Browser',
       icon: appIconPath(),
 
@@ -84,8 +98,10 @@ export class BrowserWindowController {
       // including snap layouts on hover — rather than being HTML imitations.
       titleBarStyle: 'hidden',
       titleBarOverlay: {
-        color: '#0b0d12',
-        symbolColor: '#98a1b3',
+        // Transparent, so the window-control strip sits on the same glass as the
+        // tabs beside it rather than as an opaque block in the corner.
+        color: '#00000000',
+        symbolColor: '#c8cede',
         height: TITLE_BAR_HEIGHT
       },
       // The menu is kept for its accelerators but its bar stays hidden until Alt,
@@ -100,9 +116,13 @@ export class BrowserWindowController {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
-        webSecurity: true
+        webSecurity: true,
+        // Required for the window's acrylic to be visible through the chrome.
+        // Without it Chromium paints an opaque base layer over the material.
+        transparent: true
       }
     })
+    this.chromeView.setBackgroundColor('#00000000')
 
     // Surface renderer errors in the main log. A React exception in the chrome
     // document blanks the entire UI while the window frame stays up, which looks

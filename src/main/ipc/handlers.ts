@@ -515,7 +515,7 @@ export function registerHandlers(ctx: AppContext): void {
     if (request.intoNewWorkspace) {
       const workspace = ctx.workspaces.create({
         name: detail.label.slice(0, 40),
-        icon: '🕘',
+        icon: 'wsHome',
         color: 'slate',
         // Never isolated: an isolated workspace has its own cookie partition, so
         // restoring into one would silently sign every tab out.

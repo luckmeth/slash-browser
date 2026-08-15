@@ -21,7 +21,7 @@ export function WorkspaceRail(): React.JSX.Element {
     <nav
       style={{ width: WORKSPACE_RAIL_WIDTH }}
       aria-label="Workspaces"
-      className="flex shrink-0 flex-col items-center gap-1 border-r border-[var(--color-border-subtle)] bg-[var(--color-surface)] py-2"
+      className="glass glass-divide-r flex shrink-0 flex-col items-center gap-1 py-2"
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeWorkspaceId
@@ -59,7 +59,7 @@ export function WorkspaceRail(): React.JSX.Element {
               dragOverId === workspace.id ? 'ring-2 ring-[var(--color-accent)]' : ''
             ].join(' ')}
           >
-            <span aria-hidden="true">{workspace.icon || '📁'}</span>
+            <Icon name={workspace.icon} size={17} />
 
             {/* An isolated workspace is marked, because "my logins are separate
                 here" is the one property a user must be able to see at a glance. */}

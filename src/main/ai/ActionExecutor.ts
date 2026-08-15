@@ -63,7 +63,7 @@ export class ActionExecutor {
           break
         case 'create-workspace':
           lines.push({
-            text: `Create workspace ${action.icon} “${action.name}” and move ${action.tabIds.length} tabs into it`,
+            text: `Create workspace “${action.name}” and move ${action.tabIds.length} tabs into it`,
             tabIds: action.tabIds,
             mutating: true
           })
@@ -124,7 +124,7 @@ export class ActionExecutor {
             }
             const workspace = this.workspaces.create({
               name: group.name,
-              icon: '📁',
+              icon: 'wsFolder',
               color: 'slate',
               // Never isolated: an isolated workspace has its own cookie
               // partition, so moving tabs in would sign them all out. The AI

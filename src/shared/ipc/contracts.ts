@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import { SettingsSchema } from '../types/settings'
 import { TabsSnapshotSchema, TabSchema } from '../types/tab'
-import { WorkspacesSnapshotSchema, WORKSPACE_COLORS } from '../types/workspace'
+import {
+  WorkspacesSnapshotSchema,
+  WORKSPACE_COLORS,
+  WORKSPACE_ICONS,
+  DEFAULT_WORKSPACE_ICON
+} from '../types/workspace'
 import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
@@ -189,7 +194,7 @@ export const invokeContracts = {
   'workspaces:create': {
     request: z.object({
       name: z.string().min(1).max(60),
-      icon: z.string().max(8).default('📁'),
+      icon: z.enum(WORKSPACE_ICONS).default(DEFAULT_WORKSPACE_ICON),
       color: z.enum(WORKSPACE_COLORS).default('slate'),
       /** Fixed at creation — see WorkspaceSchema. */
       isolated: z.boolean().default(false)

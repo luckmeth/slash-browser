@@ -1,7 +1,10 @@
 import {
   DEFAULT_WORKSPACE_ID,
+  DEFAULT_WORKSPACE_ICON,
+  WORKSPACE_ICONS,
   type Workspace,
-  type WorkspaceColor
+  type WorkspaceColor,
+  type WorkspaceIcon
 } from '@shared/types/workspace'
 import type { Database } from '../Database'
 
@@ -16,11 +19,24 @@ interface WorkspaceRow {
   created_at: number
 }
 
+/**
+ * Coerces a stored icon to a known name.
+ *
+ * Migration 008 normalises existing rows, but a database edited by hand — or
+ * carried back from an older build — could still hold anything. Falling back
+ * beats rendering an empty box where an icon should be.
+ */
+function toIcon(value: string): WorkspaceIcon {
+  return (WORKSPACE_ICONS as readonly string[]).includes(value)
+    ? (value as WorkspaceIcon)
+    : DEFAULT_WORKSPACE_ICON
+}
+
 function toWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
     name: row.name,
-    icon: row.icon,
+    icon: toIcon(row.icon),
     color: row.color as WorkspaceColor,
     isolated: row.isolated === 1,
     notes: row.notes,
@@ -31,7 +47,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
 
 export interface CreateWorkspaceInput {
   name: string
-  icon: string
+  icon: WorkspaceIcon
   color: WorkspaceColor
   isolated: boolean
 }

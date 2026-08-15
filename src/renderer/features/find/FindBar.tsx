@@ -56,7 +56,7 @@ export function FindBar(): React.JSX.Element | null {
   return (
     <div
       style={{ height: FIND_BAR_HEIGHT }}
-      className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3"
+      className="glass glass-divide-b flex shrink-0 items-center gap-2 px-3"
     >
       <div className="relative flex items-center">
         <input
@@ -69,7 +69,7 @@ export function FindBar(): React.JSX.Element | null {
           }}
           placeholder="Find in page"
           aria-label="Find in page"
-          className={`w-64 rounded-md border bg-[var(--color-surface-raised)] px-2.5 py-1 text-sm outline-none ${
+          className={`w-64 rounded-lg border bg-[var(--glass-raised)] px-2.5 py-1 text-sm outline-none ${
             noMatches
               ? 'border-[var(--color-bad)]'
               : 'border-[var(--color-border-subtle)] focus:border-[var(--color-accent)]'

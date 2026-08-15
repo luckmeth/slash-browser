@@ -220,9 +220,9 @@ export function showTabContextMenu(tabId: string, deps: ContextMenuDeps): void {
     template.push(separator, {
       label: 'Move to workspace',
       submenu: otherWorkspaces.map((workspace) => ({
-        // The lock hints that the move will sign the tab out there; the
-        // confirmation dialog states it explicitly.
-        label: `${workspace.icon} ${workspace.name}${workspace.isolated ? '  🔒' : ''}`,
+        // Native menus cannot render our SVG icons, so isolation is spelled out
+        // in words. The confirmation dialog states the consequence in full.
+        label: workspace.isolated ? `${workspace.name} (isolated)` : workspace.name,
         click: () => deps.moveTabToWorkspace(tabId, workspace.id)
       }))
     })

@@ -104,14 +104,16 @@ export function App(): React.JSX.Element {
   const hibernated = activeTab?.status === 'hibernated'
 
   return (
-    <div className="flex h-full flex-col bg-[var(--color-surface)]">
+    // No opaque background: the window's acrylic is the backdrop, and each row
+    // below adds its own translucent layer over it.
+    <div className="flex h-full flex-col">
       {/*
         Row 1 is the title bar. The window has no OS title bar, so this strip
         carries the drag region and reserves space on the right for the native
         minimise/maximise/close buttons Windows draws over it.
       */}
       <div
-        className="app-drag flex shrink-0 items-stretch"
+        className="app-drag glass flex shrink-0 items-stretch"
         style={{ height: TITLE_BAR_HEIGHT, paddingRight: WINDOW_CONTROLS_WIDTH }}
       >
         <TabStrip />
@@ -124,7 +126,7 @@ export function App(): React.JSX.Element {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div
-            className="relative shrink-0 border-b border-[var(--color-border-subtle)]"
+            className="glass glass-divide-b relative shrink-0"
             style={{ height: TOOLBAR_HEIGHT }}
           >
             <Toolbar />
@@ -190,7 +192,7 @@ function HibernatedTab(): React.JSX.Element {
   const activeTab = useBrowserStore((s) => s.activeTab())
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-surface)] p-8 text-center">
+    <div className="glass-page flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
       <Icon name="clock" size={28} className="text-violet-400" />
       <div>
         <h2 className="text-lg font-semibold">{activeTab?.title || 'This tab is asleep'}</h2>
@@ -225,7 +227,7 @@ function SadTab(): React.JSX.Element {
   const activeTab = useBrowserStore((s) => s.activeTab())
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-surface)] p-8 text-center">
+    <div className="glass-page flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
       <Icon name="warning" size={32} className="text-[var(--color-bad)]" />
       <div>
         <h2 className="text-lg font-semibold">This tab stopped working</h2>

@@ -118,7 +118,7 @@ const m003_workspaces: Migration = {
     -- There must always be somewhere for a tab to live, so the default workspace
     -- is seeded by the migration rather than created lazily at runtime.
     INSERT INTO workspaces (id, name, icon, color, isolated, notes, sort_order, created_at)
-    VALUES ('default', 'Personal', '🏠', 'blue', 0, '', 0, unixepoch() * 1000);
+    VALUES ('default', 'Personal', 'wsHome', 'blue', 0, '', 0, unixepoch() * 1000);
   `
 }
 
@@ -266,6 +266,44 @@ const m007_ai: Migration = {
   `
 }
 
+const m008_icon_names: Migration = {
+  version: 8,
+  name: 'icon_names',
+  sql: /* sql */ `
+    -- Workspace icons were emoji; they are now names into the app's SVG set.
+    -- Emoji render differently on every platform and read as informal in
+    -- application chrome.
+    --
+    -- Existing rows are mapped by meaning where there is an obvious match, and
+    -- anything unrecognised becomes the folder icon rather than a broken glyph.
+    UPDATE workspaces SET icon = CASE icon
+      WHEN '🏠' THEN 'wsHome'
+      WHEN '💼' THEN 'wsWork'
+      WHEN '🎓' THEN 'wsStudy'
+      WHEN '💻' THEN 'wsCode'
+      WHEN '🔬' THEN 'wsResearch'
+      WHEN '✈️' THEN 'wsTravel'
+      WHEN '🛒' THEN 'wsShop'
+      WHEN '🎵' THEN 'wsMedia'
+      WHEN '🎨' THEN 'wsDesign'
+      WHEN '📚' THEN 'wsReading'
+      WHEN '⚡' THEN 'wsFinance'
+      WHEN '🕘' THEN 'wsHome'
+      WHEN '📁' THEN 'wsFolder'
+      ELSE icon
+    END;
+
+    -- Anything still not a known name (an emoji we did not list, or a value from
+    -- a hand-edited database) is normalised so the UI never has to render an
+    -- unknown icon.
+    UPDATE workspaces SET icon = 'wsFolder'
+    WHERE icon NOT IN (
+      'wsHome','wsWork','wsStudy','wsCode','wsResearch','wsTravel',
+      'wsShop','wsMedia','wsDesign','wsReading','wsFinance','wsFolder'
+    );
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -273,7 +311,8 @@ export const migrations: readonly Migration[] = [
   m004_permissions,
   m005_snapshots,
   m006_memory,
-  m007_ai
+  m007_ai,
+  m008_icon_names
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

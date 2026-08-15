@@ -33,7 +33,30 @@ const paths = {
   bookmarks: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
   zoomIn: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M11 8v6M8 11h6',
   zoomOut: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M8 11h6',
-  menu: 'M3 12h18M3 6h18M3 18h18'
+  menu: 'M3 12h18M3 6h18M3 18h18',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  shieldOff:
+    'M19.7 14a8.6 8.6 0 0 0 .3-2V5l-8-3-3.2 1.2M4.7 7.7 4 8v4c0 6 8 10 8 10a15 15 0 0 0 4.3-3M2 2l20 20',
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+
+  // --- workspace icons ------------------------------------------------------
+  // A fixed, curated set. Emoji were used here originally; they render
+  // differently on every platform, sit at the wrong optical weight beside real
+  // UI icons, and read as informal in an application chrome.
+  wsHome: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
+  wsWork:
+    'M20 7h-4V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zM10 5h4v2h-4z',
+  wsStudy: 'M22 10 12 5 2 10l10 5 10-5zM6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5',
+  wsCode: 'M8 6 2 12l6 6M16 6l6 6-6 6M14 4l-4 16',
+  wsResearch: 'M9 3h6M10 3v6.5L5.2 18a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3',
+  wsTravel: 'M17.8 19.2 16 11l5-5a2 2 0 0 0-2.8-2.8l-5 5-8.2-1.8-1.4 1.4 6.6 3.6-3 3H4l-1.4 1.4 4 1.4 1.4 4L9.4 20v-3.2l3-3 3.6 6.6z',
+  wsShop: 'M6 6h15l-1.5 9h-12zM6 6 5 2H2M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+  wsMedia: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
+  wsDesign:
+    'M12 22a10 10 0 1 1 0-20c5 0 9 3.6 9 8 0 2.5-2 4.5-4.5 4.5H14a2 2 0 0 0-1.4 3.4A1.9 1.9 0 0 1 12 22zM7.5 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM12 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM16.5 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+  wsReading: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z',
+  wsFinance: 'M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.2 5 1.3 5 3.3-2.2 3-5 3-5-1.1-5-3',
+  wsFolder: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'
 } as const
 
 export type IconName = keyof typeof paths
