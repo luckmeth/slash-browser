@@ -292,6 +292,11 @@ export function buildApplicationMenu(ctx: AppContext): void {
           click: send('open-performance')
         },
         { label: 'Site Permissions', click: send('open-permissions') },
+        {
+          label: 'Restore Points…',
+          accelerator: 'CommandOrControl+Shift+R',
+          click: send('open-timemachine')
+        },
         { label: 'Settings', accelerator: 'CommandOrControl+,', click: send('open-settings') }
       ]
     }

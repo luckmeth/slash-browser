@@ -164,11 +164,49 @@ const m004_permissions: Migration = {
   `
 }
 
+const m005_snapshots: Migration = {
+  version: 5,
+  name: 'snapshots',
+  sql: /* sql */ `
+    CREATE TABLE snapshots (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      label      TEXT    NOT NULL,
+      kind       TEXT    NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_snapshots_created ON snapshots (created_at DESC);
+    CREATE INDEX idx_snapshots_kind ON snapshots (kind, created_at DESC);
+
+    -- Tabs are stored per snapshot rather than deduplicated across snapshots.
+    -- A snapshot has to be a complete, independent record: sharing rows would
+    -- mean pruning one restore point could corrupt another, and correctness of
+    -- recovery matters far more here than the few kilobytes saved.
+    --
+    -- entries_json holds the back/forward list. It carries pageState (scroll and
+    -- form values) only when the user has opted in — see restoreFormState.
+    CREATE TABLE snapshot_tabs (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshot_id        INTEGER NOT NULL REFERENCES snapshots (id) ON DELETE CASCADE,
+      url                TEXT    NOT NULL,
+      title              TEXT    NOT NULL DEFAULT '',
+      favicon_url        TEXT,
+      workspace_id       TEXT    NOT NULL,
+      tab_order          INTEGER NOT NULL,
+      is_pinned          INTEGER NOT NULL DEFAULT 0 CHECK (is_pinned IN (0, 1)),
+      scroll_y           REAL    NOT NULL DEFAULT 0,
+      entries_json       TEXT    NOT NULL DEFAULT '[]',
+      active_entry_index INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_snapshot_tabs ON snapshot_tabs (snapshot_id, tab_order);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
   m003_workspaces,
-  m004_permissions
+  m004_permissions,
+  m005_snapshots
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

@@ -13,6 +13,8 @@ import { installContentSignalListener } from './tabs/contentSignals'
 import type { EventChannel, EventPayload } from '@shared/ipc/contracts'
 import { PermissionRepository } from './db/repositories/PermissionRepository'
 import { PermissionManager } from './permissions/PermissionManager'
+import { SnapshotRepository } from './db/repositories/SnapshotRepository'
+import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -37,6 +39,8 @@ export class AppContext {
   readonly workspaces: WorkspaceRepository
   readonly permissionRepository: PermissionRepository
   readonly permissions: PermissionManager
+  readonly snapshotRepository: SnapshotRepository
+  readonly snapshots: SessionSnapshotManager
   readonly downloads: DownloadManager
   readonly sessions: SessionRegistry
   private readonly hardening = new SessionHardening()
@@ -60,6 +64,12 @@ export class AppContext {
       dismissPrompt: () => {},
       onGrantsChanged: () => {}
     })
+    this.snapshotRepository = new SnapshotRepository(this.db)
+    this.snapshots = new SessionSnapshotManager(
+      this.snapshotRepository,
+      this.settings,
+      () => this.windows
+    )
     this.downloadRepository = new DownloadRepository(this.db)
     this.sessions = new SessionRegistry(this.hardening)
     this.downloads = new DownloadManager(this.downloadRepository, this.settings, {
@@ -119,6 +129,7 @@ export class AppContext {
       }
     })
     this.permissions.start()
+    this.snapshots.start()
 
     registerHandlers(this)
 

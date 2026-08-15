@@ -467,6 +467,68 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(undefined)
   })
 
+  // --- time machine ---------------------------------------------------------
+
+  ipc.handle('snapshots:list', () => ok(ctx.snapshotRepository.list()))
+
+  ipc.handle('snapshots:detail', (request) => ok(ctx.snapshotRepository.detail(request.id)))
+
+  ipc.handle('snapshots:create', async (request) => {
+    await ctx.snapshots.capture('manual', request.label)
+    return ok(ctx.snapshotRepository.list())
+  })
+
+  ipc.handle('snapshots:restore', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const detail = ctx.snapshotRepository.detail(request.id)
+    if (!detail) return err('NOT_FOUND', 'That restore point no longer exists')
+
+    let tabs = detail.tabs
+    if (request.intoNewWorkspace) {
+      const workspace = ctx.workspaces.create({
+        name: detail.label.slice(0, 40),
+        icon: '🕘',
+        color: 'slate',
+        // Never isolated: an isolated workspace has its own cookie partition, so
+        // restoring into one would silently sign every tab out.
+        isolated: false
+      })
+      tabs = tabs.map((tab) => ({ ...tab, workspaceId: workspace.id }))
+      window.tabs.setActiveWorkspace(workspace.id)
+      ipc.broadcast(
+        'workspaces:snapshot',
+        { workspaces: ctx.workspaces.list(), activeWorkspaceId: workspace.id },
+        window.privilegedContents()
+      )
+    }
+
+    const restored = window.tabs.restoreFromSnapshot(tabs, { activateFirst: true })
+    return ok({ restored })
+  })
+
+  ipc.handle('snapshots:restoreTab', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const detail = ctx.snapshotRepository.detail(request.id)
+    const tab = detail?.tabs[request.tabIndex]
+    if (!tab) return err('NOT_FOUND', 'That tab is not in this restore point')
+
+    // Into the current workspace: restoring one tab is a "bring this back here"
+    // action, and sending it to a workspace the user is not looking at would
+    // make it appear to have done nothing.
+    const restored = window.tabs.restoreFromSnapshot(
+      [{ ...tab, workspaceId: window.tabs.currentWorkspaceId }],
+      { activateFirst: true }
+    )
+    return ok({ restored })
+  })
+
+  ipc.handle('snapshots:delete', (request) => {
+    ctx.snapshotRepository.delete(request.id)
+    return ok(ctx.snapshotRepository.list())
+  })
+
   // --- history --------------------------------------------------------------
 
   ipc.handle('history:search', (request) =>

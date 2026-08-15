@@ -87,6 +87,20 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
     hooks.onChanged()
   })
 
+  // Reapply the scroll offset a snapshot recorded. Done on did-finish-load
+  // rather than dom-ready because a page that lays out after its scripts run
+  // would otherwise be scrolled before it is tall enough to hold the offset.
+  contents.on('did-finish-load', () => {
+    const scrollY = tab.takePendingScrollY()
+    if (scrollY <= 0) return
+    contents
+      .executeJavaScript(`window.scrollTo(0, ${scrollY})`, true)
+      .catch(() => {
+        // A page that refuses evaluation simply opens at the top. Not worth
+        // surfacing — the restore itself still succeeded.
+      })
+  })
+
   contents.on('found-in-page', (_event, result) => {
     tab.patch({
       findResult: { activeMatch: result.activeMatchOrdinal, totalMatches: result.matches }

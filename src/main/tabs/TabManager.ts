@@ -315,6 +315,66 @@ export class TabManager {
     this.create({ url: source.snapshot.url, afterTabId: id })
   }
 
+  /**
+   * Recreates tabs from a snapshot.
+   *
+   * Restored tabs are created *without* views. They materialise when activated,
+   * which is what stops restoring forty tabs from launching forty renderer
+   * processes at once — the same mechanism hibernation uses, so a restored
+   * session starts light rather than thrashing the machine on launch.
+   */
+  restoreFromSnapshot(
+    snapshotTabs: readonly {
+      url: string
+      title: string
+      faviconUrl: string | null
+      workspaceId: string
+      isPinned: boolean
+      scrollY: number
+      entries: Array<{ url: string; title: string; pageState?: string }>
+      activeEntryIndex: number
+    }[],
+    options: { activateFirst: boolean }
+  ): number {
+    let restored = 0
+    let firstId: string | null = null
+
+    for (const snapshotTab of snapshotTabs) {
+      const tab = new Tab({
+        workspaceId: snapshotTab.workspaceId,
+        url: snapshotTab.url
+      })
+      tab.patch({
+        title: snapshotTab.title,
+        faviconUrl: snapshotTab.faviconUrl,
+        isPinned: snapshotTab.isPinned,
+        // No view yet, so it is genuinely hibernated rather than pretending to
+        // be live and showing a blank page.
+        status: 'hibernated'
+      })
+      tab.seedFromSnapshot(snapshotTab.entries, snapshotTab.activeEntryIndex, snapshotTab.scrollY)
+
+      this.tabs.push(tab)
+      if (!firstId) firstId = tab.id
+      restored += 1
+    }
+
+    if (restored > 0) {
+      // Pinned tabs form a block at the start, the same invariant setPinned
+      // maintains. A stable sort keeps the snapshot's relative order inside
+      // each block.
+      const pinned = this.tabs.filter((tab) => tab.snapshot.isPinned)
+      const rest = this.tabs.filter((tab) => !tab.snapshot.isPinned)
+      this.tabs.length = 0
+      this.tabs.push(...pinned, ...rest)
+
+      if (options.activateFirst && firstId) this.activate(firstId)
+      else this.scheduleEmit()
+      log.info(`restored ${restored} tab(s) from snapshot`)
+    }
+    return restored
+  }
+
   /** Closes every other tab in this workspace, keeping pinned ones. */
   closeOthers(keepId: string): void {
     // Snapshot the ids first: close() mutates the array being iterated.

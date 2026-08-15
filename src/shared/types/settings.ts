@@ -35,6 +35,19 @@ export const SettingsSchema = z.object({
   // --- Phase 3: performance --------------------------------------------------
   performanceMode: z.enum(['off', 'balanced', 'aggressive']).default('balanced'),
 
+  // --- Phase 6: time machine -------------------------------------------------
+  /** Keep automatic restore points for this many days. 0 = keep only manual ones. */
+  snapshotRetentionDays: z.number().int().min(0).max(365).default(14),
+  /**
+   * Include Chromium's page state in snapshots.
+   *
+   * Off by default and deliberately so: page state carries **form values** as
+   * well as scroll position, so enabling this writes whatever has been typed
+   * into a form — potentially a half-entered password — into the local database.
+   * Scroll position is captured separately and is unaffected by this setting.
+   */
+  restoreFormState: z.boolean().default(false),
+
   // --- Phase 5: web memory privacy gates (default OFF) -----------------------
   /** Index visit metadata (url, title, timestamp). */
   indexHistory: z.boolean().default(false),

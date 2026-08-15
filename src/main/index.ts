@@ -27,10 +27,31 @@ if (!app.requestSingleInstanceLock()) {
     buildApplicationMenu(context)
     const window = context.createWindow()
 
+    // Bring back what was open when the browser was last closed.
+    //
+    // Restored tabs are created without renderers and materialise on activation,
+    // so reopening forty tabs does not launch forty processes at once. What this
+    // genuinely restores is pages, order, pinning, scroll and back/forward
+    // history — not logged-in state beyond what the cookies already carry.
+    if (context.settings.getAll().restoreTabsOnStartup) {
+      const previous = context.snapshots.latestSessionEnd()
+      if (previous && previous.tabs.length > 0) {
+        const restored = window.tabs.restoreFromSnapshot(previous.tabs, { activateFirst: true })
+        log.info(`startup: restored ${restored} tab(s) from the previous session`)
+      }
+    }
+
     const spikePath = process.env['ADAPTIVE_SPIKE_CAPTURE']
     if (spikePath) {
       void import('./dev/spikeCapture').then(({ runSpikeCapture }) =>
         runSpikeCapture(window, spikePath)
+      )
+    }
+
+    const snapshotMode = process.env['ADAPTIVE_SNAPSHOT_CAPTURE']
+    if (snapshotMode) {
+      void import('./dev/spikeCapture').then(({ runSnapshotCapture }) =>
+        runSnapshotCapture(window, process.env['ADAPTIVE_SNAPSHOT_OUT'] ?? 'snapshot.png', snapshotMode)
       )
     }
 
@@ -65,6 +86,25 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
+  })
+
+  /**
+   * Record the session before quitting.
+   *
+   * `will-quit` is too late and, more importantly, synchronous — capturing scroll
+   * position means asking each live renderer, which is async. So the first quit
+   * is deferred: take the snapshot, then quit for real. The `quitting` flag stops
+   * the second pass from deferring again and hanging the app.
+   */
+  let quitting = false
+  app.on('before-quit', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    quitting = true
+    void context.snapshots
+      .capture('session-end')
+      .catch((error: unknown) => log.error('failed to record the closing session', error))
+      .finally(() => app.quit())
   })
 
   // `will-quit` rather than `quit`: this is the last point at which the SQLite

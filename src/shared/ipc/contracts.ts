@@ -4,6 +4,7 @@ import { TabsSnapshotSchema, TabSchema } from '../types/tab'
 import { WorkspacesSnapshotSchema, WORKSPACE_COLORS } from '../types/workspace'
 import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
+import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
 import {
   PermissionEventSchema,
   PermissionGrantSchema,
@@ -306,6 +307,33 @@ export const invokeContracts = {
   },
   'permissions:clearEvents': { request: z.void(), response: z.void() },
 
+  'snapshots:list': { request: z.void(), response: z.array(SnapshotSchema) },
+  'snapshots:detail': {
+    request: z.object({ id: z.number().int() }),
+    response: SnapshotDetailSchema.nullable()
+  },
+  'snapshots:create': {
+    request: z.object({ label: z.string().min(1).max(120) }),
+    response: z.array(SnapshotSchema)
+  },
+  'snapshots:restore': {
+    request: z.object({
+      id: z.number().int(),
+      /** Put every tab into one new workspace instead of their original ones. */
+      intoNewWorkspace: z.boolean().default(false)
+    }),
+    response: z.object({ restored: z.number().int() })
+  },
+  /** Restore a single tab out of a snapshot, by its index within it. */
+  'snapshots:restoreTab': {
+    request: z.object({ id: z.number().int(), tabIndex: z.number().int().min(0) }),
+    response: z.object({ restored: z.number().int() })
+  },
+  'snapshots:delete': {
+    request: z.object({ id: z.number().int() }),
+    response: z.array(SnapshotSchema)
+  },
+
   'history:search': {
     request: HistoryQuerySchema,
     response: z.array(HistoryEntrySchema)
@@ -383,6 +411,7 @@ export const UiCommandSchema = z.object({
     'open-performance',
     'open-find',
     'open-permissions',
+    'open-timemachine',
     'bookmark-current-tab',
     'close-panel'
   ])

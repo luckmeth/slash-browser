@@ -86,6 +86,14 @@ export const INVOKE_CHANNELS = [
   'permissions:events',
   'permissions:clearEvents',
 
+  // --- time machine ---
+  'snapshots:list',
+  'snapshots:detail',
+  'snapshots:create',
+  'snapshots:restore',
+  'snapshots:restoreTab',
+  'snapshots:delete',
+
   // --- history ---
   'history:search',
   'history:delete',

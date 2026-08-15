@@ -78,6 +78,9 @@ export function App(): React.JSX.Element {
         case 'open-permissions':
           togglePanel('permissions')
           break
+        case 'open-timemachine':
+          togglePanel('timemachine')
+          break
         case 'close-panel':
           setPanel('none')
           break

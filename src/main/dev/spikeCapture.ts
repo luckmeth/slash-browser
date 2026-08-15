@@ -168,6 +168,87 @@ async function captureOmniboxDropdown(
 }
 
 /**
+ * Dev-only Phase 6 verification, run in two passes.
+ *
+ * Pass "record" opens tabs, navigates one of them twice so it has real
+ * back-history, then quits normally — which is what writes the session-end
+ * snapshot. Pass "verify" launches again and inspects what came back.
+ *
+ * Two separate process launches on purpose: restoring from an in-memory object
+ * would prove nothing. The claim is that a session survives the process dying,
+ * so the process has to actually die.
+ */
+export async function runSnapshotCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  mode: string
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  if (mode === 'record') {
+    window.tabs.navigate(activeId, 'https://example.com')
+    await delay(3500)
+    // Second navigation in the same tab, so there is a back entry to restore.
+    window.tabs.navigate(activeId, 'https://www.iana.org/help/example-domains')
+    await delay(3500)
+
+    window.tabs.create({ url: 'https://www.wikipedia.org', background: true })
+    await delay(3000)
+
+    const before = window.tabs.snapshot()
+    log.info(`snapshot record: ${before.tabs.length} tab(s) open, quitting normally`)
+    // Ordinary quit — the before-quit hook is what captures the session.
+    app.quit()
+    return
+  }
+
+  // --- verify pass ---------------------------------------------------------
+  const snapshot = window.tabs.snapshot()
+  const restored = snapshot.tabs.filter((tab) => !tab.url.startsWith('adaptive://'))
+
+  log.info(`snapshot verify: ${restored.length} tab(s) came back`)
+  for (const tab of restored) {
+    log.info(`  ${tab.status.padEnd(11)} ${tab.url}`)
+  }
+
+  if (restored.length === 0) {
+    log.error('snapshot verify: FAIL — nothing was restored')
+    app.quit()
+    return
+  }
+
+  // Restored tabs must arrive hibernated: reopening forty tabs should not launch
+  // forty renderers at once.
+  const live = restored.filter((tab) => tab.status !== 'hibernated')
+  if (live.length > 1) {
+    log.error(`snapshot verify: FAIL — ${live.length} tabs materialised eagerly`)
+  } else {
+    log.info('snapshot verify: PASS — restored tabs are hibernated until activated')
+  }
+
+  // Activate the tab that had two navigations and confirm Back works, which is
+  // the part that proves navigation history survived rather than just the URL.
+  const target = restored.find((tab) => tab.url.includes('iana.org')) ?? restored[0]
+  if (target) {
+    window.tabs.activate(target.id)
+    await delay(4000)
+    const after = window.tabs.snapshot().tabs.find((tab) => tab.id === target.id)
+    if (after?.canGoBack) {
+      log.info('snapshot verify: PASS — back/forward history survived the restart')
+    } else {
+      log.error('snapshot verify: FAIL — restored tab has no back history')
+    }
+  }
+
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
  * Dev-only Phase 4 verification.
  *
  * Triggers a real `navigator.geolocation` request from a real page, so the whole

@@ -50,6 +50,8 @@ export class Tab {
   private beforeUnloadObserved = false
   /** Working set at the moment of hibernation, for measured savings reporting. */
   private rssBeforeHibernate: number | null = null
+  /** Scroll offset awaiting reapplication after a snapshot restore. */
+  private pendingScrollY = 0
 
   constructor(init: { workspaceId: string; url?: string; id?: string }) {
     this.id = init.id ?? nextTabId()
@@ -165,5 +167,25 @@ export class Tab {
     const saved = this.savedNavigation
     this.savedNavigation = null
     return saved
+  }
+
+  /**
+   * Seeds a tab restored from a snapshot with the history it had.
+   *
+   * Reuses the same field hibernation uses, so a restored tab and a woken tab
+   * take one identical code path rather than two that can drift apart.
+   */
+  seedFromSnapshot(entries: SavedNavigation['entries'], index: number, scrollY: number): void {
+    if (entries.length > 0) {
+      this.savedNavigation = { entries, index: Math.max(0, Math.min(index, entries.length - 1)) }
+    }
+    this.pendingScrollY = scrollY
+  }
+
+  /** Scroll offset to reapply once the page has loaded. Consumed on read. */
+  takePendingScrollY(): number {
+    const value = this.pendingScrollY
+    this.pendingScrollY = 0
+    return value
   }
 }
