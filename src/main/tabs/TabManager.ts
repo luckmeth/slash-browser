@@ -36,6 +36,8 @@ export interface WorkspaceContext {
 export interface TabManagerHooks {
   onSnapshot: (snapshot: TabsSnapshot) => void
   onNavigated: (url: string, title: string, faviconUrl: string | null) => void
+  /** A document finished loading — the Web Memory indexer's entry point. */
+  onPageLoaded: (tab: Tab, url: string) => void
   onMetadata: (url: string, title: string, faviconUrl: string | null) => void
   /**
    * Attaches the right-click menu to a newly built page view.
@@ -663,6 +665,7 @@ export class TabManager {
     attachTabEvents(view.webContents, tab, {
       onChanged: () => this.scheduleEmit(),
       onNavigated: (t, url) => this.hooks.onNavigated(url, t.snapshot.title, t.snapshot.faviconUrl),
+      onPageLoaded: (t, url) => this.hooks.onPageLoaded(t, url),
       onMetadata: (t) =>
         this.hooks.onMetadata(t.snapshot.url, t.snapshot.title, t.snapshot.faviconUrl),
       onCrashed: () => this.scheduleEmit()

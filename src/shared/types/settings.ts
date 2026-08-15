@@ -59,6 +59,8 @@ export const SettingsSchema = z.object({
   memoryRetentionDays: z.number().int().min(0).default(90),
   /** Opt-in local ONNX embedding layer. Keyword search works without it. */
   semanticSearchEnabled: z.boolean().default(false),
+  /** Keep private-window visits out of the memory index. */
+  excludePrivateFromMemory: z.boolean().default(true),
 
   // --- Phase 7: AI (default OFF, no provider configured) ---------------------
   aiProvider: z.enum(['none', 'anthropic', 'openai-compatible']).default('none'),

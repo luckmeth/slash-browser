@@ -6,6 +6,8 @@ export interface TabEventHooks {
   onChanged: () => void
   /** A main-frame navigation completed — the point at which history is recorded. */
   onNavigated: (tab: Tab, url: string) => void
+  /** Document finished loading — the point at which it can be indexed. */
+  onPageLoaded: (tab: Tab, url: string) => void
   /** Title or favicon arrived after navigation; history metadata catches up. */
   onMetadata: (tab: Tab) => void
   /** The renderer process died. */
@@ -91,6 +93,10 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
   // rather than dom-ready because a page that lays out after its scripts run
   // would otherwise be scrolled before it is tall enough to hold the offset.
   contents.on('did-finish-load', () => {
+    // Index after the document has settled: extracting at dom-ready would miss
+    // the body of anything that renders its content from script.
+    hooks.onPageLoaded(tab, contents.getURL())
+
     const scrollY = tab.takePendingScrollY()
     if (scrollY <= 0) return
     contents

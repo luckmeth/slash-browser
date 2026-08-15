@@ -94,6 +94,12 @@ export const INVOKE_CHANNELS = [
   'snapshots:restoreTab',
   'snapshots:delete',
 
+  // --- web memory ---
+  'memory:search',
+  'memory:stats',
+  'memory:forget',
+  'memory:clear',
+
   // --- history ---
   'history:search',
   'history:delete',

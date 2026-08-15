@@ -81,6 +81,9 @@ export function App(): React.JSX.Element {
         case 'open-timemachine':
           togglePanel('timemachine')
           break
+        case 'open-memory':
+          togglePanel('memory')
+          break
         case 'close-panel':
           setPanel('none')
           break

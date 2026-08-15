@@ -291,6 +291,11 @@ export function buildApplicationMenu(ctx: AppContext): void {
           accelerator: 'CommandOrControl+Shift+P',
           click: send('open-performance')
         },
+        {
+          label: 'Search Browsing Memory…',
+          accelerator: 'CommandOrControl+Shift+F',
+          click: send('open-memory')
+        },
         { label: 'Site Permissions', click: send('open-permissions') },
         {
           label: 'Restore Points…',

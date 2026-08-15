@@ -5,6 +5,7 @@ import { WorkspacesSnapshotSchema, WORKSPACE_COLORS } from '../types/workspace'
 import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
+import { MemoryResultSchema, MemoryStatsSchema, ParsedQuerySchema } from '../types/memory'
 import {
   PermissionEventSchema,
   PermissionGrantSchema,
@@ -334,6 +335,22 @@ export const invokeContracts = {
     response: z.array(SnapshotSchema)
   },
 
+  'memory:search': {
+    request: z.object({
+      query: z.string(),
+      limit: z.number().int().min(1).max(100).default(30)
+    }),
+    // The parsed query comes back too, so the UI can show which time window it
+    // understood rather than leaving the user guessing why results are filtered.
+    response: z.object({
+      results: z.array(MemoryResultSchema),
+      parsed: ParsedQuerySchema
+    })
+  },
+  'memory:stats': { request: z.void(), response: MemoryStatsSchema },
+  'memory:forget': { request: z.object({ url: z.string() }), response: MemoryStatsSchema },
+  'memory:clear': { request: z.void(), response: MemoryStatsSchema },
+
   'history:search': {
     request: HistoryQuerySchema,
     response: z.array(HistoryEntrySchema)
@@ -412,6 +429,7 @@ export const UiCommandSchema = z.object({
     'open-find',
     'open-permissions',
     'open-timemachine',
+    'open-memory',
     'bookmark-current-tab',
     'close-panel'
   ])

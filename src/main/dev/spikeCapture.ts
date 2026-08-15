@@ -168,6 +168,98 @@ async function captureOmniboxDropdown(
 }
 
 /**
+ * Dev-only Phase 5 verification.
+ *
+ * Exercises the whole chain against real pages: consent gate → Readability
+ * extraction in the page → FTS5 index → BM25 search → match explanations. Also
+ * checks the gate the other way round, which is the part that matters most: with
+ * indexing off, nothing may be written at all.
+ */
+export async function runMemoryCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  memory: {
+    setIndexing: (history: boolean, content: boolean) => void
+    excludeOrigin: (origin: string) => void
+    search: (query: string) => { results: Array<{ title: string; reasons: Array<{ detail: string }> }> }
+    stats: () => { pageCount: number; withContent: number }
+    clear: () => void
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // 1. Gate closed: visiting a page must write nothing.
+  memory.clear()
+  memory.setIndexing(false, false)
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(4000)
+  const gated = memory.stats()
+  if (gated.pageCount === 0) {
+    log.info('memory probe: PASS — nothing indexed while the setting is off')
+  } else {
+    log.error(`memory probe: FAIL — ${gated.pageCount} page(s) indexed with the gate closed`)
+  }
+
+  // 2. Metadata only.
+  memory.setIndexing(true, false)
+  window.tabs.navigate(activeId, 'https://www.iana.org/help/example-domains')
+  await delay(4500)
+  const metaOnly = memory.stats()
+  if (metaOnly.pageCount > 0 && metaOnly.withContent === 0) {
+    log.info('memory probe: PASS — history indexed without page text')
+  } else {
+    log.error(
+      `memory probe: FAIL — pages=${metaOnly.pageCount} withContent=${metaOnly.withContent}`
+    )
+  }
+
+  // 3. Excluded origin, with content indexing fully on.
+  memory.setIndexing(true, true)
+  memory.excludeOrigin('https://example.com')
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(4500)
+  const afterExcluded = memory.search('illustrative examples')
+  if (afterExcluded.results.every((r) => !r.title.toLowerCase().includes('example domain'))) {
+    log.info('memory probe: PASS — an excluded origin was not indexed')
+  } else {
+    log.error('memory probe: FAIL — excluded origin was indexed anyway')
+  }
+
+  // 4. Full content indexing on a real article.
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/PostgreSQL')
+  await delay(7000)
+  const stats = memory.stats()
+  log.info(`memory probe: indexed ${stats.pageCount} page(s), ${stats.withContent} with full text`)
+
+  // Search for a word that appears only in the *body*, never in the title or
+  // URL — the whole claim of Web Memory is finding pages by what was on them.
+  const found = memory.search('relational database transactions')
+  log.info(`memory probe: "relational database transactions" → ${found.results.length} result(s)`)
+  for (const result of found.results.slice(0, 3)) {
+    log.info(`   ${result.title} — ${result.reasons.map((r) => r.detail).join('; ')}`)
+  }
+
+  if (found.results.length > 0 && stats.withContent > 0) {
+    log.info('memory probe: PASS — a page was found by its body text')
+  } else {
+    log.error('memory probe: FAIL — full-text search returned nothing')
+  }
+
+  // 5. Time-scoped query.
+  const scoped = memory.search('postgres today')
+  log.info(`memory probe: time-scoped query → ${scoped.results.length} result(s)`)
+
+  ipcBroadcastUiCommand(window, 'open-memory')
+  await delay(1500)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
  * Dev-only Phase 6 verification, run in two passes.
  *
  * Pass "record" opens tabs, navigates one of them twice so it has real

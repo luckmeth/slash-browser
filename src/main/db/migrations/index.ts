@@ -201,12 +201,50 @@ const m005_snapshots: Migration = {
   `
 }
 
+const m006_memory: Migration = {
+  version: 6,
+  name: 'memory',
+  sql: /* sql */ `
+    -- One row per indexed page. Metadata only; the searchable text lives in the
+    -- FTS table so there is exactly one copy of it.
+    CREATE TABLE memory_pages (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      url         TEXT    NOT NULL UNIQUE,
+      title       TEXT    NOT NULL DEFAULT '',
+      site_name   TEXT,
+      excerpt     TEXT    NOT NULL DEFAULT '',
+      word_count  INTEGER NOT NULL DEFAULT 0,
+      /** Whether body text was stored, or only title and URL. */
+      has_content INTEGER NOT NULL DEFAULT 0 CHECK (has_content IN (0, 1)),
+      indexed_at  INTEGER NOT NULL,
+      visited_at  INTEGER NOT NULL
+    );
+    CREATE INDEX idx_memory_visited ON memory_pages (visited_at DESC);
+
+    -- FTS5 with the porter stemmer, so "scaling" finds "scale". BM25 ranking is
+    -- built in, which is what makes results ordered by relevance rather than by
+    -- how many times a word happens to appear.
+    --
+    -- The text is stored in the FTS table itself rather than in an external
+    -- content table: it keeps snippet() working without a join, and there is
+    -- only ever one copy to delete when the user forgets a page.
+    CREATE VIRTUAL TABLE memory_fts USING fts5(
+      title,
+      body,
+      url,
+      page_id UNINDEXED,
+      tokenize = 'porter unicode61'
+    );
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
   m003_workspaces,
   m004_permissions,
-  m005_snapshots
+  m005_snapshots,
+  m006_memory
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

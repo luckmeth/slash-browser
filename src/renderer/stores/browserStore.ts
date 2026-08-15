@@ -13,6 +13,7 @@ export type PanelId =
   | 'performance'
   | 'permissions'
   | 'timemachine'
+  | 'memory'
 
 interface BrowserState {
   tabs: Tab[]

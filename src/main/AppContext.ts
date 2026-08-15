@@ -15,6 +15,8 @@ import { PermissionRepository } from './db/repositories/PermissionRepository'
 import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
+import { MemoryRepository } from './db/repositories/MemoryRepository'
+import { MemoryIndexer } from './memory/MemoryIndexer'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -41,6 +43,8 @@ export class AppContext {
   readonly permissions: PermissionManager
   readonly snapshotRepository: SnapshotRepository
   readonly snapshots: SessionSnapshotManager
+  readonly memoryRepository: MemoryRepository
+  readonly memory: MemoryIndexer
   readonly downloads: DownloadManager
   readonly sessions: SessionRegistry
   private readonly hardening = new SessionHardening()
@@ -64,6 +68,8 @@ export class AppContext {
       dismissPrompt: () => {},
       onGrantsChanged: () => {}
     })
+    this.memoryRepository = new MemoryRepository(this.db)
+    this.memory = new MemoryIndexer(this.memoryRepository, this.settings)
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
@@ -130,6 +136,7 @@ export class AppContext {
     })
     this.permissions.start()
     this.snapshots.start()
+    this.memory.start()
 
     registerHandlers(this)
 
@@ -152,6 +159,12 @@ export class AppContext {
       settings: this.settings,
       downloads: this.downloads,
       onTabDiscarded: (tabId) => this.permissions.cancelForTab(tabId),
+      onPageLoaded: (contents, url) => {
+        // Private-window support is not built yet, so `false` is the truthful
+        // value here rather than a placeholder — the flag exists so the gate is
+        // already correct when it is.
+        void this.memory.indexPage(contents, url, false)
+      },
       onBookmarkRequested: (url, title) => {
         if (this.bookmarks.findByUrl(url)) return
         this.bookmarks.create({ url, title, faviconUrl: null, parentId: null, isFolder: false })

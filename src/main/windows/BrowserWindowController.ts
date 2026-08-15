@@ -32,6 +32,8 @@ export interface WindowDeps {
   onBookmarkRequested: (url: string, title: string) => void
   /** A tab closed — drop anything scoped to it. */
   onTabDiscarded: (tabId: string) => void
+  /** A page finished loading; the Web Memory indexer decides what to do with it. */
+  onPageLoaded: (contents: WebContents, url: string) => void
 }
 
 /**
@@ -152,7 +154,11 @@ export class BrowserWindowController {
         },
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
-        onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId)
+        onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
+        onPageLoaded: (tab, url) => {
+          const contents = tab.contents
+          if (contents) void this.deps.onPageLoaded(contents, url)
+        }
       }
     )
 

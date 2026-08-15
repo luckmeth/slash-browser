@@ -12,7 +12,15 @@ export default defineConfig({
    * native module and must be loaded from node_modules at runtime, not inlined.
    */
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [
+      externalizeDepsPlugin({
+        // Readability is imported with `?raw` so its source can be injected into
+        // a page on demand. Externalising it would leave a literal
+        // `require('...Readability.js?raw')` in the bundle, which resolves to
+        // nothing at runtime — Vite has to process the import for it to inline.
+        exclude: ['@mozilla/readability']
+      })
+    ],
     resolve: {
       alias: {
         '@shared': shared,

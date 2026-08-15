@@ -7,6 +7,7 @@ import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
 import { showTabContextMenu } from '../menus/ContextMenus'
 import { buildSuggestions } from '../navigation/SuggestionEngine'
+import { parseQuery } from '../memory/parseQuery'
 
 /**
  * Registers every Phase 1 channel. Each must already exist in
@@ -527,6 +528,30 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('snapshots:delete', (request) => {
     ctx.snapshotRepository.delete(request.id)
     return ok(ctx.snapshotRepository.list())
+  })
+
+  // --- web memory -----------------------------------------------------------
+
+  ipc.handle('memory:search', (request) => {
+    const parsed = parseQuery(request.query)
+    return ok({
+      results: ctx.memoryRepository.search(parsed, request.limit),
+      parsed
+    })
+  })
+
+  ipc.handle('memory:stats', () =>
+    ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
+  )
+
+  ipc.handle('memory:forget', (request) => {
+    ctx.memoryRepository.forget(request.url)
+    return ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
+  })
+
+  ipc.handle('memory:clear', () => {
+    ctx.memoryRepository.clearAll()
+    return ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
   })
 
   // --- history --------------------------------------------------------------

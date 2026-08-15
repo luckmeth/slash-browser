@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { AppContext } from './AppContext'
+import { parseQuery as parseQueryForDev } from './memory/parseQuery'
 import { buildApplicationMenu } from './menu'
 import { createLogger } from './logger'
 
@@ -45,6 +46,28 @@ if (!app.requestSingleInstanceLock()) {
     if (spikePath) {
       void import('./dev/spikeCapture').then(({ runSpikeCapture }) =>
         runSpikeCapture(window, spikePath)
+      )
+    }
+
+    const memoryPath = process.env['ADAPTIVE_MEMORY_CAPTURE']
+    if (memoryPath) {
+      void import('./dev/spikeCapture').then(({ runMemoryCapture }) =>
+        runMemoryCapture(window, memoryPath, {
+          setIndexing: (history, content) =>
+            context.settings.update({ indexHistory: history, indexPageContent: content }),
+          excludeOrigin: (origin) =>
+            context.settings.update({
+              excludedOrigins: [...context.settings.getAll().excludedOrigins, origin]
+            }),
+          search: (query) => ({
+            results: context.memoryRepository.search(parseQueryForDev(query), 10)
+          }),
+          stats: () => context.memoryRepository.stats(false, false),
+          clear: () => {
+            context.memoryRepository.clearAll()
+            context.settings.update({ excludedOrigins: [] })
+          }
+        })
       )
     }
 
