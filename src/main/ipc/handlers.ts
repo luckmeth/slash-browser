@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
-import { originOf } from '@shared/url'
+import { originOf, hostOf } from '@shared/url'
+import type { BlockingStatus } from '@shared/types/blocking'
 import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
@@ -19,6 +20,28 @@ import type { BrowserWindowController } from '../windows/BrowserWindowController
  * preview and the actual request must never be able to disagree about what is
  * sent.
  */
+/** Shield state for a tab, assembled from the blocker and current settings. */
+function blockingStatus(
+  ctx: AppContext,
+  window: BrowserWindowController,
+  tabId: string
+): BlockingStatus {
+  const tab = window.tabs.findById(tabId)
+  const host = tab ? hostOf(tab.snapshot.url) : ''
+  const settings = ctx.settings.getAll()
+  const counts = ctx.blocker.engine.counts
+
+  return {
+    blockedOnPage: tab?.contents ? ctx.blocker.countFor(tab.contents.id) : 0,
+    adsEnabled: settings.blockAds,
+    maliciousEnabled: settings.blockMaliciousSites,
+    host,
+    siteAllowed: host !== '' && ctx.blocker.engine.isSiteAllowed(host),
+    ruleCount: counts.blocked,
+    maliciousRuleCount: counts.malicious
+  }
+}
+
 function buildContext(
   ctx: AppContext,
   window: BrowserWindowController,
@@ -672,6 +695,31 @@ export function registerHandlers(ctx: AppContext): void {
   })
 
   ipc.handle('ai:activity', (request) => ok(ctx.ai.listActivity(request.limit)))
+
+  // --- content blocking -----------------------------------------------------
+
+  ipc.handle('blocking:status', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  ipc.handle('blocking:setSiteAllowed', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const current = ctx.settings.getAll().blockingAllowedSites
+    const next = request.allowed
+      ? [...new Set([...current, request.host])]
+      : current.filter((host) => host !== request.host)
+
+    ctx.settings.update({ blockingAllowedSites: next })
+    ctx.blocker.refreshAllowedSites()
+    // Reload so the change takes effect on the page in front of the user rather
+    // than only on the next navigation.
+    window.tabs.reload(request.tabId, false)
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
 
   // --- history --------------------------------------------------------------
 

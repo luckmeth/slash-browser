@@ -18,6 +18,7 @@ import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
 import { MemoryIndexer } from './memory/MemoryIndexer'
 import { AiEngine } from './ai/AiEngine'
+import { ContentBlocker } from './blocking/ContentBlocker'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -47,6 +48,7 @@ export class AppContext {
   readonly memoryRepository: MemoryRepository
   readonly memory: MemoryIndexer
   readonly ai: AiEngine
+  readonly blocker: ContentBlocker
   /** Undo closure from the most recent approved AI plan, if it is reversible. */
   lastAiUndo: (() => void) | null = null
   readonly downloads: DownloadManager
@@ -75,6 +77,13 @@ export class AppContext {
     this.memoryRepository = new MemoryRepository(this.db)
     this.memory = new MemoryIndexer(this.memoryRepository, this.settings)
     this.ai = new AiEngine(this.settings, this.db)
+    // Hooks are replaced in start(); until then a blocked navigation has no UI
+    // to report to, but the request is still refused.
+    this.blocker = new ContentBlocker(this.settings, {
+      onMaliciousNavigation: () => {},
+      onCountsChanged: () => {},
+      resolvePageUrl: (webContentsId) => this.pageUrlFor(webContentsId)
+    })
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
@@ -83,6 +92,9 @@ export class AppContext {
     )
     this.downloadRepository = new DownloadRepository(this.db)
     this.sessions = new SessionRegistry(this.hardening)
+    // Registered before any session is acquired, so every partition — including
+    // an isolated workspace's — gets the filter rather than browsing unfiltered.
+    this.sessions.setContentBlocker(this.blocker)
     this.downloads = new DownloadManager(this.downloadRepository, this.settings, {
       onChanged: (items) => this.broadcastAll('downloads:changed', items),
       getWindow: () => this.focusedWindow()?.browserWindow ?? null
@@ -189,6 +201,24 @@ export class AppContext {
 
   allWindows(): readonly BrowserWindowController[] {
     return this.windows
+  }
+
+  /**
+   * URL of the page a WebContents is showing.
+   *
+   * Read from the live contents rather than our tab snapshot, because a request
+   * can fire mid-navigation, before the snapshot has caught up.
+   */
+  pageUrlFor(webContentsId: number): string | null {
+    for (const window of this.windows) {
+      for (const tab of window.tabs.allTabs()) {
+        const contents = tab.contents
+        if (contents && !contents.isDestroyed() && contents.id === webContentsId) {
+          return contents.getURL() || tab.snapshot.url
+        }
+      }
+    }
+    return null
   }
 
   /** Pushes the workspace list to one window after a change it did not make. */

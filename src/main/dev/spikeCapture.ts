@@ -168,6 +168,97 @@ async function captureOmniboxDropdown(
 }
 
 /**
+ * Dev-only content-blocker verification.
+ *
+ * Loads real pages that carry advertising and analytics, and confirms requests
+ * were actually cancelled — not merely that the engine's unit tests pass. Also
+ * checks a known-malicious host is refused.
+ */
+export async function runBlockingCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  blocker: {
+    countFor: (webContentsId: number) => number
+    diagnostics: { seen: number; withContentsId: number; thirdParty: number; resolvedPage: number }
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // Start from a blank page: a restored session could otherwise leave the tab
+  // on whatever the last run ended with.
+  window.tabs.navigate(activeId, 'about:blank')
+  await delay(1500)
+
+  /*
+   * Deterministic test.
+   *
+   * Loading a news site and hoping it serves ads is not a test — a consent
+   * dialog or a quiet ad auction makes it pass or fail for reasons that have
+   * nothing to do with the filter. Instead, load an ordinary page and have it
+   * request a known tracker directly: that is unambiguously a third-party
+   * request to a listed domain, and it either gets cancelled or it does not.
+   */
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(4000)
+
+  const page = window.tabs.findById(activeId)?.contents
+  if (page) {
+    const probe = (await page.executeJavaScript(
+      `(async () => {
+         const attempt = async (url) => {
+           try { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return 'allowed'; }
+           catch { return 'blocked'; }
+         };
+         return {
+           tracker: await attempt('https://www.google-analytics.com/analytics.js'),
+           ads: await attempt('https://securepubads.g.doubleclick.net/tag/js/gpt.js'),
+           innocent: await attempt('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js')
+         };
+       })()`,
+      true
+    )) as { tracker: string; ads: string; innocent: string }
+
+    log.info(
+      `blocking probe: tracker=${probe.tracker} ads=${probe.ads} innocent=${probe.innocent}`
+    )
+    if (probe.tracker === 'blocked' && probe.ads === 'blocked' && probe.innocent === 'allowed') {
+      log.info('blocking probe: PASS — trackers cancelled, unrelated CDN untouched')
+    } else {
+      log.error('blocking probe: FAIL — filter did not behave as expected')
+    }
+  }
+  await delay(1500)
+
+  const contents = window.tabs.findById(activeId)?.contents
+  const blocked = contents ? blocker.countFor(contents.id) : 0
+  const d = blocker.diagnostics
+  log.info(
+    `blocking probe: seen=${d.seen} withContentsId=${d.withContentsId} ` +
+      `resolvedPage=${d.resolvedPage} thirdParty=${d.thirdParty} blocked=${blocked}`
+  )
+  log.info(`blocking probe: tab is at ${window.tabs.findById(activeId)?.snapshot.url}`)
+
+  if (blocked > 0) {
+    log.info('blocking probe: PASS — ad and tracker requests were cancelled')
+  } else {
+    log.error('blocking probe: FAIL — nothing was blocked')
+  }
+
+  // Malicious navigation must be refused outright.
+  window.tabs.navigate(activeId, 'https://malware.testing.google.test/testing/malware/')
+  await delay(4000)
+  const after = window.tabs.snapshot().tabs.find((t) => t.id === activeId)
+  log.info(`blocking probe: malicious navigation left tab at ${after?.url}`)
+
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
  * Dev-only Phase 5 verification.
  *
  * Exercises the whole chain against real pages: consent gate → Readability

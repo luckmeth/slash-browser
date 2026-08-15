@@ -32,6 +32,24 @@ export const SettingsSchema = z.object({
   /** Prompt for a save location on every download instead of using the folder above. */
   askWhereToSaveDownloads: z.boolean().default(false),
 
+  // --- content blocking ------------------------------------------------------
+  /**
+   * Block advertising and tracking requests.
+   *
+   * On by default: these requests are cancelled before they leave the machine,
+   * so this saves bandwidth and time as well as removing the ads.
+   */
+  blockAds: z.boolean().default(true),
+  /**
+   * Refuse navigation to hosts on the known-malicious list.
+   *
+   * This is domain reputation, not virus scanning — a browser cannot inspect a
+   * file for malware, and the UI must not imply that it does.
+   */
+  blockMaliciousSites: z.boolean().default(true),
+  /** Sites the user has turned blocking off for. */
+  blockingAllowedSites: z.array(z.string()).default([]),
+
   // --- Phase 3: performance --------------------------------------------------
   performanceMode: z.enum(['off', 'balanced', 'aggressive']).default('balanced'),
 

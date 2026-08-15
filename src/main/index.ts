@@ -49,6 +49,16 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const blockPath = process.env['ADAPTIVE_BLOCK_CAPTURE']
+    if (blockPath) {
+      void import('./dev/spikeCapture').then(({ runBlockingCapture }) =>
+        runBlockingCapture(window, blockPath, {
+          countFor: (id) => context.blocker.countFor(id),
+          diagnostics: context.blocker.diagnostics
+        })
+      )
+    }
+
     const memoryPath = process.env['ADAPTIVE_MEMORY_CAPTURE']
     if (memoryPath) {
       void import('./dev/spikeCapture').then(({ runMemoryCapture }) =>

@@ -11,6 +11,7 @@ import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
 import { MemoryResultSchema, MemoryStatsSchema, ParsedQuerySchema } from '../types/memory'
+import { BlockingStatusSchema } from '../types/blocking'
 import {
   ActionPlanSchema,
   AiActivitySchema,
@@ -397,6 +398,15 @@ export const invokeContracts = {
   'ai:activity': {
     request: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
     response: z.array(AiActivitySchema)
+  },
+
+  'blocking:status': {
+    request: z.object({ tabId: z.string() }),
+    response: BlockingStatusSchema
+  },
+  'blocking:setSiteAllowed': {
+    request: z.object({ host: z.string(), allowed: z.boolean(), tabId: z.string() }),
+    response: BlockingStatusSchema
   },
 
   'history:search': {

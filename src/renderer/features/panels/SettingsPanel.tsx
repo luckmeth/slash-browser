@@ -31,6 +31,65 @@ export function SettingsPanel(): React.JSX.Element {
         </Field>
       </Group>
 
+      <Group title="Content blocking">
+        <Toggle
+          label="Block ads and trackers"
+          hint="Requests are cancelled before they leave your machine, so they cost no bandwidth or time."
+          checked={settings.blockAds}
+          onChange={(blockAds) => update({ blockAds })}
+        />
+        <Toggle
+          label="Refuse known-malicious sites"
+          hint="Checks the address against a list of known-bad domains."
+          checked={settings.blockMaliciousSites}
+          onChange={(blockMaliciousSites) => update({ blockMaliciousSites })}
+        />
+        {/*
+          Said plainly, because a shield icon invites the assumption that this is
+          antivirus. It is not, and a browser cannot be.
+        */}
+        <p className="pt-1 text-xs text-[var(--color-text-muted)]">
+          This is not a virus scanner. A browser cannot inspect a file for malware — keep Windows
+          Security on for that. The malicious-site list is also small and bundled; real coverage
+          needs a continuously updated feed, which this build does not have.
+        </p>
+      </Group>
+
+      <Group title="Browsing memory">
+        <Toggle
+          label="Make visited pages searchable"
+          hint="Records the address and title of pages you visit."
+          checked={settings.indexHistory}
+          onChange={(indexHistory) => update({ indexHistory })}
+        />
+        <Toggle
+          label="Also index page text"
+          hint="Lets you find a page by words that were on it, not just its title. Stored only on this device."
+          checked={settings.indexPageContent}
+          disabled={!settings.indexHistory}
+          onChange={(indexPageContent) => update({ indexPageContent })}
+        />
+        <Toggle
+          label="Keep private windows out of memory"
+          checked={settings.excludePrivateFromMemory}
+          onChange={(excludePrivateFromMemory) => update({ excludePrivateFromMemory })}
+        />
+      </Group>
+
+      <Group title="Restore points">
+        <Toggle
+          label="Reopen tabs from the last session"
+          checked={settings.restoreTabsOnStartup}
+          onChange={(restoreTabsOnStartup) => update({ restoreTabsOnStartup })}
+        />
+        <Toggle
+          label="Also restore what you typed into forms"
+          hint="Off by default: this writes form contents — including a half-typed password — into the local database."
+          checked={settings.restoreFormState}
+          onChange={(restoreFormState) => update({ restoreFormState })}
+        />
+      </Group>
+
       <Group title="Privacy">
         <Toggle
           label="Record browsing history"
@@ -55,17 +114,28 @@ export function SettingsPanel(): React.JSX.Element {
       </Group>
 
       {/*
-        Features whose engines do not exist yet are shown as disabled rather than
-        hidden, so the roadmap is visible and no control implies capability the
-        build does not have.
+        Capabilities that genuinely are not built are listed as such rather than
+        shown as controls, so nothing on this screen implies something the build
+        cannot do.
       */}
-      <Group title="Not yet available">
-        <Toggle label="Index page content for search" checked={false} disabled hint="Phase 5 — Web Memory" onChange={() => {}} />
-        <Toggle label="Semantic search" checked={false} disabled hint="Phase 5 — opt-in local model" onChange={() => {}} />
-        <Toggle label="AI assistance" checked={false} disabled hint="Phase 7 — requires your own API key" onChange={() => {}} />
+      <Group title="Not built yet">
+        <Toggle
+          label="Semantic search"
+          checked={false}
+          disabled
+          hint="Keyword search works. Finding a page by a paraphrase needs a local embedding model, which is not installed."
+          onChange={() => {}}
+        />
+        <Toggle
+          label="Private browsing"
+          checked={false}
+          disabled
+          hint="There is no private window yet. Memory already honours the setting for when there is."
+          onChange={() => {}}
+        />
         <p className="pt-1 text-xs text-[var(--color-text-muted)]">
-          Permission controls arrive in Phase 4. Until then this build denies every site permission
-          request — camera, microphone, location and notifications will not work.
+          This build also has no automatic updates. Chromium ships security fixes regularly, so
+          check for a newer version yourself rather than assuming this one is current.
         </p>
       </Group>
     </div>

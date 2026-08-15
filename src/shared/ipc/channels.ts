@@ -110,6 +110,10 @@ export const INVOKE_CHANNELS = [
   'ai:undo',
   'ai:activity',
 
+  // --- content blocking ---
+  'blocking:status',
+  'blocking:setSiteAllowed',
+
   // --- history ---
   'history:search',
   'history:delete',
