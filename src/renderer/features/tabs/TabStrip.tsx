@@ -145,9 +145,11 @@ function TabItem({
       className={[
         'app-no-drag group relative flex h-[31px] shrink-0 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-[13px] transition-colors',
         compact ? 'justify-center' : '',
+        // The active tab gets a lit pane; inactive ones stay legible rather than
+        // fading into the glass, which is what happened at lower contrast.
         isActive
-          ? 'bg-[var(--color-surface-raised)] text-[var(--color-text-primary)] shadow-[0_-1px_0_var(--color-border-subtle),1px_0_0_var(--color-border-subtle),-1px_0_0_var(--color-border-subtle)]'
-          : 'text-[var(--color-text-muted)] hover:bg-white/[0.06]',
+          ? 'bg-[var(--glass-high)] text-[var(--color-text-primary)] shadow-[inset_0_1px_0_var(--glass-edge-strong)]'
+          : 'text-[var(--color-text-muted)] hover:bg-white/[0.10]',
         isDropTarget ? 'ring-2 ring-[var(--color-accent)] ring-inset' : ''
       ].join(' ')}
     >

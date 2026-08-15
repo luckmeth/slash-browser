@@ -1,6 +1,11 @@
 import { join } from 'node:path'
 import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'electron'
-import { VIEW_KIND, WORKSPACE_RAIL_WIDTH, TITLE_BAR_HEIGHT } from '@shared/constants'
+import {
+  VIEW_KIND,
+  WORKSPACE_RAIL_WIDTH,
+  TITLE_BAR_HEIGHT,
+  PAGE_INSET
+} from '@shared/constants'
 import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
 import type { OmniboxState } from '@shared/types/omnibox'
@@ -197,6 +202,9 @@ export class BrowserWindowController {
     // The workspace rail is always visible in Phase 2, so the page view is
     // permanently inset by its width. Both sides read the same constant.
     this.layout.setSidebarWidth(WORKSPACE_RAIL_WIDTH)
+    // Leaves a gutter of glass around the page, so the chrome frames it rather
+    // than the page covering every pixel below the toolbar.
+    this.layout.setPageInset(PAGE_INSET)
 
     this.window.on('resize', () => this.applyLayout())
     this.applyLayout()

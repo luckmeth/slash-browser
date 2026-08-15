@@ -1,5 +1,5 @@
 import type { BaseWindow, Rectangle, Session, WebContents, WebContentsView } from 'electron'
-import { CLOSED_TAB_STACK_LIMIT } from '@shared/constants'
+import { CLOSED_TAB_STACK_LIMIT, PAGE_RADIUS } from '@shared/constants'
 import {
   NEW_TAB_URL,
   isInternalUrl,
@@ -701,6 +701,9 @@ export class TabManager {
     if (!view || view === this.attachedView) return
     this.detachCurrentView()
     view.setBounds(this.pageBounds)
+    // Rounded to match the gutter the layout leaves around it, so the page reads
+    // as a pane sitting on the glass rather than a rectangle bolted into it.
+    view.setBorderRadius(PAGE_RADIUS)
     // Covers the case where this view was previously frozen.
     view.setVisible(true)
     this.window.contentView.addChildView(view, PAGE_VIEW_INDEX)

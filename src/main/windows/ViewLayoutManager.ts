@@ -47,6 +47,20 @@ export class ViewLayoutManager {
     this.rightPanelWidth = Math.max(0, Math.round(px))
   }
 
+  /**
+   * Gutter between the page view and the window edge.
+   *
+   * The page is opaque native content. Without a gutter it fills every pixel
+   * below the toolbar, so the only glass anyone ever sees is a couple of thin
+   * bars — which is why the window did not read as glass at all. Insetting the
+   * page turns the chrome into a visible frame around it.
+   */
+  setPageInset(px: number): void {
+    this.pageInset = Math.max(0, Math.round(px))
+  }
+
+  private pageInset = 0
+
   compute(contentWidth: number, contentHeight: number): LayoutRects {
     const width = Math.max(0, Math.round(contentWidth))
     const height = Math.max(0, Math.round(contentHeight))
@@ -57,15 +71,21 @@ export class ViewLayoutManager {
     const pageY = Math.min(this.chromeHeight, height)
     const pageX = Math.min(this.sidebarWidth, width)
     const available = Math.max(0, width - pageX)
+    const rawWidth = Math.max(0, available - Math.min(this.rightPanelWidth, available))
+    const rawHeight = Math.max(0, height - pageY)
+
+    // The gutter is dropped entirely when the window is too small for it, rather
+    // than eating into a page area that is already cramped.
+    const inset = rawWidth > this.pageInset * 4 && rawHeight > this.pageInset * 4 ? this.pageInset : 0
 
     return {
       chrome: full,
       full,
       page: {
-        x: pageX,
+        x: pageX + inset,
         y: pageY,
-        width: Math.max(0, available - Math.min(this.rightPanelWidth, available)),
-        height: Math.max(0, height - pageY)
+        width: Math.max(0, rawWidth - inset * 2),
+        height: Math.max(0, rawHeight - inset)
       }
     }
   }

@@ -21,8 +21,13 @@
   --color-surface: #0d0f14;
   --color-surface-raised: #151922;
   --color-border-subtle: #262c3a;
-  --color-text-primary: #eef1f7;
-  --color-text-muted: #949cb0;
+  --color-text-primary: #f2f5fa;
+  /*
+   * Brighter than a conventional muted grey. Secondary text here sits on
+   * heavily translucent glass whose backdrop is the user's wallpaper, so the
+   * usual low-contrast grey becomes unreadable rather than merely quiet.
+   */
+  --color-text-muted: #b9c2d4;
   --color-accent: #6ea8fe;
   --color-good: #58d39b;
   --color-bad: #f2777a;
@@ -41,21 +46,35 @@
    * Translucent enough to read as glass; opaque enough that text is never at
    * the mercy of a wallpaper.
    */
-  --glass-base: rgba(12, 14, 19, 0.86);
-  --glass-raised: rgba(26, 30, 41, 0.82);
-  --glass-high: rgba(38, 44, 60, 0.86);
-  --glass-hover: rgba(255, 255, 255, 0.07);
-  --glass-active: rgba(255, 255, 255, 0.12);
-  /* Behind full content areas — the new tab page, panels of text. */
-  --glass-page: rgba(11, 13, 18, 0.94);
+  /*
+   * Chrome bars carry only a light tint. They sit beside the page rather than
+   * behind a wall of text, and they are thin, so the acrylic can dominate —
+   * which is what actually makes the window read as glass.
+   */
+  /*
+   * The bars carry a little more fill than the floating surfaces: they hold the
+   * tab labels and toolbar icons, which have to stay legible over anything.
+   */
+  --glass-base: rgba(14, 17, 24, 0.55);
+  --glass-raised: rgba(46, 54, 72, 0.34);
+  --glass-high: rgba(72, 82, 105, 0.42);
+  --glass-hover: rgba(255, 255, 255, 0.10);
+  --glass-active: rgba(255, 255, 255, 0.18);
+  /*
+   * Reading surfaces stay far more opaque. A page of text whose contrast shifts
+   * with the wallpaper behind the window is simply hard to read, and no amount
+   * of glass is worth that.
+   */
+  --glass-page: rgba(11, 13, 18, 0.9);
 
   /* Hairlines. Brighter on top, so panes look lit from above. */
-  --glass-edge: rgba(255, 255, 255, 0.09);
-  --glass-edge-strong: rgba(255, 255, 255, 0.16);
+  /* Brighter now: at low fill opacity the edge is what defines a pane's shape. */
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-edge-strong: rgba(255, 255, 255, 0.28);
 
-  --blur-sm: 18px;
-  --blur-md: 30px;
-  --blur-lg: 48px;
+  --blur-sm: 20px;
+  --blur-md: 40px;
+  --blur-lg: 64px;
 
   --shadow-panel: 0 12px 40px rgba(0, 0, 0, 0.45);
   --shadow-float: 0 20px 60px rgba(0, 0, 0, 0.55);
@@ -89,8 +108,21 @@ body {
  */
 .glass {
   background: var(--glass-base);
-  backdrop-filter: blur(var(--blur-md)) saturate(140%);
-  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(140%);
+  backdrop-filter: blur(var(--blur-md)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(180%);
+}
+
+/*
+ * Legibility aid for text sitting on heavily translucent glass.
+ *
+ * At this fill opacity the backdrop can be almost any colour, so a faint dark
+ * halo keeps labels readable without adding an opaque plate behind them. This
+ * is the compromise that lets the chrome be genuinely transparent instead of
+ * only slightly tinted.
+ */
+.glass,
+.glass-float {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
 }
 
 .glass-raised {

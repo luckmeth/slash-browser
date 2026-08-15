@@ -124,6 +124,33 @@ export class SessionHardening {
     app.userAgentFallback = cleaned
     log.info(`user agent: ${cleaned}`)
   }
+
+  /*
+   * NOTE ON GOOGLE SIGN-IN, and why there is no workaround here.
+   *
+   * Google refuses sign-in from this browser with "This browser or app may not
+   * be secure". The User-Agent is already a clean Chrome string — verified — so
+   * that is not the trigger. The remaining signal is Client Hints:
+   *
+   *   navigator.userAgentData.brands
+   *     → [{ "Not;A=Brand" }, { "Chromium", "150" }]
+   *
+   * A real browser also reports a *product* brand there: Chrome reports "Google
+   * Chrome", Edge "Microsoft Edge", Brave "Brave". Electron reports none,
+   * because that list comes from Chromium's embedder identity and Electron does
+   * not expose an API to set it. An attempt to set it via a command-line switch
+   * was tried and verified to do nothing.
+   *
+   * The only remaining route would be injecting script into every page to
+   * redefine `navigator.userAgentData` and claim to be Google Chrome. That is
+   * deliberately not done: the check exists to keep credentials out of embedded
+   * frameworks that can read them, and defeating it by impersonating a browser
+   * we are not is the wrong thing to build into a browser that tells its users
+   * the truth elsewhere.
+   *
+   * Google allowlists browsers. Brave and Vivaldi are accepted because they went
+   * through that process, not because they spoofed their way in.
+   */
 }
 
 function originOf(url: string): string {

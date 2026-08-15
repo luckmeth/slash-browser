@@ -21,6 +21,15 @@ export const CHROME_HEIGHT = TITLE_BAR_HEIGHT + TOOLBAR_HEIGHT
 export const WINDOW_CONTROLS_WIDTH = 138
 
 /**
+ * Gutter between the page and the window edge, so the glass chrome frames it.
+ * Matched by the page view's corner radius below.
+ */
+export const PAGE_INSET = 10
+
+/** Corner radius applied to the native page view. */
+export const PAGE_RADIUS = 12
+
+/**
  * Width of the workspace switcher rail on the left edge.
  *
  * Shared because the renderer draws the rail and the main process must inset the
