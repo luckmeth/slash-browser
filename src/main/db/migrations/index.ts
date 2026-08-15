@@ -238,13 +238,42 @@ const m006_memory: Migration = {
   `
 }
 
+const m007_ai: Migration = {
+  version: 7,
+  name: 'ai',
+  sql: /* sql */ `
+    -- The API key, encrypted by the OS keychain (DPAPI on Windows) before it
+    -- reaches this table. A BLOB, not TEXT: it is ciphertext, and storing a
+    -- provider key in readable form next to the browsing history would be
+    -- indefensible.
+    CREATE TABLE ai_secrets (
+      id      INTEGER PRIMARY KEY CHECK (id = 1),
+      api_key BLOB NOT NULL
+    );
+
+    -- Every proposal and every execution, so "what did the AI do" is answerable
+    -- after the fact rather than a matter of trust.
+    CREATE TABLE ai_activity (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      at            INTEGER NOT NULL,
+      request       TEXT    NOT NULL,
+      understanding TEXT    NOT NULL DEFAULT '',
+      outcome       TEXT    NOT NULL,
+      action_count  INTEGER NOT NULL DEFAULT 0,
+      detail        TEXT    NOT NULL DEFAULT ''
+    );
+    CREATE INDEX idx_ai_activity_at ON ai_activity (at DESC);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
   m003_workspaces,
   m004_permissions,
   m005_snapshots,
-  m006_memory
+  m006_memory,
+  m007_ai
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

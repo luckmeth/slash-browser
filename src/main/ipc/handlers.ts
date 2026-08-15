@@ -8,6 +8,32 @@ import { resolveInput } from '../navigation/UrlResolver'
 import { showTabContextMenu } from '../menus/ContextMenus'
 import { buildSuggestions } from '../navigation/SuggestionEngine'
 import { parseQuery } from '../memory/parseQuery'
+import { ActionExecutor } from '../ai/ActionExecutor'
+import { ContextBuilder } from '../ai/ContextBuilder'
+import type { BrowserWindowController } from '../windows/BrowserWindowController'
+
+/**
+ * Assembles the AI context for a window.
+ *
+ * A single helper so every AI channel builds context the same way — the egress
+ * preview and the actual request must never be able to disagree about what is
+ * sent.
+ */
+function buildContext(
+  ctx: AppContext,
+  window: BrowserWindowController,
+  includePageContent: boolean
+): ContextBuilder {
+  const snapshot = window.tabs.snapshot()
+  return new ContextBuilder({
+    tabs: snapshot.tabs,
+    workspaces: ctx.workspaces.list(),
+    activeWorkspaceId: window.tabs.currentWorkspaceId,
+    excludedOrigins: ctx.settings.getAll().excludedOrigins,
+    // Requires both the standing setting and this request's opt-in.
+    includePageContent: includePageContent && ctx.settings.getAll().aiMayReadPageContent
+  })
+}
 
 /**
  * Registers every Phase 1 channel. Each must already exist in
@@ -553,6 +579,99 @@ export function registerHandlers(ctx: AppContext): void {
     ctx.memoryRepository.clearAll()
     return ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
   })
+
+  // --- ai action engine -----------------------------------------------------
+
+  ipc.handle('ai:status', () => ok(ctx.ai.status()))
+
+  ipc.handle('ai:setApiKey', (request) => {
+    const stored = ctx.ai.setApiKey(request.key)
+    return ok({
+      stored,
+      reason: stored
+        ? null
+        : 'This system has no secure credential store available, so the key was not saved. Storing it in plain text would not be acceptable.'
+    })
+  })
+
+  ipc.handle('ai:egressPreview', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(buildContext(ctx, window, request.includePageContent).preview())
+  })
+
+  ipc.handle('ai:propose', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const executor = new ActionExecutor(window, ctx.workspaces, ctx.bookmarks)
+    const built = buildContext(ctx, window, request.includePageContent)
+    const result = await ctx.ai.proposePlan(request.request, built.build(), (actions) =>
+      executor.preview(actions)
+    )
+
+    if (!result.ok) {
+      ctx.ai.logActivity(request.request, '', 'failed', 0, result.error)
+      return ok({ plan: null, error: result.error })
+    }
+    ctx.ai.logActivity(
+      request.request,
+      result.plan.understanding,
+      'proposed',
+      result.plan.actions.length,
+      result.plan.refusal ?? ''
+    )
+    return ok({ plan: result.plan, error: null })
+  })
+
+  ipc.handle('ai:approve', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    // Consumed, so a plan can run at most once — approving twice must not
+    // duplicate the effects.
+    const plan = ctx.ai.takePlan(request.planId)
+    if (!plan) return err('NOT_FOUND', 'That plan has expired. Ask again.')
+
+    const executor = new ActionExecutor(window, ctx.workspaces, ctx.bookmarks)
+    const result = executor.execute(plan.actions)
+    ctx.lastAiUndo = result.undo
+
+    ctx.ai.logActivity(
+      '',
+      plan.understanding,
+      'executed',
+      result.applied,
+      result.messages.join('; ')
+    )
+    ctx.broadcastWorkspacesTo(window)
+
+    return ok({
+      applied: result.applied,
+      skipped: result.skipped,
+      messages: result.messages,
+      canUndo: result.undo !== null
+    })
+  })
+
+  ipc.handle('ai:cancel', (request) => {
+    const plan = ctx.ai.takePlan(request.planId)
+    if (plan) ctx.ai.logActivity('', plan.understanding, 'cancelled', plan.actions.length, '')
+    return ok(undefined)
+  })
+
+  ipc.handle('ai:undo', (_req, context) => {
+    const undo = ctx.lastAiUndo
+    if (!undo) return ok({ undone: false })
+    undo()
+    ctx.lastAiUndo = null
+    ctx.ai.logActivity('', '', 'undone', 0, '')
+    const window = windowOf(context.sender)
+    if (window) ctx.broadcastWorkspacesTo(window)
+    return ok({ undone: true })
+  })
+
+  ipc.handle('ai:activity', (request) => ok(ctx.ai.listActivity(request.limit)))
 
   // --- history --------------------------------------------------------------
 

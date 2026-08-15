@@ -84,6 +84,9 @@ export function App(): React.JSX.Element {
         case 'open-memory':
           togglePanel('memory')
           break
+        case 'open-ai':
+          togglePanel('ai')
+          break
         case 'close-panel':
           setPanel('none')
           break

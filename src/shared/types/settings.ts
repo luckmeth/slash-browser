@@ -67,7 +67,9 @@ export const SettingsSchema = z.object({
   /** Never sent to the renderer; the main process substitutes a redaction marker. */
   aiModel: z.string().default('claude-sonnet-5'),
   /** Page *content* may only reach a provider with a per-request approval too. */
-  aiMayReadPageContent: z.boolean().default(false)
+  aiMayReadPageContent: z.boolean().default(false),
+  /** For the OpenAI-compatible adapter — Ollama, LM Studio, a local server. */
+  aiBaseUrl: z.string().default('http://localhost:11434/v1')
 })
 
 export type Settings = z.infer<typeof SettingsSchema>

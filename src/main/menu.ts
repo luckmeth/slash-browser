@@ -296,6 +296,11 @@ export function buildApplicationMenu(ctx: AppContext): void {
           accelerator: 'CommandOrControl+Shift+F',
           click: send('open-memory')
         },
+        {
+          label: 'Assistant…',
+          accelerator: 'CommandOrControl+Shift+A',
+          click: send('open-ai')
+        },
         { label: 'Site Permissions', click: send('open-permissions') },
         {
           label: 'Restore Points…',

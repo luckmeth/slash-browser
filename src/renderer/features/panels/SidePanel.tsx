@@ -10,6 +10,7 @@ import { PerformancePanel } from '../performance/PerformancePanel'
 import { PermissionsPanel } from '../permissions/PermissionsPanel'
 import { TimeMachinePanel } from '../timemachine/TimeMachinePanel'
 import { MemoryPanel } from '../memory/MemoryPanel'
+import { AiPanel } from '../ai/AiPanel'
 
 export const SIDE_PANEL_WIDTH = 380
 
@@ -21,7 +22,8 @@ const TITLES = {
   performance: 'Performance',
   permissions: 'Permissions',
   timemachine: 'Restore points',
-  memory: 'Browsing memory'
+  memory: 'Browsing memory',
+  ai: 'Assistant'
 } as const
 
 /**
@@ -91,6 +93,7 @@ export function SidePanel(): React.JSX.Element | null {
             {panel === 'permissions' && <PermissionsPanel />}
             {panel === 'timemachine' && <TimeMachinePanel />}
             {panel === 'memory' && <MemoryPanel />}
+            {panel === 'ai' && <AiPanel />}
           </>
         )}
       </div>

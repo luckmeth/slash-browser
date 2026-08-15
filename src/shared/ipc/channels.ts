@@ -100,6 +100,16 @@ export const INVOKE_CHANNELS = [
   'memory:forget',
   'memory:clear',
 
+  // --- ai action engine ---
+  'ai:status',
+  'ai:setApiKey',
+  'ai:egressPreview',
+  'ai:propose',
+  'ai:approve',
+  'ai:cancel',
+  'ai:undo',
+  'ai:activity',
+
   // --- history ---
   'history:search',
   'history:delete',

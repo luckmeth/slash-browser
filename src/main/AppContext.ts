@@ -17,6 +17,7 @@ import { SnapshotRepository } from './db/repositories/SnapshotRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
 import { MemoryIndexer } from './memory/MemoryIndexer'
+import { AiEngine } from './ai/AiEngine'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -45,6 +46,9 @@ export class AppContext {
   readonly snapshots: SessionSnapshotManager
   readonly memoryRepository: MemoryRepository
   readonly memory: MemoryIndexer
+  readonly ai: AiEngine
+  /** Undo closure from the most recent approved AI plan, if it is reversible. */
+  lastAiUndo: (() => void) | null = null
   readonly downloads: DownloadManager
   readonly sessions: SessionRegistry
   private readonly hardening = new SessionHardening()
@@ -70,6 +74,7 @@ export class AppContext {
     })
     this.memoryRepository = new MemoryRepository(this.db)
     this.memory = new MemoryIndexer(this.memoryRepository, this.settings)
+    this.ai = new AiEngine(this.settings, this.db)
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
@@ -184,6 +189,18 @@ export class AppContext {
 
   allWindows(): readonly BrowserWindowController[] {
     return this.windows
+  }
+
+  /** Pushes the workspace list to one window after a change it did not make. */
+  broadcastWorkspacesTo(window: BrowserWindowController): void {
+    this.ipc.broadcast(
+      'workspaces:snapshot',
+      {
+        workspaces: this.workspaces.list(),
+        activeWorkspaceId: window.tabs.currentWorkspaceId
+      },
+      window.privilegedContents()
+    )
   }
 
   /** The window containing a given tab. */

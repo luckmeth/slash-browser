@@ -7,6 +7,12 @@ import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
 import { MemoryResultSchema, MemoryStatsSchema, ParsedQuerySchema } from '../types/memory'
 import {
+  ActionPlanSchema,
+  AiActivitySchema,
+  AiStatusSchema,
+  EgressPreviewSchema
+} from '../types/ai'
+import {
   PermissionEventSchema,
   PermissionGrantSchema,
   PermissionKindSchema,
@@ -351,6 +357,43 @@ export const invokeContracts = {
   'memory:forget': { request: z.object({ url: z.string() }), response: MemoryStatsSchema },
   'memory:clear': { request: z.void(), response: MemoryStatsSchema },
 
+  'ai:status': { request: z.void(), response: AiStatusSchema },
+  /** The key is write-only across IPC; it is never sent back to the renderer. */
+  'ai:setApiKey': {
+    request: z.object({ key: z.string() }),
+    response: z.object({ stored: z.boolean(), reason: z.string().nullable() })
+  },
+  /** Exactly what would be sent, shown before anything is sent. */
+  'ai:egressPreview': {
+    request: z.object({ includePageContent: z.boolean().default(false) }),
+    response: EgressPreviewSchema
+  },
+  'ai:propose': {
+    request: z.object({
+      request: z.string().min(1).max(500),
+      includePageContent: z.boolean().default(false)
+    }),
+    response: z.object({
+      plan: ActionPlanSchema.nullable(),
+      error: z.string().nullable()
+    })
+  },
+  'ai:approve': {
+    request: z.object({ planId: z.string() }),
+    response: z.object({
+      applied: z.number().int(),
+      skipped: z.number().int(),
+      messages: z.array(z.string()),
+      canUndo: z.boolean()
+    })
+  },
+  'ai:cancel': { request: z.object({ planId: z.string() }), response: z.void() },
+  'ai:undo': { request: z.void(), response: z.object({ undone: z.boolean() }) },
+  'ai:activity': {
+    request: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+    response: z.array(AiActivitySchema)
+  },
+
   'history:search': {
     request: HistoryQuerySchema,
     response: z.array(HistoryEntrySchema)
@@ -430,6 +473,7 @@ export const UiCommandSchema = z.object({
     'open-permissions',
     'open-timemachine',
     'open-memory',
+    'open-ai',
     'bookmark-current-tab',
     'close-panel'
   ])
