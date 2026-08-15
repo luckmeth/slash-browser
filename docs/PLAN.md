@@ -11,8 +11,15 @@
 >   still wins on a newer SQLite and a non-experimental API.
 > - **Both Phase 0 spikes passed**, in dev and in the packaged NSIS build. See `docs/testing/phase-0.md`.
 >
-> **Progress:** Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ — **v0.1 complete.**
-> Phases 4–7 remaining.
+> **Progress:** Phases 0–7 all built ✅, plus a native-shell pass that was not in the
+> original plan. 121 tests, installer builds.
+>
+> **Not launch-ready.** See `docs/RELEASE-READINESS.md` for what stands between this and
+> something you could hand to a stranger — the largest items are code signing and an
+> auto-update channel, neither of which is a coding task.
+>
+> Deliberately not built: the optional local ONNX embedding layer for semantic search
+> (`docs/testing/phase-5.md`), and AI page summarisation (`docs/testing/phase-7.md`).
 > Per-phase test scripts and known gaps live in `docs/testing/phase-N.md`.
 >
 > Two design decisions made during implementation that the plan did not anticipate:
