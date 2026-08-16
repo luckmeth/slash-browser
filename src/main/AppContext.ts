@@ -320,6 +320,12 @@ export class AppContext {
         })
     })
     this.windows.push(window)
+    // `close` fires while the views are still alive; `closed` fires after the
+    // window is gone and has already been removed from this.windows, which is
+    // too late for the session-end snapshot to see any tabs.
+    window.browserWindow.on('close', () => {
+      this.snapshots.retainClosingWindow(window)
+    })
     window.browserWindow.on('closed', () => {
       const index = this.windows.indexOf(window)
       if (index >= 0) this.windows.splice(index, 1)

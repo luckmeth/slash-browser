@@ -53,6 +53,53 @@ export class SessionSnapshotManager {
    * tab has no renderer to ask, so its last known scroll is used instead — which
    * is exactly what was recorded when it was put to sleep.
    */
+  /**
+   * Tab state kept from windows that have already closed.
+   *
+   * Closing the last window destroys it *before* `before-quit` runs, so by the
+   * time the session-end snapshot is taken there are no windows left to read and
+   * nothing gets written. The browser then restored whatever was saved earlier —
+   * an automatic snapshot from up to five minutes back, or the previous run's
+   * session-end. Close five of ten tabs, quit, reopen, and all ten came back,
+   * because the record of you closing them was never made.
+   *
+   * `retainClosingWindow` is called on `close`, which fires while the views are
+   * still alive.
+   */
+  private retained: SnapshotTab[] = []
+
+  /**
+   * Records a window's tabs as it closes.
+   *
+   * Synchronous by necessity — `close` cannot be awaited, and an async read
+   * would race the window's destruction. Scroll offset is the one thing that
+   * needs a live renderer round-trip, so it falls back to the last value the
+   * automatic snapshot captured. Getting the right *set of tabs* matters far
+   * more than getting the exact scroll position of each.
+   */
+  retainClosingWindow(window: { tabs: { allTabs: () => readonly Tab[] } }): void {
+    const includePageState = this.settings.getAll().restoreFormState
+    const tabs: SnapshotTab[] = []
+
+    for (const [index, tab] of window.tabs.allTabs().entries()) {
+      const snap = tab.snapshot
+      if (isInternalUrl(snap.url)) continue
+      tabs.push({
+        url: snap.url,
+        title: snap.title,
+        faviconUrl: snap.faviconUrl,
+        workspaceId: snap.workspaceId,
+        order: index,
+        isPinned: snap.isPinned,
+        scrollY: 0,
+        entries: readEntries(tab, includePageState),
+        activeEntryIndex: readActiveIndex(tab)
+      })
+    }
+
+    this.retained = tabs
+  }
+
   async capture(kind: 'automatic' | 'manual' | 'session-end', label?: string): Promise<number | null> {
     const tabs: SnapshotTab[] = []
     const includePageState = this.settings.getAll().restoreFormState
@@ -77,6 +124,25 @@ export class SessionSnapshotManager {
           activeEntryIndex: readActiveIndex(tab)
         })
       }
+    }
+
+    // Every window is already gone — the normal case when quitting by closing
+    // the last one. Use what was retained as it closed rather than writing
+    // nothing and leaving a stale snapshot to be restored.
+    if (tabs.length === 0 && kind === 'session-end' && this.retained.length > 0) {
+      const id = this.repository.create(label ?? defaultLabel(kind), kind, this.retained)
+      log.info(`captured ${kind} snapshot #${id} with ${this.retained.length} retained tab(s)`)
+      this.repository.trimSessionEnd(SESSION_END_KEEP)
+      this.retained = []
+      return id
+    }
+
+    // A deliberately emptied session must be recorded as empty, or the next
+    // launch reopens the tabs the user just closed.
+    if (tabs.length === 0 && kind === 'session-end') {
+      this.repository.create(label ?? defaultLabel(kind), kind, [])
+      this.repository.trimSessionEnd(SESSION_END_KEEP)
+      return null
     }
 
     if (tabs.length === 0) return null
