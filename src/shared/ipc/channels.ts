@@ -161,7 +161,10 @@ export const EVENT_CHANNELS = [
   /** Menu accelerators that must be handled by the UI, not the main process. */
   'ui:command',
   /** Slash Shield held a popup; the chrome view offers it to the user. */
-  'shield:popupBlocked'
+  'shield:popupBlocked',
+  /** A top-level navigation was refused, or flagged and allowed. */
+  'shield:navigationBlocked',
+  'shield:navigationWarned'
 ] as const
 
 export type EventChannel = (typeof EVENT_CHANNELS)[number]

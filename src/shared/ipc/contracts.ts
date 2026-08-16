@@ -11,7 +11,11 @@ import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
 import { MemoryResultSchema, MemoryStatsSchema, ParsedQuerySchema } from '../types/memory'
-import { BlockingStatusSchema, PopupBlockedSchema } from '../types/blocking'
+import {
+  BlockingStatusSchema,
+  PopupBlockedSchema,
+  NavigationNoticeSchema
+} from '../types/blocking'
 import {
   ActionPlanSchema,
   AiActivitySchema,
@@ -547,7 +551,9 @@ export const eventContracts = {
   'permissions:prompt': PermissionRequestSchema.nullable(),
   'permissions:changed': z.array(PermissionGrantSchema),
   'ui:command': UiCommandSchema,
-  'shield:popupBlocked': PopupBlockedSchema
+  'shield:popupBlocked': PopupBlockedSchema,
+  'shield:navigationBlocked': NavigationNoticeSchema,
+  'shield:navigationWarned': NavigationNoticeSchema
 } as const satisfies Record<EventChannel, z.ZodType>
 
 export type EventPayload<C extends EventChannel> = z.infer<(typeof eventContracts)[C]>

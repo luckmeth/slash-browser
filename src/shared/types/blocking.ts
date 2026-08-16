@@ -78,3 +78,16 @@ export const PopupBlockedSchema = z.object({
   explanation: z.string()
 })
 export type PopupBlocked = z.infer<typeof PopupBlockedSchema>
+
+/**
+ * A navigation Slash Shield refused, or flagged and allowed.
+ *
+ * Carries the destination host and a plain-language reason. The wording never
+ * asserts the site is malicious unless a rule said so — a fast redirect chain is
+ * a pattern, not evidence, and the copy reflects that difference.
+ */
+export const NavigationNoticeSchema = z.object({
+  host: z.string(),
+  explanation: z.string()
+})
+export type NavigationNotice = z.infer<typeof NavigationNoticeSchema>

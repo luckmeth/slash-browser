@@ -41,6 +41,13 @@ export interface WindowDeps {
   onPageLoaded: (contents: WebContents, url: string) => void
   /** Slash Shield's verdict on a `window.open` from a page in this window. */
   shouldAllowPopup: (tabId: string, url: string, pageUrl: string, webContentsId: number) => boolean
+  /** Slash Shield's verdict on a page-initiated top-level navigation. */
+  shouldAllowNavigation: (
+    tabId: string,
+    url: string,
+    pageUrl: string,
+    webContentsId: number
+  ) => boolean
 }
 
 /**
@@ -184,6 +191,8 @@ export class BrowserWindowController {
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
         shouldAllowPopup: (tab, url, webContentsId) =>
           this.deps.shouldAllowPopup(tab.id, url, tab.snapshot.url, webContentsId),
+        shouldAllowNavigation: (tab, url, webContentsId) =>
+          this.deps.shouldAllowNavigation(tab.id, url, tab.snapshot.url, webContentsId),
         onPageLoaded: (tab, url) => {
           const contents = tab.contents
           if (contents) void this.deps.onPageLoaded(contents, url)

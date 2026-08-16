@@ -11,6 +11,7 @@ import { DownloadManager } from './downloads/DownloadManager'
 import { IpcRegistry } from './ipc/registry'
 import { installContentSignalListener } from './tabs/contentSignals'
 import type { EventChannel, EventPayload } from '@shared/ipc/contracts'
+import { hostOf } from '@shared/url'
 import { PermissionRepository } from './db/repositories/PermissionRepository'
 import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
@@ -20,6 +21,8 @@ import { MemoryIndexer } from './memory/MemoryIndexer'
 import { AiEngine } from './ai/AiEngine'
 import { ContentBlocker } from './shield/NetworkPolicy'
 import { PopupGuard } from './shield/PopupGuard'
+import { RedirectGuard } from './shield/RedirectGuard'
+import { GestureTracker } from './shield/GestureTracker'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -51,6 +54,8 @@ export class AppContext {
   readonly ai: AiEngine
   readonly blocker: ContentBlocker
   readonly popups: PopupGuard
+  readonly redirects: RedirectGuard
+  private readonly gestures = new GestureTracker()
   /**
    * Tabs with "Stay on This Site" turned on.
    *
@@ -94,12 +99,18 @@ export class AppContext {
       onCountsChanged: () => {},
       resolvePageUrl: (webContentsId) => this.pageUrlFor(webContentsId)
     })
-    // Popup decisions need a gesture history, which only main can hold. Hooks
-    // are replaced in start() once there is a window to report a block to.
-    this.popups = new PopupGuard({
-      onPopupBlocked: () => {},
-      openInNewTab: () => {}
-    })
+    // Both guards ask "was this the user?", so they share one gesture history —
+    // two would be two answers that can disagree. Hooks are replaced in start()
+    // once there is a window to report a block to.
+    this.popups = new PopupGuard(
+      { onPopupBlocked: () => {}, openInNewTab: () => {} },
+      this.gestures
+    )
+    this.redirects = new RedirectGuard(
+      { onNavigationBlocked: () => {}, onNavigationWarned: () => {} },
+      this.gestures,
+      (host) => this.blocker.engine.isKnownAdHost(host)
+    )
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
@@ -159,6 +170,55 @@ export class AppContext {
         const window = this.focusedWindow()
         window?.tabs.create({ url, background })
       }
+    })
+
+    // A refused navigation is recorded so the shield panel can account for it.
+    // Warnings are recorded too and deliberately not blocked: the evidence is a
+    // pattern rather than a rule, and the product rule is that we never call a
+    // navigation malicious without one.
+    this.redirects.setHooks({
+      onNavigationBlocked: (webContentsId, host, explanation) => {
+        const pageHost = hostOf(this.pageUrlFor(webContentsId) ?? '')
+        this.blocker.activity.record(webContentsId, 'redirect', host, pageHost)
+        const window = this.windowForContents(webContentsId)
+        if (!window) return
+        this.ipc.broadcast(
+          'shield:navigationBlocked',
+          { host, explanation },
+          window.privilegedContents()
+        )
+      },
+      onNavigationWarned: (webContentsId, host, explanation) => {
+        const window = this.windowForContents(webContentsId)
+        if (!window) return
+        this.ipc.broadcast(
+          'shield:navigationWarned',
+          { host, explanation },
+          window.privilegedContents()
+        )
+      }
+    })
+
+    // A refused malicious navigation had been reported to nobody since this
+    // hook was written: the request was genuinely cancelled, but the user saw a
+    // failed page load with no reason given, which is indistinguishable from
+    // the site being down.
+    this.blocker.setHooks({
+      onMaliciousNavigation: (webContentsId, blocked) => {
+        const window = this.windowForContents(webContentsId)
+        if (!window) return
+        this.ipc.broadcast(
+          'shield:navigationBlocked',
+          {
+            host: blocked.host,
+            explanation:
+              'This site is on a list of known-malicious domains, so Slash refused to load it.'
+          },
+          window.privilegedContents()
+        )
+      },
+      onCountsChanged: () => {},
+      resolvePageUrl: (webContentsId) => this.pageUrlFor(webContentsId)
     })
 
     // Prompts render in the window that owns the requesting tab; grant changes
@@ -239,7 +299,15 @@ export class AppContext {
           siteLocked: this.siteLockedTabs.has(tabId)
         })
         return verdict.action === 'allow'
-      }
+      },
+      shouldAllowNavigation: (tabId, url, pageUrl, webContentsId) =>
+        this.redirects.evaluate({
+          webContentsId,
+          targetUrl: url,
+          currentUrl: pageUrl,
+          mode: this.settings.getAll().protectionMode,
+          siteLocked: this.siteLockedTabs.has(tabId)
+        })
     })
     this.windows.push(window)
     window.browserWindow.on('closed', () => {

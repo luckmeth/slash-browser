@@ -17,7 +17,16 @@ decision logic is pure and Electron-free, and the wiring is separate.
 | `RedirectChainMonitor.ts` | Judges navigation chains; exempts sign-in and payment flows | yes |
 | `ActivityLog.ts` | Per-tab record of decisions, bounded, host-only | yes |
 | `PopupGuard.ts` | Gesture bookkeeping, holds blocked popups | no |
+| `RedirectGuard.ts` | Per-tab navigation chains, `will-navigate` / `will-redirect` | no |
+| `GestureTracker.ts` | When each tab was last genuinely touched | no |
 | `NetworkPolicy.ts` | `webRequest` installation, per session | no |
+
+Both guards share **one** `GestureTracker`. They ask the same question — "was this the user?" — and
+two trackers would be two answers that can disagree.
+
+`will-redirect` is handled as well as `will-navigate`: a 302 chain through three ad networks fires
+the former once per hop and the latter not at all, so a guard installed only on `will-navigate` would
+miss the exact pattern it exists to catch.
 
 ## The signal that makes popup blocking possible
 
@@ -59,7 +68,20 @@ npm run build && ADAPTIVE_BLOCK_CAPTURE=block.png npx electron-vite preview
 
 Network blocking, unchanged from before and still passing.
 
-46 unit tests over the decision logic: 10 popup, 16 redirect, 20 filter/engine.
+```bash
+npm run build && SLASH_REDIRECT_PROBE=1 npx electron-vite preview
+```
+
+Expected: `redirect probe: PASS — cross-site jump blocked, sign-in still reachable`.
+
+Measured 2026-08-16: a locked tab on `example.com` had `location.href` set to `iana.org` by page
+script — refused, logged as `navigation blocked → www.iana.org (site-locked)`, and the tab stayed
+put. The same tab then reached `accounts.google.com/v3/signin` under identical conditions. That
+second half is the point of the probe: locked tab, strict conditions, cross-site, unclicked — every
+signal says block, and it must still allow, because a redirect guard that breaks sign-in is worse
+than no redirect guard.
+
+68 unit tests over the decision logic and the stateful guards.
 
 ## Manual test procedure
 
@@ -73,25 +95,32 @@ Network blocking, unchanged from before and still passing.
 8. **Payment redirect** — a Stripe checkout redirect completes.
 9. **Media site** — click play on a video; playback continues and the ad tab is blocked, with the
    original tab still active.
-10. **Counts match** — the panel's ads + trackers + popups equals the total shown on the button.
+10. **Counts match** — the panel's ads + trackers + popups + redirects equals the total on the button.
+11. **Stay on This Site** — turn it on in the shield panel, then click a link to another site: it is
+    allowed, because you clicked it. Script-driven jumps to other sites are refused with a notice.
+12. **Refused navigation explains itself** — visiting `malware.testing.google.test` shows *"Slash
+    Shield stopped this page going to …"* rather than a blank failed load.
+13. **Clear** — the Clear button in the panel empties the recent list and zeroes the counts.
 
 ## Not built yet — do not claim these
 
-- **`RedirectChainMonitor` is not wired.** The logic and its 16 tests are complete and correct, but
-  nothing calls `decideRedirect` from `will-navigate` yet. Redirect counts are therefore always zero
-  and no redirect is currently blocked or warned about. This is the next piece of work.
-- **"Stay on This Site" is half-connected.** The per-tab flag exists, the IPC to set it exists, and
-  the *popup* path honours it. The *navigation* path does not, because that lives in the unwired
-  redirect guard. Turning it on today blocks cross-site popups but not cross-site navigation.
-- **The shield panel still shows the old single count.** The IPC now returns the ad/tracker/popup
-  split and the recent-activity list, but `ShieldButton.tsx` has not been rebuilt to render them.
-- **A refused malicious navigation shows no explanation.** `onMaliciousNavigation` has been a no-op
-  since it was written — the request is genuinely cancelled, but the user sees a failed page load
-  with no reason given. Pre-existing, found during this work, not introduced by it.
-- **No subscribable filter lists.** The bundled starter list is small next to EasyList. There is no
-  updater and no list subscription UI.
+- **No subscribable filter lists.** The bundled starter list is a few hundred domains; EasyList is
+  tens of thousands. There is no updater and no subscription UI, so coverage is well short of uBlock
+  Origin's and the panel says so rather than letting a shield icon imply otherwise.
 - **No cosmetic filtering.** Blocked ads leave their empty layout boxes behind. Slash cancels
   requests; it does not hide elements.
+- **Domain matching only.** No regex URL patterns, no per-element rules, no query-parameter
+  stripping.
+- **The same-site test is approximate.** It compares the last two labels, so `a.co.uk` and `b.co.uk`
+  read as one site. The failure is conservative — it blocks *less*, never more — so the worst case is
+  an ad getting through rather than a page breaking. A Public Suffix List would fix it.
+- **Malicious-domain coverage is a demonstration, not protection.** The bundled list is four test
+  domains. Real coverage needs a live feed like Safe Browsing, because malicious domains are
+  registered and burned within hours.
+- **Not a virus scanner.** A browser cannot inspect a file for malware. The panel states this
+  outright.
+- **Site lock is not persisted.** It is a mode for the page you are looking at now; a lock silently
+  still in force days later on a restored tab would look like the browser was broken.
 
 ## Regression checks
 

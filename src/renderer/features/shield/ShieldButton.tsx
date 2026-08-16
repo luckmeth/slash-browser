@@ -95,6 +95,83 @@ export function ShieldButton(): React.JSX.Element | null {
               />
             </label>
 
+            {/* What was blocked, split by category. These are the recorded
+                decisions themselves, so they always sum to the total. */}
+            {count > 0 && (
+              <div className="mt-3 grid grid-cols-4 gap-1 border-t border-[var(--glass-edge)] pt-3">
+                <Stat label="Ads" value={status.counts.ads} />
+                <Stat label="Trackers" value={status.counts.trackers} />
+                <Stat label="Popups" value={status.counts.popups} />
+                <Stat label="Redirects" value={status.counts.redirects} />
+              </div>
+            )}
+
+            <div className="mt-3 space-y-2 border-t border-[var(--glass-edge)] pt-3">
+              <Toggle
+                label="Stay on this site"
+                hint="Blocks popups and automatic jumps to other sites. You can always click through."
+                checked={status.siteLocked}
+                onChange={(locked) => {
+                  if (!tabId) return
+                  void window.browser
+                    .invoke('shield:setSiteLock', { tabId, locked })
+                    .then((result) => {
+                      if (result.ok) setStatus(result.value)
+                    })
+                }}
+              />
+              <Toggle
+                label="Strict mode"
+                hint="Also stops unclicked windows and jumps to other sites. More false positives."
+                checked={status.strictMode}
+                onChange={(strict) => {
+                  if (!tabId) return
+                  void window.browser
+                    .invoke('shield:setMode', { mode: strict ? 'strict' : 'standard', tabId })
+                    .then((result) => {
+                      if (result.ok) setStatus(result.value)
+                    })
+                }}
+              />
+            </div>
+
+            {status.recent.length > 0 && (
+              <div className="mt-3 border-t border-[var(--glass-edge)] pt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium">Recent</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!tabId) return
+                      void window.browser
+                        .invoke('shield:clearActivity', { tabId })
+                        .then((result) => {
+                          if (result.ok) setStatus(result.value)
+                        })
+                    }}
+                    className="cursor-default text-[11px] text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {/* Hosts, not URLs — a blocked request's path and query can
+                    carry identifiers and search terms. */}
+                <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto">
+                  {status.recent.slice(0, 8).map((entry) => (
+                    <li
+                      key={entry.id}
+                      className="flex justify-between gap-2 text-[11px] text-[var(--color-text-muted)]"
+                    >
+                      <span className="truncate" title={entry.host}>
+                        {entry.host}
+                      </span>
+                      <span className="shrink-0 opacity-60">{entry.category}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="mt-3 space-y-1 border-t border-[var(--glass-edge)] pt-2">
               <Row label="Ad and tracker rules" value={status.ruleCount.toLocaleString()} />
               <Row
@@ -113,6 +190,44 @@ export function ShieldButton(): React.JSX.Element | null {
         </>
       )}
     </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: number }): React.JSX.Element {
+  return (
+    <div className="rounded-lg bg-white/5 px-1.5 py-1.5 text-center">
+      <div className="font-mono text-sm text-[var(--color-text-primary)]">{value}</div>
+      <div className="text-[10px] text-[var(--color-text-muted)]">{label}</div>
+    </div>
+  )
+}
+
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  onChange: (value: boolean) => void
+}): React.JSX.Element {
+  return (
+    <label className="flex cursor-default items-start justify-between gap-2 rounded-lg border border-[var(--glass-edge)] px-2.5 py-2">
+      <span className="min-w-0">
+        <span className="block text-xs">{label}</span>
+        <span className="mt-0.5 block text-[10px] leading-snug text-[var(--color-text-muted)]">
+          {hint}
+        </span>
+      </span>
+      <input
+        type="checkbox"
+        className="mt-0.5 shrink-0"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
   )
 }
 

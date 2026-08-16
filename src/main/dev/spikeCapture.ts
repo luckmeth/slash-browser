@@ -420,6 +420,63 @@ export async function runPopupCapture(
 }
 
 /**
+ * Dev-only redirect-guard verification.
+ *
+ * The unit tests cover the judgement; this covers that `will-navigate` and
+ * `will-redirect` are actually installed and that `preventDefault` genuinely
+ * stops the load. It also checks the case that matters most — that a sign-in
+ * host is still reachable — because a redirect guard that breaks OAuth is worse
+ * than no redirect guard.
+ */
+export async function runRedirectCapture(
+  window: BrowserWindowController,
+  hooks: { lockTab: (tabId: string) => void }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  window.tabs.activate(activeId)
+  window.tabs.navigate(activeId, 'https://example.com/')
+  await delay(3000)
+
+  const tab = window.tabs.findById(activeId)
+  const page = tab?.contents
+  if (!tab || !page) {
+    log.error('redirect probe: no page')
+    app.quit()
+    return
+  }
+
+  // Lock the tab, then have the *page* try to leave for another site with no
+  // click. This is the pattern a video page uses to throw you at an ad.
+  hooks.lockTab(activeId)
+  await page.executeJavaScript(`location.href = 'https://www.iana.org/domains'; void 0`)
+  await delay(2500)
+  const afterHostile = page.getURL()
+
+  // Now the case that must never break: a sign-in host, same conditions.
+  await page.executeJavaScript(`location.href = 'https://accounts.google.com/signin'; void 0`)
+  await delay(4000)
+  const afterAuth = page.getURL()
+
+  log.info(`redirect probe: afterHostile=${afterHostile}`)
+  log.info(`redirect probe: afterAuth=${afterAuth}`)
+
+  const stayed = afterHostile.includes('example.com')
+  const reachedAuth = afterAuth.includes('accounts.google.com')
+  if (stayed && reachedAuth) {
+    log.info('redirect probe: PASS — cross-site jump blocked, sign-in still reachable')
+  } else {
+    log.error(`redirect probe: FAIL — stayed=${stayed} reachedAuth=${reachedAuth}`)
+  }
+
+  app.quit()
+}
+
+/**
  * Dev-only content-blocker verification.
  *
  * Loads real pages that carry advertising and analytics, and confirms requests

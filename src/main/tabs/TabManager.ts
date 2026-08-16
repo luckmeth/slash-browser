@@ -61,6 +61,8 @@ export interface TabManagerHooks {
    * when it is absent keeps popup behaviour exactly as it was.
    */
   shouldAllowPopup?: (tab: Tab, url: string, webContentsId: number) => boolean
+  /** Slash Shield's verdict on a page-initiated top-level navigation. */
+  shouldAllowNavigation?: (tab: Tab, url: string, webContentsId: number) => boolean
 }
 
 /**
@@ -684,7 +686,9 @@ export class TabManager {
         this.create({ url, background, afterTabId: tab.id })
       },
       shouldAllowPopup: (url) =>
-        this.hooks.shouldAllowPopup?.(tab, url, view.webContents.id) ?? true
+        this.hooks.shouldAllowPopup?.(tab, url, view.webContents.id) ?? true,
+      shouldAllowNavigation: (url) =>
+        this.hooks.shouldAllowNavigation?.(tab, url, view.webContents.id) ?? true
     })
 
     this.hooks.installPageContextMenu(view.webContents)

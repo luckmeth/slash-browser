@@ -27,6 +27,14 @@ export interface NavigationGuardHooks {
    * quietly won.
    */
   shouldAllowPopup?: (url: string, disposition: string) => boolean
+  /**
+   * Slash Shield's verdict on a top-level navigation, or null when absent.
+   *
+   * Consulted only for main-frame navigation the page initiated. A URL the user
+   * typed never reaches here — `TabManager.navigate` loads it directly, so the
+   * guard cannot stop someone going where they asked to go.
+   */
+  shouldAllowNavigation?: (url: string) => boolean
 }
 
 /**
@@ -81,6 +89,26 @@ export function installNavigationGuards(contents: WebContents, hooks: Navigation
       // them to the OS is the correct behaviour, but only with consent.
       event.preventDefault()
       void confirmExternal(url, hooks.window)
+      return
+    }
+
+    if (hooks.shouldAllowNavigation && !hooks.shouldAllowNavigation(url)) {
+      event.preventDefault()
+    }
+  })
+
+  /**
+   * Server-side redirects, which `will-navigate` never sees.
+   *
+   * A 302 chain through three ad networks fires this once per hop and
+   * `will-navigate` not at all, so a guard installed only above would miss the
+   * exact pattern it exists to catch.
+   */
+  contents.on('will-redirect', (event, url) => {
+    const scheme = schemeOf(url)
+    if (!scheme || !IN_APP_SCHEMES.has(scheme)) return
+    if (hooks.shouldAllowNavigation && !hooks.shouldAllowNavigation(url)) {
+      event.preventDefault()
     }
   })
 }

@@ -2,6 +2,7 @@ import type { HeldPopup, ProtectionMode } from '@shared/types/shield'
 import { hostOf } from '@shared/url'
 import { createLogger } from '../logger'
 import { decidePopup, GESTURE_WINDOW_MS, explainPopup, type PopupVerdict } from './PopupPolicy'
+import { GestureTracker } from './GestureTracker'
 
 const log = createLogger('shield')
 
@@ -22,12 +23,6 @@ const log = createLogger('shield')
 const HOLD_TTL_MS = 60_000
 const MAX_HELD = 10
 
-interface GestureState {
-  at: number
-  /** Windows already opened attributed to this gesture. */
-  spent: number
-}
-
 export interface PopupGuardHooks {
   /** A popup was blocked and is being held for the user. */
   onPopupBlocked: (webContentsId: number, held: HeldPopup, explanation: string) => void
@@ -36,7 +31,6 @@ export interface PopupGuardHooks {
 }
 
 export class PopupGuard {
-  private readonly gestures = new Map<number, GestureState>()
   private readonly held = new Map<string, HeldPopup>()
   /** Sites the user allowed popups on for this run only. */
   private readonly sessionAllowed = new Set<string>()
@@ -44,6 +38,7 @@ export class PopupGuard {
 
   constructor(
     private hooks: PopupGuardHooks,
+    private readonly gestures: GestureTracker = new GestureTracker(),
     private readonly now: () => number = () => Date.now()
   ) {}
 
@@ -53,11 +48,11 @@ export class PopupGuard {
 
   /** Called when the content preload reports a trusted click or keypress. */
   noteGesture(webContentsId: number): void {
-    this.gestures.set(webContentsId, { at: this.now(), spent: 0 })
+    this.gestures.note(webContentsId)
   }
 
   forget(webContentsId: number): void {
-    this.gestures.delete(webContentsId)
+    this.gestures.forget(webContentsId)
   }
 
   allowPopupsFor(pageHost: string): void {
@@ -103,14 +98,13 @@ export class PopupGuard {
   }): PopupVerdict {
     const targetHost = hostOf(input.targetUrl)
     const pageHost = hostOf(input.pageUrl)
-    const gesture = this.gestures.get(input.webContentsId)
-    const msSinceGesture = gesture ? this.now() - gesture.at : null
+    const msSinceGesture = this.gestures.msSince(input.webContentsId)
 
     const verdict = decidePopup({
       targetHost,
       pageHost,
       msSinceGesture,
-      opensFromThisGesture: gesture?.spent ?? 0,
+      opensFromThisGesture: this.gestures.spentFor(input.webContentsId),
       mode: input.mode,
       siteAllowsPopups: this.isPopupAllowedFor(pageHost),
       siteLocked: input.siteLocked,
@@ -119,8 +113,8 @@ export class PopupGuard {
 
     if (verdict.action === 'allow') {
       // Spend the gesture, so the *second* window from one click is caught.
-      if (gesture && msSinceGesture !== null && msSinceGesture <= GESTURE_WINDOW_MS) {
-        gesture.spent += 1
+      if (msSinceGesture !== null && msSinceGesture <= GESTURE_WINDOW_MS) {
+        this.gestures.spend(input.webContentsId)
       }
       return verdict
     }

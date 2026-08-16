@@ -9,7 +9,8 @@ import {
 import { FindBar, FIND_BAR_HEIGHT } from './features/find/FindBar'
 import { HandoffNotice, HANDOFF_NOTICE_HEIGHT } from './features/handoff/HandoffNotice'
 import { PopupBlockedNotice, POPUP_NOTICE_HEIGHT } from './features/shield/PopupBlockedNotice'
-import type { PopupBlocked } from '@shared/types/blocking'
+import { NavigationBlockedNotice, NAV_NOTICE_HEIGHT } from './features/shield/NavigationBlockedNotice'
+import type { PopupBlocked, NavigationNotice } from '@shared/types/blocking'
 import { handoffHintFor } from '@shared/externalHandoff'
 import { useBrowserStore } from './stores/browserStore'
 import { TabStrip } from './features/tabs/TabStrip'
@@ -53,14 +54,20 @@ export function App(): React.JSX.Element {
   const handoffShowing = handoffHint !== null && handoffDismissedHost !== handoffHint.host
 
   const [blockedPopup, setBlockedPopup] = useState<PopupBlocked | null>(null)
+  const [blockedNav, setBlockedNav] = useState<NavigationNotice | null>(null)
   useEffect(() => {
     return window.browser.on('shield:popupBlocked', setBlockedPopup)
   }, [])
+  useEffect(() => {
+    return window.browser.on('shield:navigationBlocked', setBlockedNav)
+  }, [])
 
-  // A held popup belongs to the page it happened on. Navigating away makes it
-  // stale, and offering to open it later would be worse than dropping it.
+  // These belong to the page they happened on. Navigating away makes them stale,
+  // and offering to open a popup from a page you have left would be worse than
+  // dropping it.
   useEffect(() => {
     setBlockedPopup(null)
+    setBlockedNav(null)
   }, [activeTab?.url])
 
   useEffect(() => {
@@ -69,9 +76,10 @@ export function App(): React.JSX.Element {
         CHROME_HEIGHT +
         (findOpen ? FIND_BAR_HEIGHT : 0) +
         (handoffShowing ? HANDOFF_NOTICE_HEIGHT : 0) +
-        (blockedPopup ? POPUP_NOTICE_HEIGHT : 0)
+        (blockedPopup ? POPUP_NOTICE_HEIGHT : 0) +
+        (blockedNav ? NAV_NOTICE_HEIGHT : 0)
     })
-  }, [findOpen, handoffShowing, blockedPopup])
+  }, [findOpen, handoffShowing, blockedPopup, blockedNav])
 
   // Menu accelerators arrive here because a native view — usually the page —
   // holds keyboard focus, so the chrome document never sees the keystroke.
@@ -169,6 +177,7 @@ export function App(): React.JSX.Element {
           <FindBar />
           <HandoffNotice />
           <PopupBlockedNotice blocked={blockedPopup} onDismiss={() => setBlockedPopup(null)} />
+          <NavigationBlockedNotice notice={blockedNav} onDismiss={() => setBlockedNav(null)} />
 
           <div className="flex min-h-0 flex-1">
             <main className="min-w-0 flex-1">

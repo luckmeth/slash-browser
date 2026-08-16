@@ -68,6 +68,12 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_REDIRECT_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runRedirectCapture }) =>
+        runRedirectCapture(window, { lockTab: (tabId) => context.siteLockedTabs.add(tabId) })
+      )
+    }
+
     if (process.env['SLASH_POPUP_PROBE']) {
       void import('./dev/spikeCapture').then(({ runPopupCapture }) =>
         runPopupCapture(window, { tabCount: () => window.tabs.allTabs().length })

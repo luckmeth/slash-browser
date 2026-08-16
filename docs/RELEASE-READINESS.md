@@ -61,8 +61,12 @@ These are deliberate and documented in their phase scripts, not oversights:
 
 Worth stating too, so the list above is read in proportion:
 
-- 137 tests over the logic whose failure modes are destructive — never-hibernate guards, permission
-  scoping and defaults, the AI action allowlist, URL resolution, query parsing.
+- 194 tests over the logic whose failure modes are destructive — never-hibernate guards, permission
+  scoping and defaults, the AI action allowlist, URL resolution, query parsing, and Slash Shield's
+  popup and redirect judgements.
+- The content preload reads no page content at all. It reports that a trusted gesture happened and
+  that an edit occurred, never what was typed, so the script injected into every page — sign-in
+  forms included — has no access to leak.
 - Every phase has a manual test script that re-runs earlier phases as regression checks.
 - The security posture holds: `contextIsolation`, `sandbox`, `nodeIntegration: false` everywhere
   including our own chrome; a sender-allowlisted, zod-validated IPC surface; a content preload with
