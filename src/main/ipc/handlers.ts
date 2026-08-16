@@ -31,14 +31,27 @@ function blockingStatus(
   const settings = ctx.settings.getAll()
   const counts = ctx.blocker.engine.counts
 
+  const contentsId = tab?.contents?.id ?? null
+
   return {
-    blockedOnPage: tab?.contents ? ctx.blocker.countFor(tab.contents.id) : 0,
+    blockedOnPage: contentsId !== null ? ctx.blocker.countFor(contentsId) : 0,
+    // The split is the recorded decisions themselves, so the categories always
+    // sum to the total rather than being tallied separately and drifting.
+    counts:
+      contentsId !== null
+        ? ctx.blocker.activity.countsFor(contentsId)
+        : { ads: 0, trackers: 0, popups: 0, redirects: 0 },
     adsEnabled: settings.blockAds,
     maliciousEnabled: settings.blockMaliciousSites,
+    popupsEnabled: settings.blockPopups,
+    strictMode: settings.protectionMode === 'strict',
     host,
     siteAllowed: host !== '' && ctx.blocker.engine.isSiteAllowed(host),
+    popupsAllowedHere: host !== '' && ctx.popups.isPopupAllowedFor(host),
+    siteLocked: ctx.siteLockedTabs.has(tabId),
     ruleCount: counts.blocked,
-    maliciousRuleCount: counts.malicious
+    maliciousRuleCount: counts.malicious,
+    recent: contentsId !== null ? [...ctx.blocker.activity.entriesFor(contentsId, 20)] : []
   }
 }
 
@@ -730,6 +743,50 @@ export function registerHandlers(ctx: AppContext): void {
     // Reload so the change takes effect on the page in front of the user rather
     // than only on the next navigation.
     window.tabs.reload(request.tabId, false)
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  // --- Slash Shield ---------------------------------------------------------
+
+  ipc.handle('shield:releasePopup', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    // The URL comes from main's own held record, keyed by this id. The renderer
+    // never supplies an address, so this cannot become "open anything I name".
+    if (!ctx.popups.releaseHeld(request.id)) {
+      return err('NOT_FOUND', 'That popup is no longer held')
+    }
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  ipc.handle('shield:allowPopupsHere', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.findById(request.tabId)
+    if (!tab) return err('NOT_FOUND', 'No such tab')
+    ctx.popups.allowPopupsFor(hostOf(tab.snapshot.url))
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  ipc.handle('shield:setSiteLock', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    if (request.locked) ctx.siteLockedTabs.add(request.tabId)
+    else ctx.siteLockedTabs.delete(request.tabId)
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  ipc.handle('shield:setMode', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    ctx.settings.update({ protectionMode: request.mode })
+    return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  ipc.handle('shield:clearActivity', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    ctx.blocker.activity.clearAll()
     return ok(blockingStatus(ctx, window, request.tabId))
   })
 

@@ -22,13 +22,25 @@ const log = createLogger('content')
  */
 const CONTENT_STATE_CHANNEL = 'content:state'
 
-const ContentStateSchema = z.object({
-  hasUnsavedInput: z.boolean()
-})
+const ContentStateSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('unsaved-input'), hasUnsavedInput: z.boolean() }),
+  // Carries no data at all. The fact of the message is the signal, and the time
+  // is taken here rather than from the page — a renderer does not get to claim
+  // when it was clicked.
+  z.object({ kind: z.literal('user-gesture') })
+])
 
 export type ResolveTabBySender = (webContentsId: number) => Tab | null
 
-export function installContentSignalListener(resolveTab: ResolveTabBySender): () => void {
+export interface ContentSignalHooks {
+  /** A trusted click or keypress happened in this tab. */
+  onUserGesture?: (webContentsId: number) => void
+}
+
+export function installContentSignalListener(
+  resolveTab: ResolveTabBySender,
+  hooks: ContentSignalHooks = {}
+): () => void {
   const listener = (event: IpcMainEvent, raw: unknown): void => {
     const parsed = ContentStateSchema.safeParse(raw)
     if (!parsed.success) {
@@ -40,6 +52,11 @@ export function installContentSignalListener(resolveTab: ResolveTabBySender): ()
     // name another tab.
     const tab = resolveTab(event.sender.id)
     if (!tab) return
+
+    if (parsed.data.kind === 'user-gesture') {
+      hooks.onUserGesture?.(event.sender.id)
+      return
+    }
 
     tab.setHasUnsavedInput(parsed.data.hasUnsavedInput)
   }

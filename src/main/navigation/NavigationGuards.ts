@@ -18,6 +18,15 @@ export interface NavigationGuardHooks {
   openInNewTab: (url: string, background: boolean) => void
   /** Owning window, used to parent the external-protocol confirmation dialog. */
   window: BaseWindow
+  /**
+   * Slash Shield's popup verdict, or null when the guard is not installed.
+   *
+   * Consulted here rather than in a handler of its own because Electron allows
+   * exactly one `setWindowOpenHandler` per WebContents — a second registration
+   * silently replaces the first, which would mean whichever module loaded last
+   * quietly won.
+   */
+  shouldAllowPopup?: (url: string, disposition: string) => boolean
 }
 
 /**
@@ -43,6 +52,13 @@ export function installNavigationGuards(contents: WebContents, hooks: Navigation
 
     if (scheme && !IN_APP_SCHEMES.has(scheme)) {
       void confirmExternal(url, hooks.window)
+      return { action: 'deny' }
+    }
+
+    // Slash Shield gets the last word on whether this window was asked for. It
+    // holds what it blocks and surfaces it, so a wrong call is recoverable
+    // rather than looking like a dead link.
+    if (hooks.shouldAllowPopup && !hooks.shouldAllowPopup(url, disposition)) {
       return { action: 'deny' }
     }
 

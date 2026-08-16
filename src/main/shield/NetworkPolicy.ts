@@ -2,8 +2,13 @@ import type { Session } from 'electron'
 import { hostOf } from '@shared/url'
 import type { SettingsStore } from '../settings/SettingsStore'
 import { createLogger } from '../logger'
-import { BlocklistEngine } from './BlocklistEngine'
-import { DEFAULT_BLOCK_DOMAINS, DEFAULT_MALICIOUS_DOMAINS } from './defaultLists'
+import { FilterEngine } from './FilterEngine'
+import { ActivityLog } from './ActivityLog'
+import {
+  DEFAULT_BLOCK_DOMAINS,
+  DEFAULT_MALICIOUS_DOMAINS,
+  DEFAULT_TRACKER_DOMAINS
+} from './defaultLists'
 
 const log = createLogger('blocker')
 
@@ -37,34 +42,40 @@ export interface ContentBlockerHooks {
  * also saves bandwidth and time rather than only tidying the page.
  */
 export class ContentBlocker {
-  readonly engine = new BlocklistEngine()
-  /** Per-WebContents block counts, reset on navigation. */
-  private readonly counts = new Map<number, number>()
+  readonly engine = new FilterEngine()
+  /** Per-tab record of what was blocked, and the source of the dashboard counts. */
+  readonly activity: ActivityLog
 
   constructor(
     private readonly settings: SettingsStore,
-    private hooks: ContentBlockerHooks
+    private hooks: ContentBlockerHooks,
+    activity = new ActivityLog()
   ) {
-    this.engine.loadBlocked(DEFAULT_BLOCK_DOMAINS)
+    this.activity = activity
+    this.engine.loadBlocked(DEFAULT_BLOCK_DOMAINS, 'ad')
+    this.engine.loadBlocked(DEFAULT_TRACKER_DOMAINS, 'tracker')
     this.engine.loadMalicious(DEFAULT_MALICIOUS_DOMAINS)
     this.engine.setAllowedSites(this.settings.getAll().blockingAllowedSites)
+    this.engine.setCustomRules(this.settings.getAll().customBlockRules)
   }
 
   setHooks(hooks: ContentBlockerHooks): void {
     this.hooks = hooks
   }
 
-  /** Re-reads the per-site exemptions after a settings change. */
+  /** Re-reads the per-site exemptions and user rules after a settings change. */
   refreshAllowedSites(): void {
-    this.engine.setAllowedSites(this.settings.getAll().blockingAllowedSites)
+    const settings = this.settings.getAll()
+    this.engine.setAllowedSites(settings.blockingAllowedSites)
+    this.engine.setCustomRules(settings.customBlockRules)
   }
 
   countFor(webContentsId: number): number {
-    return this.counts.get(webContentsId) ?? 0
+    return this.activity.totalFor(webContentsId)
   }
 
   resetCount(webContentsId: number): void {
-    if (this.counts.delete(webContentsId)) this.hooks.onCountsChanged()
+    if (this.activity.reset(webContentsId)) this.hooks.onCountsChanged()
   }
 
   /**
@@ -139,9 +150,13 @@ export class ContentBlocker {
         return
       }
 
-      if (this.engine.shouldBlockRequest(requestHost, pageHost)) {
+      // One decision, recorded as it is made. The dashboard's ad and tracker
+      // numbers are these entries counted — not a parallel tally that could
+      // disagree with what actually happened.
+      const category = this.engine.classifyRequest(requestHost, pageHost)
+      if (category) {
         if (details.webContentsId !== undefined) {
-          this.counts.set(details.webContentsId, (this.counts.get(details.webContentsId) ?? 0) + 1)
+          this.activity.record(details.webContentsId, category, requestHost, pageHost)
           this.hooks.onCountsChanged()
         }
         callback({ cancel: true })

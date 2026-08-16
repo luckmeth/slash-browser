@@ -39,6 +39,8 @@ export interface WindowDeps {
   onTabDiscarded: (tabId: string) => void
   /** A page finished loading; the Web Memory indexer decides what to do with it. */
   onPageLoaded: (contents: WebContents, url: string) => void
+  /** Slash Shield's verdict on a `window.open` from a page in this window. */
+  shouldAllowPopup: (tabId: string, url: string, pageUrl: string, webContentsId: number) => boolean
 }
 
 /**
@@ -180,6 +182,8 @@ export class BrowserWindowController {
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
+        shouldAllowPopup: (tab, url, webContentsId) =>
+          this.deps.shouldAllowPopup(tab.id, url, tab.snapshot.url, webContentsId),
         onPageLoaded: (tab, url) => {
           const contents = tab.contents
           if (contents) void this.deps.onPageLoaded(contents, url)

@@ -54,6 +54,13 @@ export interface TabManagerHooks {
    * allow-for-tab grant must not outlive the tab that was granted it.
    */
   onTabDiscarded: (tabId: string) => void
+  /**
+   * Slash Shield's verdict on a `window.open`.
+   *
+   * Optional so a TabManager can be built without the shield — returning true
+   * when it is absent keeps popup behaviour exactly as it was.
+   */
+  shouldAllowPopup?: (tab: Tab, url: string, webContentsId: number) => boolean
 }
 
 /**
@@ -675,7 +682,9 @@ export class TabManager {
       window: this.window,
       openInNewTab: (url, background) => {
         this.create({ url, background, afterTabId: tab.id })
-      }
+      },
+      shouldAllowPopup: (url) =>
+        this.hooks.shouldAllowPopup?.(tab, url, view.webContents.id) ?? true
     })
 
     this.hooks.installPageContextMenu(view.webContents)

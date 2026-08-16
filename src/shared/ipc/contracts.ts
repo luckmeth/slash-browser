@@ -11,7 +11,7 @@ import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
 import { MemoryResultSchema, MemoryStatsSchema, ParsedQuerySchema } from '../types/memory'
-import { BlockingStatusSchema } from '../types/blocking'
+import { BlockingStatusSchema, PopupBlockedSchema } from '../types/blocking'
 import {
   ActionPlanSchema,
   AiActivitySchema,
@@ -420,6 +420,34 @@ export const invokeContracts = {
     response: BlockingStatusSchema
   },
 
+  /**
+   * Lets a held popup through.
+   *
+   * Takes the *id* of something Slash Shield already blocked, never a URL. Main
+   * looks the URL up in its own held record, so a compromised chrome view cannot
+   * turn this into "open any address I name".
+   */
+  'shield:releasePopup': {
+    request: z.object({ id: z.string(), tabId: z.string() }),
+    response: BlockingStatusSchema
+  },
+  'shield:allowPopupsHere': {
+    request: z.object({ tabId: z.string() }),
+    response: BlockingStatusSchema
+  },
+  'shield:setSiteLock': {
+    request: z.object({ tabId: z.string(), locked: z.boolean() }),
+    response: BlockingStatusSchema
+  },
+  'shield:setMode': {
+    request: z.object({ mode: z.enum(['standard', 'strict']), tabId: z.string() }),
+    response: BlockingStatusSchema
+  },
+  'shield:clearActivity': {
+    request: z.object({ tabId: z.string() }),
+    response: BlockingStatusSchema
+  },
+
   'history:search': {
     request: HistoryQuerySchema,
     response: z.array(HistoryEntrySchema)
@@ -518,7 +546,8 @@ export const eventContracts = {
   'omnibox:state': OmniboxStateSchema,
   'permissions:prompt': PermissionRequestSchema.nullable(),
   'permissions:changed': z.array(PermissionGrantSchema),
-  'ui:command': UiCommandSchema
+  'ui:command': UiCommandSchema,
+  'shield:popupBlocked': PopupBlockedSchema
 } as const satisfies Record<EventChannel, z.ZodType>
 
 export type EventPayload<C extends EventChannel> = z.infer<(typeof eventContracts)[C]>

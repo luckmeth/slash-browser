@@ -8,7 +8,7 @@ import { isInternalUrl, NEW_TAB_URL } from '@shared/types/tab'
 import { formatUrlForDisplay, isSecureUrl } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
-import { ShieldButton } from '../blocking/ShieldButton'
+import { ShieldButton } from '../shield/ShieldButton'
 
 export function Toolbar(): React.JSX.Element {
   const activeTab = useBrowserStore((s) => s.activeTab())

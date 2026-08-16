@@ -114,6 +114,11 @@ export const INVOKE_CHANNELS = [
   // --- content blocking ---
   'blocking:status',
   'blocking:setSiteAllowed',
+  'shield:releasePopup',
+  'shield:allowPopupsHere',
+  'shield:setSiteLock',
+  'shield:setMode',
+  'shield:clearActivity',
 
   // --- history ---
   'history:search',
@@ -154,7 +159,9 @@ export const EVENT_CHANNELS = [
   'permissions:prompt',
   'permissions:changed',
   /** Menu accelerators that must be handled by the UI, not the main process. */
-  'ui:command'
+  'ui:command',
+  /** Slash Shield held a popup; the chrome view offers it to the user. */
+  'shield:popupBlocked'
 ] as const
 
 export type EventChannel = (typeof EVENT_CHANNELS)[number]

@@ -68,6 +68,12 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_POPUP_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runPopupCapture }) =>
+        runPopupCapture(window, { tabCount: () => window.tabs.allTabs().length })
+      )
+    }
+
     if (process.env['SLASH_UNSAVED_PROBE']) {
       void import('./dev/spikeCapture').then(({ runUnsavedInputCapture }) =>
         runUnsavedInputCapture(window)

@@ -359,6 +359,67 @@ export async function runUnsavedInputCapture(window: BrowserWindowController): P
 }
 
 /**
+ * Dev-only Slash Shield popup verification.
+ *
+ * The unit tests cover the decision; this covers the wiring the decision depends
+ * on — that a trusted click actually reaches main as a gesture, and that an
+ * unclicked `window.open` is stopped. Those two travel through the content
+ * preload, an IPC channel and `setWindowOpenHandler`, none of which a pure test
+ * exercises.
+ */
+export async function runPopupCapture(
+  window: BrowserWindowController,
+  hooks: { tabCount: () => number }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  const page = `data:text/html,${encodeURIComponent(
+    `<button id="b" onclick="window.open('https://example.com/clicked','_blank')">open</button>`
+  )}`
+
+  window.tabs.activate(activeId)
+  window.tabs.navigate(activeId, page)
+  await delay(2500)
+
+  const contents = window.tabs.findById(activeId)?.contents
+  if (!contents) {
+    log.error('popup probe: no page')
+    app.quit()
+    return
+  }
+
+  // 1. Script-initiated, no click anywhere. Must be blocked.
+  const before = hooks.tabCount()
+  await contents.executeJavaScript(`window.open('https://example.com/auto','_blank'); void 0`)
+  await delay(1200)
+  const afterAuto = hooks.tabCount()
+
+  // 2. A real click on the button. Must be allowed — this is the case a popup
+  //    blocker must never get wrong, because the user asked for it.
+  const bounds = window.browserWindow.getContentBounds()
+  contents.sendInputEvent({ type: 'mouseDown', x: 30, y: 20, button: 'left', clickCount: 1 })
+  contents.sendInputEvent({ type: 'mouseUp', x: 30, y: 20, button: 'left', clickCount: 1 })
+  await delay(1500)
+  const afterClick = hooks.tabCount()
+
+  log.info(
+    `popup probe: tabs before=${before} afterScriptOpen=${afterAuto} afterClick=${afterClick} ` +
+      `(window ${bounds.width}x${bounds.height})`
+  )
+  if (afterAuto === before && afterClick > afterAuto) {
+    log.info('popup probe: PASS — script popup blocked, clicked popup allowed')
+  } else {
+    log.error('popup probe: FAIL')
+  }
+
+  app.quit()
+}
+
+/**
  * Dev-only content-blocker verification.
  *
  * Loads real pages that carry advertising and analytics, and confirms requests

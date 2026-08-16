@@ -18,7 +18,8 @@ import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
 import { MemoryIndexer } from './memory/MemoryIndexer'
 import { AiEngine } from './ai/AiEngine'
-import { ContentBlocker } from './blocking/ContentBlocker'
+import { ContentBlocker } from './shield/NetworkPolicy'
+import { PopupGuard } from './shield/PopupGuard'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { createLogger } from './logger'
@@ -49,6 +50,15 @@ export class AppContext {
   readonly memory: MemoryIndexer
   readonly ai: AiEngine
   readonly blocker: ContentBlocker
+  readonly popups: PopupGuard
+  /**
+   * Tabs with "Stay on This Site" turned on.
+   *
+   * Deliberately not persisted. It is a mode you switch on for the page you are
+   * looking at right now — a lock silently still in force days later, on a tab
+   * restored from a snapshot, would look like the browser was broken.
+   */
+  readonly siteLockedTabs = new Set<string>()
   /** Undo closure from the most recent approved AI plan, if it is reversible. */
   lastAiUndo: (() => void) | null = null
   readonly downloads: DownloadManager
@@ -84,6 +94,12 @@ export class AppContext {
       onCountsChanged: () => {},
       resolvePageUrl: (webContentsId) => this.pageUrlFor(webContentsId)
     })
+    // Popup decisions need a gesture history, which only main can hold. Hooks
+    // are replaced in start() once there is a window to report a block to.
+    this.popups = new PopupGuard({
+      onPopupBlocked: () => {},
+      openInNewTab: () => {}
+    })
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
@@ -114,12 +130,35 @@ export class AppContext {
 
     // Web content's only outbound channel. Untrusted by construction — see
     // contentSignals.ts for why it is kept out of IpcRegistry.
-    this.disposeContentSignals = installContentSignalListener((webContentsId) => {
-      for (const window of this.windows) {
-        const match = window.tabs.allTabs().find((tab) => tab.contents?.id === webContentsId)
-        if (match) return match
+    this.disposeContentSignals = installContentSignalListener(
+      (webContentsId) => {
+        for (const window of this.windows) {
+          const match = window.tabs.allTabs().find((tab) => tab.contents?.id === webContentsId)
+          if (match) return match
+        }
+        return null
+      },
+      { onUserGesture: (webContentsId) => this.popups.noteGesture(webContentsId) }
+    )
+
+    // A blocked popup has to reach the user. Silently dropping one is
+    // indistinguishable from a broken link, so the notice is not optional
+    // decoration — it is the half of the feature that makes a wrong call
+    // recoverable.
+    this.popups.setHooks({
+      onPopupBlocked: (webContentsId, popup, explanation) => {
+        const window = this.windowForContents(webContentsId)
+        if (!window) return
+        this.ipc.broadcast(
+          'shield:popupBlocked',
+          { popup, explanation },
+          window.privilegedContents()
+        )
+      },
+      openInNewTab: (url, background) => {
+        const window = this.focusedWindow()
+        window?.tabs.create({ url, background })
       }
-      return null
     })
 
     // Prompts render in the window that owns the requesting tab; grant changes
@@ -189,6 +228,17 @@ export class AppContext {
         for (const window of this.windows) {
           this.ipc.broadcast('bookmarks:changed', all, window.privilegedContents())
         }
+      },
+      shouldAllowPopup: (tabId, url, pageUrl, webContentsId) => {
+        if (!this.settings.getAll().blockPopups) return true
+        const verdict = this.popups.evaluate({
+          webContentsId,
+          targetUrl: url,
+          pageUrl,
+          mode: this.settings.getAll().protectionMode,
+          siteLocked: this.siteLockedTabs.has(tabId)
+        })
+        return verdict.action === 'allow'
       }
     })
     this.windows.push(window)
@@ -209,6 +259,15 @@ export class AppContext {
    * Read from the live contents rather than our tab snapshot, because a request
    * can fire mid-navigation, before the snapshot has caught up.
    */
+  /** The window owning a page view, so a block is reported where it happened. */
+  private windowForContents(webContentsId: number): BrowserWindowController | null {
+    for (const window of this.windows) {
+      const match = window.tabs.allTabs().find((tab) => tab.contents?.id === webContentsId)
+      if (match) return window
+    }
+    return null
+  }
+
   pageUrlFor(webContentsId: number): string | null {
     for (const window of this.windows) {
       for (const tab of window.tabs.allTabs()) {

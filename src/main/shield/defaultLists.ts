@@ -104,14 +104,58 @@ export const DEFAULT_BLOCK_DOMAINS: readonly string[] = [
   'exoclick.com',
   'juicyads.com',
   'trafficjunky.com',
-  // Misc trackers
   'moatads.com',
   'adsafeprotected.com',
   'doubleverify.com',
   'serving-sys.com',
   'flashtalking.com',
   'yieldlab.net',
-  'improvedigital.com',
+  'improvedigital.com'
+]
+
+/**
+ * Hosts whose business is following people between sites.
+ *
+ * Separate from the advertising list because Slash Shield reports the two counts
+ * separately, and a number shown to a user should come from the decision that
+ * was actually made. The line is drawn on purpose rather than by convenience: an
+ * ad network sells placements, these build profiles. Several firms do both and
+ * are listed here, because the tracking is the more consequential half.
+ */
+export const DEFAULT_TRACKER_DOMAINS: readonly string[] = [
+  // Analytics and product measurement
+  'google-analytics.com',
+  'googletagmanager.com',
+  'mixpanel.com',
+  'segment.com',
+  'segment.io',
+  'amplitude.com',
+  'heap.io',
+  'kissmetrics.com',
+  'quantserve.com',
+  'scorecardresearch.com',
+  'chartbeat.com',
+  'parsely.com',
+  'newrelic.com',
+  // Session recording — these replay what you did on the page
+  'hotjar.com',
+  'fullstory.com',
+  'mouseflow.com',
+  'luckyorange.com',
+  'inspectlet.com',
+  'smartlook.com',
+  'clarity.ms',
+  // Cross-site identity graphs
+  'crwdcntrl.net',
+  'bluekai.com',
+  'demdex.net',
+  'agkn.com',
+  'tapad.com',
+  'liveramp.com',
+  'rlcdn.com',
+  'addthis.com',
+  'sharethis.com',
+  // Consent platforms, which are themselves tracking surfaces
   'onetrust.com',
   'cookielaw.org'
 ]

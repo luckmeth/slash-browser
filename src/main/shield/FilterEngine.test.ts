@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { BlocklistEngine } from './BlocklistEngine'
+import { FilterEngine } from './FilterEngine'
 
-describe('BlocklistEngine', () => {
-  let engine: BlocklistEngine
+describe('FilterEngine', () => {
+  let engine: FilterEngine
 
   beforeEach(() => {
-    engine = new BlocklistEngine()
+    engine = new FilterEngine()
     engine.loadBlocked(['doubleclick.net', 'google-analytics.com', 'criteo.com'])
     engine.loadMalicious(['evil.example', 'phishing.testing.google.test'])
   })

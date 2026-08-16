@@ -48,7 +48,36 @@ function report(): void {
   const payload = JSON.stringify({ hasUnsavedInput })
   if (payload === lastReported) return
   lastReported = payload
-  ipcRenderer.send(CONTENT_STATE_CHANNEL, { hasUnsavedInput })
+  ipcRenderer.send(CONTENT_STATE_CHANNEL, { kind: 'unsaved-input', hasUnsavedInput })
+}
+
+/**
+ * Trusted user gestures, for Slash Shield's popup guard.
+ *
+ * `setWindowOpenHandler` in the main process receives no activation flag, so
+ * without this a browser cannot tell the popup you asked for from the one the
+ * page opened while you were reading. This reports *that* a real click or
+ * keypress happened and nothing else — no coordinates, no target element, no
+ * key, no content. The main process timestamps it on arrival rather than
+ * trusting a time from the page.
+ *
+ * `event.isTrusted` is the whole point: it is false for anything script
+ * dispatched, so a page cannot manufacture consent for its own popup by firing
+ * a synthetic click first.
+ */
+const GESTURE_THROTTLE_MS = 250
+let lastGestureSent = 0
+
+function reportGesture(event: Event): void {
+  if (!event.isTrusted) return
+  const now = Date.now()
+  if (now - lastGestureSent < GESTURE_THROTTLE_MS) return
+  lastGestureSent = now
+  ipcRenderer.send(CONTENT_STATE_CHANNEL, { kind: 'user-gesture' })
+}
+
+for (const type of ['pointerdown', 'keydown', 'click'] as const) {
+  document.addEventListener(type, reportGesture, { capture: true, passive: true })
 }
 
 function scheduleReport(): void {

@@ -49,6 +49,24 @@ export const SettingsSchema = z.object({
   blockMaliciousSites: z.boolean().default(true),
   /** Sites the user has turned blocking off for. */
   blockingAllowedSites: z.array(z.string()).default([]),
+  /**
+   * Block windows the page opened without the user clicking anything.
+   *
+   * Separate from `blockAds` because they fail differently: a wrongly blocked ad
+   * is invisible, a wrongly blocked popup looks like a broken link. Anything
+   * blocked here is held and offered, never silently dropped.
+   */
+  blockPopups: z.boolean().default(true),
+  /**
+   * How to treat signals that are suspicious but not conclusive.
+   *
+   * Rules-based blocking is identical in both modes. Strict additionally stops
+   * unclicked cross-site popups and warns on unclicked cross-site navigation —
+   * judgement calls, which is why they are opt-in.
+   */
+  protectionMode: z.enum(['standard', 'strict']).default('standard'),
+  /** Extra domains to block, one per line, authored by the user. */
+  customBlockRules: z.array(z.string()).default([]),
 
   // --- Phase 3: performance --------------------------------------------------
   performanceMode: z.enum(['off', 'balanced', 'aggressive']).default('balanced'),
