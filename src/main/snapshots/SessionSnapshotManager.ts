@@ -92,6 +92,29 @@ export class SessionSnapshotManager {
     return this.repository.latestOfKind('session-end')
   }
 
+  /**
+   * What startup should actually bring back: whichever is newer, the last clean
+   * exit or the last automatic snapshot.
+   *
+   * A crash or a force-kill never writes a `session-end` — that only happens on
+   * an orderly quit. Restoring from `session-end` alone therefore threw away
+   * everything since the last time the browser was closed properly, which is the
+   * one situation where restoring matters most. The five-minute automatic
+   * snapshot was already being taken; nothing was reading it.
+   *
+   * Comparing timestamps rather than preferring one kind means a normal restart
+   * still restores the clean exit, which is the more accurate record when it
+   * exists — an automatic snapshot from four minutes before you quit would miss
+   * whatever you did in those four minutes.
+   */
+  latestRestorable(): ReturnType<SnapshotRepository['latestOfKind']> {
+    const clean = this.repository.latestOfKind('session-end')
+    const automatic = this.repository.latestOfKind('automatic')
+    if (!clean) return automatic
+    if (!automatic) return clean
+    return automatic.createdAt > clean.createdAt ? automatic : clean
+  }
+
   prune(): void {
     const days = this.settings.getAll().snapshotRetentionDays
     if (days <= 0) return

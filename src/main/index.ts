@@ -40,10 +40,13 @@ if (!app.requestSingleInstanceLock()) {
     // genuinely restores is pages, order, pinning, scroll and back/forward
     // history — not logged-in state beyond what the cookies already carry.
     if (context.settings.getAll().restoreTabsOnStartup) {
-      const previous = context.snapshots.latestSessionEnd()
+      const previous = context.snapshots.latestRestorable()
       if (previous && previous.tabs.length > 0) {
         const restored = window.tabs.restoreFromSnapshot(previous.tabs, { activateFirst: true })
-        log.info(`startup: restored ${restored} tab(s) from the previous session`)
+        log.info(
+          `startup: restored ${restored} tab(s) from the previous session ` +
+            `(${previous.kind === 'automatic' ? 'autosave — the browser did not exit cleanly' : 'clean exit'})`
+        )
       }
     }
 
