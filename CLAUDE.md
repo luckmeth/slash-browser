@@ -6,6 +6,10 @@ permission control, local-first browsing memory, session time travel, and an opt
 that always previews before it acts.
 
 Full development plan: `docs/PLAN.md`.
+**What is left to build, in priority order: `docs/ROADMAP.md`** — read this before starting new
+feature work. It records what is missing, what each item costs, and the constraints that rule some
+approaches out (notably: Electron cannot install Chrome Web Store extensions, and auto-update needs
+a signing certificate the project does not have).
 
 ## Core product principles
 
