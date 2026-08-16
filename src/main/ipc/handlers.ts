@@ -91,8 +91,9 @@ export function registerHandlers(ctx: AppContext): void {
 
   // --- app / diagnostics ----------------------------------------------------
 
-  ipc.handle('app:info', () =>
+  ipc.handle('app:info', (_request, context) =>
     ok({
+      isPrivate: windowOf(context.sender)?.isPrivate ?? false,
       name: app.getName(),
       version: app.getVersion(),
       electron: process.versions.electron ?? 'unknown',

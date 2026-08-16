@@ -36,6 +36,30 @@ export class SessionRegistry {
   }
 
   /**
+   * The private-browsing session: in memory, never written to disk.
+   *
+   * `session.fromPartition` **without** a `persist:` prefix gives an in-memory
+   * partition — cookies, storage and cache live in the process and are gone when
+   * it exits. That is what makes this genuinely private rather than a normal
+   * session we promise to clean up later: there is no file to forget to delete,
+   * and a crash cannot leave one behind.
+   *
+   * One shared partition rather than one per window, so two private windows can
+   * see each other's login — which is what people expect when they open a second
+   * one mid-flow. Closing every private window discards it.
+   */
+  getPrivate(): Session {
+    return this.harden(session.fromPartition('private'), 'private')
+  }
+
+  /** Forgets the private partition, so the next one starts genuinely clean. */
+  async clearPrivate(): Promise<void> {
+    const target = session.fromPartition('private')
+    await target.clearStorageData()
+    this.hardened.delete('private')
+  }
+
+  /**
    * Installed alongside hardening, so blocking reaches every partition.
    *
    * Set before any session is acquired. An isolated workspace browsing

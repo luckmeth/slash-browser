@@ -52,6 +52,11 @@ export function buildApplicationMenu(ctx: AppContext): void {
           accelerator: 'CommandOrControl+N',
           click: () => ctx.createWindow()
         },
+        {
+          label: 'New Private Window',
+          accelerator: 'CommandOrControl+Shift+N',
+          click: () => ctx.createWindow({ isPrivate: true })
+        },
         { type: 'separator' },
         {
           label: 'Close Tab',

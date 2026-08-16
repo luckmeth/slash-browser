@@ -23,6 +23,7 @@ interface BrowserState {
   downloads: DownloadItem[]
   bookmarks: Bookmark[]
   history: HistoryEntry[]
+  isPrivate: boolean
   workspaces: Workspace[]
   activeWorkspaceId: string
   /** Workspace id being edited, 'new' for the create form, or null when closed. */
@@ -71,6 +72,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   downloads: [],
   bookmarks: [],
   history: [],
+  isPrivate: false,
   workspaces: [],
   activeWorkspaceId: DEFAULT_WORKSPACE_ID,
   workspaceEditorId: null,
@@ -149,11 +151,13 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
    * about which tab is active.
    */
   hydrate: async () => {
-    const [tabs, settings, workspaces] = await Promise.all([
+    const [tabs, settings, workspaces, info] = await Promise.all([
       window.browser.invoke('tabs:list', undefined),
       window.browser.invoke('settings:getAll', undefined),
-      window.browser.invoke('workspaces:list', undefined)
+      window.browser.invoke('workspaces:list', undefined),
+      window.browser.invoke('app:info', undefined)
     ])
+    if (info.ok) set({ isPrivate: info.value.isPrivate })
     if (tabs.ok) get().applySnapshot(tabs.value)
     if (settings.ok) set({ settings: settings.value })
     if (workspaces.ok) {

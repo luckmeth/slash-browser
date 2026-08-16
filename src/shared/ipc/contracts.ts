@@ -60,6 +60,8 @@ export interface ChannelContract {
 // --- payload schemas --------------------------------------------------------
 
 export const AppInfoSchema = z.object({
+  /** Whether the window asking is a private one. */
+  isPrivate: z.boolean().default(false),
   name: z.string(),
   version: z.string(),
   electron: z.string(),

@@ -1081,3 +1081,49 @@ async function assertPageIsUnprivileged(window: BrowserWindowController): Promis
     )
   }
 }
+
+/**
+ * Dev-only private-browsing verification.
+ *
+ * The claim "nothing is saved" spans four separate write paths — history,
+ * browsing memory, closed tabs and session snapshots — and privacy that covers
+ * three of them is not privacy. This visits a page in a private window and
+ * checks the database directly rather than trusting that each guard was wired.
+ */
+export async function runPrivateCapture(
+  window: BrowserWindowController,
+  hooks: {
+    openPrivate: () => BrowserWindowController
+    historyCount: (url: string) => number
+    memoryCount: (url: string) => number
+    closedTabCount: () => number
+  }
+): Promise<void> {
+  await waitForActiveTab(window)
+
+  const marker = 'https://example.com/private-probe'
+  const priv = hooks.openPrivate()
+  await delay(1500)
+
+  const tabId = priv.tabs.snapshot().activeTabId ?? priv.tabs.create({ url: marker })
+  if (typeof tabId === 'string') priv.tabs.navigate(tabId, marker)
+  await delay(4000)
+
+  // Close the tab too, so the closed-tab store gets its chance to record it.
+  const active = priv.tabs.snapshot().activeTabId
+  if (active) priv.tabs.close(active)
+  await delay(1000)
+
+  const history = hooks.historyCount(marker)
+  const memory = hooks.memoryCount(marker)
+  const closed = hooks.closedTabCount()
+
+  log.info(`private probe: history=${history} memory=${memory} closedTabs=${closed}`)
+  if (history === 0 && memory === 0) {
+    log.info('private probe: PASS — nothing written to history or browsing memory')
+  } else {
+    log.error('private probe: FAIL — a private visit reached the database')
+  }
+
+  app.quit()
+}

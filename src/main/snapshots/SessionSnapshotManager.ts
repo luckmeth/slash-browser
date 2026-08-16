@@ -77,7 +77,8 @@ export class SessionSnapshotManager {
    * automatic snapshot captured. Getting the right *set of tabs* matters far
    * more than getting the exact scroll position of each.
    */
-  retainClosingWindow(window: { tabs: { allTabs: () => readonly Tab[] } }): void {
+  retainClosingWindow(window: { isPrivate?: boolean; tabs: { allTabs: () => readonly Tab[] } }): void {
+    if (window.isPrivate) return
     const includePageState = this.settings.getAll().restoreFormState
     const tabs: SnapshotTab[] = []
 
@@ -105,6 +106,11 @@ export class SessionSnapshotManager {
     const includePageState = this.settings.getAll().restoreFormState
 
     for (const window of this.windows()) {
+      // A private window is never snapshotted. Restore points are written to
+      // disk and offered on the next launch, which would put private tabs in
+      // front of whoever opens the browser next — the exact opposite of the
+      // guarantee.
+      if (window.isPrivate) continue
       const ordered = window.tabs.allTabs()
       for (const [index, tab] of ordered.entries()) {
         const snap = tab.snapshot

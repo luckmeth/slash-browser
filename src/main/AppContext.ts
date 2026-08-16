@@ -269,8 +269,18 @@ export class AppContext {
     log.info('context started')
   }
 
-  createWindow(): BrowserWindowController {
+  /**
+   * Opens a window.
+   *
+   * A private window uses the in-memory session and records nothing: no
+   * history, no browsing memory, no closed-tab entries, and it is excluded from
+   * session snapshots. Those are four separate write paths, and privacy that
+   * covers three of them is not privacy.
+   */
+  createWindow(options: { isPrivate?: boolean } = {}): BrowserWindowController {
+    const isPrivate = options.isPrivate === true
     const window = new BrowserWindowController({
+      isPrivate,
       ipc: this.ipc,
       sessions: this.sessions,
       history: this.history,
@@ -280,16 +290,20 @@ export class AppContext {
       onTabDiscarded: (tabId) => this.permissions.cancelForTab(tabId),
       // Written through on close rather than flushed at quit: a crash is one of
       // the times you most want a tab back, and a shutdown flush never runs.
-      onTabClosed: (entry) => this.closedTabs.add(entry),
+      // A private tab's address must not survive it. Reopen-closed-tab is
+      // persisted, so recording one here would outlive the window itself.
+      onTabClosed: (entry) => {
+        if (isPrivate) return
+        this.closedTabs.add(entry)
+      },
       takeClosedTab: () => {
         const record = this.closedTabs.takeLatest()
         return record ? { ...record } : null
       },
       onPageLoaded: (contents, url) => {
-        // Private-window support is not built yet, so `false` is the truthful
-        // value here rather than a placeholder — the flag exists so the gate is
-        // already correct when it is.
-        void this.memory.indexPage(contents, url, false)
+        // The gate has always taken this flag; until now there was no private
+        // window to pass `true` from.
+        void this.memory.indexPage(contents, url, isPrivate)
       },
       onBookmarkRequested: (url, title) => {
         if (this.bookmarks.findByUrl(url)) return

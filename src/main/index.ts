@@ -94,6 +94,18 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_PRIVATE_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runPrivateCapture }) =>
+        runPrivateCapture(window, {
+          openPrivate: () => context.createWindow({ isPrivate: true }),
+          historyCount: (url) => context.history.search(url, 50, 0).length,
+          memoryCount: (url) =>
+            context.memoryRepository.search(parseQueryForDev(url), 50).length,
+          closedTabCount: () => context.closedTabs.list().length
+        })
+      )
+    }
+
     if (process.env['SLASH_REDIRECT_PROBE']) {
       void import('./dev/spikeCapture').then(({ runRedirectCapture }) =>
         runRedirectCapture(window, { lockTab: (tabId) => context.siteLockedTabs.add(tabId) })

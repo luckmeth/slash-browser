@@ -19,6 +19,7 @@ import { NewTabPage } from './features/newtab/NewTabPage'
 import { SidePanel } from './features/panels/SidePanel'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
 import { useWorkspaceTheme } from './features/workspaces/useWorkspaceTheme'
+import { PrivateNotice, PRIVATE_NOTICE_HEIGHT } from './features/private/PrivateNotice'
 import { Icon } from './components/Icon'
 
 /**
@@ -46,7 +47,13 @@ export function App(): React.JSX.Element {
 
   // The whole chrome takes the active workspace's accent, so switching context
   // is felt rather than read off a small highlight in the rail.
-  useWorkspaceTheme(workspaces.find((w) => w.id === activeWorkspaceId)?.color ?? null)
+  const isPrivate = useBrowserStore((s) => s.isPrivate)
+  // A private window keeps one fixed identity rather than following workspaces:
+  // the colour is part of how you tell at a glance which window you are in, and
+  // it must not shift under you.
+  useWorkspaceTheme(
+    isPrivate ? 'purple' : (workspaces.find((w) => w.id === activeWorkspaceId)?.color ?? null)
+  )
 
   useEffect(() => {
     void hydrate()
@@ -84,9 +91,10 @@ export function App(): React.JSX.Element {
         (findOpen ? FIND_BAR_HEIGHT : 0) +
         (handoffShowing ? HANDOFF_NOTICE_HEIGHT : 0) +
         (blockedPopup ? POPUP_NOTICE_HEIGHT : 0) +
-        (blockedNav ? NAV_NOTICE_HEIGHT : 0)
+        (blockedNav ? NAV_NOTICE_HEIGHT : 0) +
+        (isPrivate ? PRIVATE_NOTICE_HEIGHT : 0)
     })
-  }, [findOpen, handoffShowing, blockedPopup, blockedNav])
+  }, [findOpen, handoffShowing, blockedPopup, blockedNav, isPrivate])
 
   // Menu accelerators arrive here because a native view — usually the page —
   // holds keyboard focus, so the chrome document never sees the keystroke.
@@ -181,6 +189,7 @@ export function App(): React.JSX.Element {
               </div>
             )}
           </div>
+          {isPrivate && <PrivateNotice />}
           <FindBar />
           <HandoffNotice />
           <PopupBlockedNotice blocked={blockedPopup} onDismiss={() => setBlockedPopup(null)} />

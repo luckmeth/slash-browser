@@ -26,6 +26,14 @@ import { rendererEntry } from './rendererEntry'
 const log = createLogger('window')
 
 export interface WindowDeps {
+  /**
+   * A private window: in-memory session, nothing written to history or memory.
+   *
+   * Fixed at construction and never toggled. Flipping it later would strand
+   * whatever the window had already recorded — the same reasoning that makes
+   * workspace isolation immutable.
+   */
+  isPrivate?: boolean
   ipc: IpcRegistry
   sessions: SessionRegistry
   history: HistoryRepository
@@ -82,10 +90,18 @@ export class BrowserWindowController {
    * `omnibox:getState` contract for why a push alone is not enough.
    */
   omniboxState: OmniboxState | null = null
+  /** Whether this window browses privately. Fixed at construction. */
+  get isPrivate(): boolean {
+    return this.depsIsPrivate
+  }
   /** Prompt currently on screen, pulled by the overlay when it mounts. */
   pendingPermission: PermissionRequest | null = null
 
+  /** Read before `this.deps` is assignable inside the constructor's super call. */
+  private readonly depsIsPrivate: boolean
+
   constructor(private readonly deps: WindowDeps) {
+    this.depsIsPrivate = deps.isPrivate === true
     this.window = new BaseWindow({
       width: 1440,
       height: 900,
@@ -107,7 +123,7 @@ export class BrowserWindowController {
        * which is why every surface still defines its own colour.
        */
       backgroundMaterial: 'acrylic',
-      title: 'Slash',
+      title: this.depsIsPrivate ? 'Slash — Private' : 'Slash',
       icon: appIconPath(),
 
       // No OS title bar: the tab strip is the title bar, as in every mainstream
@@ -168,11 +184,16 @@ export class BrowserWindowController {
         // A workspace's session is resolved through the registry, which is what
         // guarantees a newly created `persist:ws-*` partition is hardened before
         // any page loads in it.
+        // A private window ignores workspace isolation entirely: every tab in it
+        // shares the one in-memory partition, so nothing it does can reach a
+        // persisted cookie jar.
         sessionFor: (workspaceId) =>
-          this.deps.sessions.getForWorkspace(
-            workspaceId,
-            this.deps.workspaces.findById(workspaceId)?.isolated ?? false
-          ),
+          this.deps.isPrivate === true
+            ? this.deps.sessions.getPrivate()
+            : this.deps.sessions.getForWorkspace(
+                workspaceId,
+                this.deps.workspaces.findById(workspaceId)?.isolated ?? false
+              ),
         isIsolated: (workspaceId) =>
           this.deps.workspaces.findById(workspaceId)?.isolated ?? false
       },
@@ -182,11 +203,16 @@ export class BrowserWindowController {
           this.syncWindowTitle(snapshot)
         },
         onNavigated: (url, title, faviconUrl) => {
+          // A private window writes no history, regardless of the setting. This
+          // is the guarantee the window's whole existence rests on, so it is
+          // checked here rather than left to the indexer downstream.
+          if (this.depsIsPrivate) return
           if (!this.deps.settings.getAll().recordHistory) return
           this.deps.history.recordVisit(url, title, faviconUrl)
           this.deps.ipc.broadcast('history:changed', {}, this.privilegedContents())
         },
         onMetadata: (url, title, faviconUrl) => {
+          if (this.depsIsPrivate) return
           if (!this.deps.settings.getAll().recordHistory) return
           this.deps.history.updateMetadata(url, title, faviconUrl)
         },
