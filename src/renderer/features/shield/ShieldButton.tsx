@@ -186,6 +186,15 @@ export function ShieldButton(): React.JSX.Element | null {
               <strong>not</strong> a virus scanner — a browser cannot inspect files for malware.
               Keep Windows Security on for that.
             </p>
+            {/* Said here rather than left to be discovered, because this is the
+                one people notice and the shield count looks like a promise. */}
+            {status.host.endsWith('youtube.com') && (
+              <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                On YouTube, Slash blocks ad tracking and measurement, but{' '}
+                <strong>not the video ad before your video</strong>. Those are delivered through the
+                same address as the video itself, so blocking them would stop playback.
+              </p>
+            )}
           </div>
         </>
       )}

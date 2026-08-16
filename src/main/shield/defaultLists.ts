@@ -161,6 +161,44 @@ export const DEFAULT_TRACKER_DOMAINS: readonly string[] = [
 ]
 
 /**
+ * Host + path rules, for ad endpoints that domain blocking cannot reach.
+ *
+ * Every entry here is deliberate and narrow, because these bypass the
+ * third-party test that keeps domain rules from breaking the site you are on.
+ * A careless prefix here takes a working site down.
+ *
+ * What is intentionally **not** here:
+ *
+ *   - `youtube.com/api/stats/watchtime` and `/api/stats/qoe` — playback
+ *     telemetry, not advertising. Blocking watchtime loses resume position.
+ *   - `googlevideo.com/videoplayback` — this is the video itself. YouTube serves
+ *     ad segments from the same host and the same path as the content, which is
+ *     precisely why network filtering alone cannot remove a pre-roll. See
+ *     docs/testing/youtube-ads.md.
+ *   - `google.com` as a domain — it would break Search. Only `/pagead/` under it.
+ */
+export const DEFAULT_PATH_RULES: readonly {
+  host: string
+  path: string
+  category: 'ad' | 'tracker'
+}[] = [
+  // YouTube's own ad and ad-measurement endpoints. First-party, so unreachable
+  // by domain rules — verified on a live watch page.
+  { host: 'youtube.com', path: '/pagead/', category: 'ad' },
+  { host: 'youtube.com', path: '/ptracking', category: 'tracker' },
+  { host: 'youtube.com', path: '/api/stats/ads', category: 'ad' },
+  { host: 'youtube.com', path: '/youtubei/v1/player/ad_break', category: 'ad' },
+  { host: 'youtube.com', path: '/get_midroll_info', category: 'ad' },
+  { host: 'googlevideo.com', path: '/initplayback', category: 'ad' },
+
+  // Ad telemetry on hosts whose main job is something else entirely.
+  { host: 'google.*', path: '/pagead/', category: 'ad' },
+  { host: 'google.*', path: '/ads/', category: 'ad' },
+  { host: 'facebook.com', path: '/tr', category: 'tracker' },
+  { host: 'bing.com', path: '/action/', category: 'tracker' }
+]
+
+/**
  * Known-malicious and phishing hosts.
  *
  * Intentionally tiny. Real protection here means a live feed — Google Safe

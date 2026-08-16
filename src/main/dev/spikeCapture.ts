@@ -477,6 +477,56 @@ export async function runRedirectCapture(
 }
 
 /**
+ * Dev-only YouTube diagnostic.
+ *
+ * "Ads still play" is a claim about a specific site, and the answer depends
+ * entirely on what that site actually requests. This records the request URLs a
+ * video page makes and what the filter decided about each, so the fix is chosen
+ * from evidence rather than from what ad blocking is assumed to look like.
+ */
+export async function runYouTubeCapture(
+  window: BrowserWindowController,
+  hooks: { onRequest: (url: string, blocked: boolean) => void; report: () => string }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  void hooks.onRequest
+  window.tabs.activate(activeId)
+  // A video page, not the home page — ads are attached to playback.
+  window.tabs.navigate(activeId, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ')
+  await delay(12000)
+
+  const page = window.tabs.findById(activeId)?.contents
+  if (page) {
+    // What the player itself thinks it is going to show. `adPlacements` is the
+    // field YouTube stitches ad breaks into, and it lives in the page's own
+    // player response — not in any separate request.
+    const player = (await page.executeJavaScript(
+      `(() => {
+         try {
+           const r = window.ytInitialPlayerResponse;
+           if (!r) return JSON.stringify({ playerResponse: 'absent' });
+           return JSON.stringify({
+             hasAdPlacements: Array.isArray(r.adPlacements),
+             adPlacementCount: (r.adPlacements || []).length,
+             hasPlayerAds: !!r.playerAds,
+             adSlotCount: (r.adSlots || []).length
+           });
+         } catch (e) { return JSON.stringify({ error: String(e) }); }
+       })()`
+    )) as string
+    log.info(`youtube probe: player ${player}`)
+  }
+
+  log.info(`youtube probe: ${hooks.report()}`)
+  app.quit()
+}
+
+/**
  * Dev-only content-blocker verification.
  *
  * Loads real pages that carry advertising and analytics, and confirms requests

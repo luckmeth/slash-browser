@@ -24,6 +24,31 @@
  */
 export type RuleCategory = 'ad' | 'tracker'
 
+/**
+ * A rule that matches a host *and* a path prefix.
+ *
+ * Domain rules cannot reach two common cases, both confirmed on a real YouTube
+ * watch page:
+ *
+ *   - **First-party ad endpoints.** `www.youtube.com/ptracking` is served by the
+ *     site you are on, so the third-party test that protects ordinary pages
+ *     exempts it.
+ *   - **Mixed-purpose hosts.** `www.google.com/pagead/lvz` is ad telemetry, but
+ *     blocking `google.com` outright would break Search.
+ *
+ * So these rules are checked against the full host+path and apply regardless of
+ * first-party status. That is a sharper instrument than domain blocking and it
+ * is kept deliberately short: every entry has to be justified against breaking
+ * the site it targets.
+ */
+export interface PathRule {
+  /** Host, matched with the same subdomain walk as domain rules. */
+  readonly host: string
+  /** Path prefix, matched case-insensitively against `url.pathname`. */
+  readonly path: string
+  readonly category: RuleCategory
+}
+
 export class FilterEngine {
   private readonly ads = new Set<string>()
   private readonly trackers = new Set<string>()
@@ -91,6 +116,41 @@ export class FilterEngine {
     return this.categoryOf(host) !== null
   }
 
+  loadPathRules(rules: readonly PathRule[]): void {
+    for (const rule of rules) {
+      const host = normalise(rule.host)
+      if (host) this.pathRules.push({ ...rule, host, path: rule.path.toLowerCase() })
+    }
+  }
+
+  /**
+   * Whether a full URL matches a host+path rule.
+   *
+   * Checked *before* the first-party test in `NetworkPolicy`, which is the whole
+   * point of these rules existing — the endpoints they target are served by the
+   * site the user is on.
+   */
+  classifyUrl(url: string): RuleCategory | null {
+    let host: string
+    let path: string
+    try {
+      const parsed = new URL(url)
+      host = normalise(parsed.host)
+      path = parsed.pathname.toLowerCase()
+    } catch {
+      return null
+    }
+    if (host === '') return null
+
+    for (const rule of this.pathRules) {
+      if (!hostMatches(rule.host, host)) continue
+      if (path.startsWith(rule.path)) return rule.category
+    }
+    return null
+  }
+
+  private readonly pathRules: PathRule[] = []
+
   /** Whether the *page* the user is on has been exempted by them. */
   isSiteAllowed(pageHost: string): boolean {
     return matches(this.allowed, normalise(pageHost))
@@ -129,6 +189,29 @@ export class FilterEngine {
 
 function normalise(value: string): string {
   return value.trim().toLowerCase().replace(/^www\./, '')
+}
+
+/**
+ * Whether `host` is `rule` or a subdomain of it.
+ *
+ * A rule ending in `.*` matches the same name under any top-level domain:
+ * `google.*` covers google.com, google.lk, google.co.uk. Google serves the same
+ * ad endpoints from every country domain it operates, and a probe against a live
+ * page found `google.lk/pagead/lvz` sailing past a rule written for
+ * `google.com`. Listing ~190 country domains by hand was the alternative.
+ */
+function hostMatches(rule: string, host: string): boolean {
+  if (rule.endsWith('.*')) {
+    const base = rule.slice(0, -2)
+    // `google.co.uk` and `google.com` both qualify; `notgoogle.com` does not,
+    // and neither does `google.com.evil.example` — the name must own the tail.
+    return new RegExp(`(^|\\.)${escapeRegExp(base)}(\\.[a-z]{2,}){1,2}$`).test(host)
+  }
+  return host === rule || host.endsWith(`.${rule}`)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /** Walks up the domain tree so a rule covers its subdomains. */

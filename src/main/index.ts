@@ -68,6 +68,29 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_YOUTUBE_PROBE']) {
+      const seen: { url: string; blocked: boolean }[] = []
+      context.blocker.onDecision = (url, blocked) => seen.push({ url, blocked })
+      void import('./dev/spikeCapture').then(({ runYouTubeCapture }) =>
+        runYouTubeCapture(window, {
+          onRequest: () => {},
+          report: () => {
+            // Group by the shape that matters: which path prefixes carry ads,
+            // and whether anything stopped them.
+            const interesting = seen.filter((s) =>
+              /pagead|doubleclick|\/ads|adformat|ptracking|googlevideo|get_video_info|player\?|youtubei\/v1\/player/i.test(
+                s.url
+              )
+            )
+            const lines = interesting
+              .slice(0, 40)
+              .map((s) => `${s.blocked ? 'BLOCKED' : 'allowed'} ${s.url.slice(0, 130)}`)
+            return `${seen.length} requests, ${seen.filter((s) => s.blocked).length} blocked\n${lines.join('\n')}`
+          }
+        })
+      )
+    }
+
     if (process.env['SLASH_REDIRECT_PROBE']) {
       void import('./dev/spikeCapture').then(({ runRedirectCapture }) =>
         runRedirectCapture(window, { lockTab: (tabId) => context.siteLockedTabs.add(tabId) })

@@ -7,7 +7,8 @@ import { ActivityLog } from './ActivityLog'
 import {
   DEFAULT_BLOCK_DOMAINS,
   DEFAULT_MALICIOUS_DOMAINS,
-  DEFAULT_TRACKER_DOMAINS
+  DEFAULT_TRACKER_DOMAINS,
+  DEFAULT_PATH_RULES
 } from './defaultLists'
 
 const log = createLogger('blocker')
@@ -54,6 +55,7 @@ export class ContentBlocker {
     this.activity = activity
     this.engine.loadBlocked(DEFAULT_BLOCK_DOMAINS, 'ad')
     this.engine.loadBlocked(DEFAULT_TRACKER_DOMAINS, 'tracker')
+    this.engine.loadPathRules(DEFAULT_PATH_RULES)
     this.engine.loadMalicious(DEFAULT_MALICIOUS_DOMAINS)
     this.engine.setAllowedSites(this.settings.getAll().blockingAllowedSites)
     this.engine.setCustomRules(this.settings.getAll().customBlockRules)
@@ -86,6 +88,9 @@ export class ContentBlocker {
    * process in ordinary use.
    */
   readonly diagnostics = { seen: 0, withContentsId: 0, thirdParty: 0, resolvedPage: 0 }
+
+  /** Dev-only tap on every decision. Null in normal use; see SLASH_YOUTUBE_PROBE. */
+  onDecision: ((url: string, blocked: boolean) => void) | null = null
 
   /**
    * Installs the filter on a session.
@@ -130,6 +135,29 @@ export class ContentBlocker {
         return
       }
 
+      // Host+path rules run BEFORE the first-party test, which is exactly why
+      // they exist: YouTube serves its ad endpoints from youtube.com itself, so
+      // the rule that stops domain blocking breaking the site you are on would
+      // otherwise exempt them. Verified against a live watch page.
+      const byPath = this.engine.classifyUrl(details.url)
+      if (byPath) {
+        const owner =
+          details.webContentsId !== undefined
+            ? this.hooks.resolvePageUrl(details.webContentsId)
+            : null
+        // A per-site exemption still wins: turning the shield off for a site has
+        // to turn all of it off, not most of it.
+        if (!owner || !this.engine.isSiteAllowed(hostOf(owner))) {
+          this.onDecision?.(details.url, true)
+          if (details.webContentsId !== undefined) {
+            this.activity.record(details.webContentsId, byPath, requestHost, hostOf(owner ?? ''))
+            this.hooks.onCountsChanged()
+          }
+          callback({ cancel: true })
+          return
+        }
+      }
+
       // The page's own host, not the request's, decides first-party status.
       const pageUrl =
         details.webContentsId !== undefined
@@ -154,6 +182,7 @@ export class ContentBlocker {
       // numbers are these entries counted — not a parallel tally that could
       // disagree with what actually happened.
       const category = this.engine.classifyRequest(requestHost, pageHost)
+      this.onDecision?.(details.url, category !== null)
       if (category) {
         if (details.webContentsId !== undefined) {
           this.activity.record(details.webContentsId, category, requestHost, pageHost)
