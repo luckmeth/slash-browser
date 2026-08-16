@@ -111,7 +111,23 @@ export function registerHandlers(ctx: AppContext): void {
   // --- settings -------------------------------------------------------------
 
   ipc.handle('settings:getAll', () => ok(ctx.settings.getAll()))
-  ipc.handle('settings:update', (patch) => ok(ctx.settings.update(patch)))
+  ipc.handle('settings:update', (patch) => {
+    const next = ctx.settings.update(patch)
+
+    // Announce the change. Without this the value was written to SQLite and the
+    // renderer never heard about it — the store only updates from this event, so
+    // the UI kept rendering the old settings until the next launch. Toggles hid
+    // it, because they are re-read whenever the panel reopens; the appearance
+    // settings exposed it immediately, since they are supposed to repaint.
+    for (const window of ctx.allWindows()) {
+      ipc.broadcast('settings:changed', next, window.privilegedContents())
+    }
+
+    // Anything holding a derived copy of a setting has to be told too, or the
+    // stored value and the engine's view of it drift apart.
+    ctx.blocker.refreshAllowedSites()
+    return ok(next)
+  })
 
   // --- omnibox suggestions --------------------------------------------------
 

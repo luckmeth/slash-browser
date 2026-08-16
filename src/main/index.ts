@@ -94,6 +94,12 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_SETTINGS_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runSettingsCapture }) =>
+        runSettingsCapture(window)
+      )
+    }
+
     if (process.env['SLASH_PRIVATE_PROBE']) {
       void import('./dev/spikeCapture').then(({ runPrivateCapture }) =>
         runPrivateCapture(window, {

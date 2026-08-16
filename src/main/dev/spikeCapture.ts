@@ -1127,3 +1127,48 @@ export async function runPrivateCapture(
 
   app.quit()
 }
+
+/**
+ * Dev-only check that a settings change reaches the interface.
+ *
+ * The value was always written to SQLite; what was missing was the broadcast
+ * telling the renderer. That failure is invisible to a typecheck and to any test
+ * that stops at the repository, so it is verified here by changing a setting and
+ * reading the accent colour back off the live document.
+ */
+export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
+  await waitForActiveTab(window)
+  const chrome = window.privilegedContents()[0]
+  if (!chrome) {
+    log.error('settings probe: no chrome view')
+    app.quit()
+    return
+  }
+
+  const read = async (): Promise<string> =>
+    (await chrome.executeJavaScript(
+      `getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim()`
+    )) as string
+
+  const before = await read()
+
+  await chrome.executeJavaScript(
+    `window.browser.invoke('settings:update', { accentColor: 'rose' })`
+  )
+  await delay(1200)
+  const after = await read()
+
+  log.info(`settings probe: accent before=${before} after=${after}`)
+  if (before !== after && after.length > 0) {
+    log.info('settings probe: PASS — a settings change repaints the interface')
+  } else {
+    log.error('settings probe: FAIL — the change never reached the renderer')
+  }
+
+  // Leave the profile as it was found.
+  await chrome.executeJavaScript(
+    `window.browser.invoke('settings:update', { accentColor: 'default' })`
+  )
+  await delay(400)
+  app.quit()
+}

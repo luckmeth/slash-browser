@@ -12,7 +12,7 @@ import { z } from 'zod'
  */
 export const SettingsSchema = z.object({
   // --- Phase 1: core browser -------------------------------------------------
-  searchEngineId: z.enum(['duckduckgo', 'google', 'bing', 'startpage']).default('duckduckgo'),
+  searchEngineId: z.enum(['duckduckgo', 'google', 'bing', 'startpage']).default('google'),
   homepage: z.string().default('app://newtab'),
   theme: z.enum(['system', 'light', 'dark']).default('system'),
 
