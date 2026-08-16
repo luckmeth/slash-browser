@@ -200,27 +200,161 @@ export async function runHandoffCapture(
        })()`
     )) as string
     if (seen === 'not shown') {
-      log.error('handoff probe: FAIL — notice did not appear')
       const snap = window.tabs.snapshot()
-      log.info(`handoff probe: tab url is ${window.tabs.findById(activeId)?.snapshot.url}`)
-      log.info(
-        `handoff probe: navigated=${activeId} mainActive=${snap.activeTabId} ` +
-          `activeUrl=${snap.tabs.find((t) => t.id === snap.activeTabId)?.url}`
+      log.error(
+        `handoff probe: FAIL — notice did not appear ` +
+          `(navigated=${activeId} active=${snap.activeTabId})`
       )
-      const debug = (await chrome.executeJavaScript(
-        `JSON.stringify({
-           statusNodes: document.querySelectorAll('[role="status"]').length,
-           bodyHas: document.body.innerText.includes('default browser'),
-           firstText: document.body.innerText.slice(0, 200)
-         })`
-      )) as string
-      log.info(`handoff probe: chrome DOM ${debug}`)
     } else {
       log.info(`handoff probe: PASS — ${seen}`)
     }
   }
 
   await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only diagnostic for the Google sign-in refusal.
+ *
+ * Exists because "Google blocks us" is a claim, and a claim about someone else's
+ * server-side heuristic is worth exactly as much as the evidence behind it. This
+ * reads the signals a browser actually exposes to a page — the ones Google's
+ * check is documented and observed to consult — and prints them, so the
+ * conclusion in `SessionHardening` can be checked rather than believed.
+ *
+ * Reads only from our own page views, and only values the page could read about
+ * itself. No credentials are typed and nothing is submitted.
+ */
+export async function runGoogleDiagnostic(
+  window: BrowserWindowController,
+  outputPath: string
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  window.tabs.activate(activeId)
+  window.tabs.navigate(activeId, 'https://accounts.google.com/signin/v2/identifier')
+  await delay(7000)
+
+  const page = window.tabs.findById(activeId)?.contents
+  if (!page) {
+    log.error('google diagnostic: no page contents')
+    app.quit()
+    return
+  }
+
+  // Client-identification signals, read from the page itself. `getHighEntropyValues`
+  // is the full brand list — the short `brands` array is what a site sees first,
+  // but the high-entropy call is what a determined check reads.
+  const signals = (await page.executeJavaScript(
+    `(async () => {
+       const uad = navigator.userAgentData;
+       let high = null;
+       try {
+         high = uad ? await uad.getHighEntropyValues(['fullVersionList', 'platform', 'platformVersion']) : null;
+       } catch (e) { high = { error: String(e) }; }
+       return JSON.stringify({
+         userAgent: navigator.userAgent,
+         webdriver: navigator.webdriver,
+         hasUserAgentData: !!uad,
+         brands: uad ? uad.brands : null,
+         mobile: uad ? uad.mobile : null,
+         platform: uad ? uad.platform : null,
+         highEntropy: high,
+         pluginCount: navigator.plugins.length,
+         languages: navigator.languages
+       }, null, 1);
+     })()`
+  )) as string
+  log.info(`google diagnostic: signals ${signals}`)
+
+  // The page's own text, which is where the refusal (if any) is stated.
+  const pageText = (await page.executeJavaScript(
+    `JSON.stringify({
+       url: location.href,
+       title: document.title,
+       text: document.body.innerText.replace(/\\s+/g, ' ').slice(0, 400)
+     }, null, 1)`
+  )) as string
+  log.info(`google diagnostic: page ${pageText}`)
+
+  // What the request actually carried. Sec-CH-UA is derived from the same brand
+  // list, so this shows whether the wire agrees with the JS API.
+  const headers = (await page.executeJavaScript(
+    `fetch('https://accounts.google.com/generate_204', { method: 'GET' })
+       .then((r) => JSON.stringify({ status: r.status, type: r.type }))
+       .catch((e) => JSON.stringify({ error: String(e) }))`
+  )) as string
+  log.info(`google diagnostic: probe request ${headers}`)
+
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only verification that the unsaved-input guard still fires.
+ *
+ * This guard is what stops the performance engine destroying a renderer holding
+ * a half-filled form, so a silent regression here loses a user's typing. The
+ * preload no longer reads field values, which means the signal now depends
+ * entirely on `input` events reaching it — worth proving against a real DOM
+ * rather than trusting the unit test of the predicate alone.
+ */
+export async function runUnsavedInputCapture(window: BrowserWindowController): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  const form = `data:text/html,${encodeURIComponent(
+    `<form><input id="t" type="text"><input id="p" type="password">` +
+      `<input id="c" type="checkbox"><div id="e" contenteditable="true"></div></form>`
+  )}`
+
+  window.tabs.activate(activeId)
+  window.tabs.navigate(activeId, form)
+  await delay(2500)
+
+  const tab = window.tabs.findById(activeId)
+  const page = tab?.contents
+  if (!tab || !page) {
+    log.error('unsaved probe: no page')
+    app.quit()
+    return
+  }
+
+  const baseline = tab.hasUnsavedInput
+  log.info(`unsaved probe: before typing = ${baseline}`)
+
+  // A checkbox first: it must NOT count, so a pass here proves the predicate is
+  // consulted rather than every input event being treated as unsaved work.
+  await page.executeJavaScript(
+    `document.getElementById('c').click(); void 0`
+  )
+  await delay(2200)
+  log.info(`unsaved probe: after checkbox = ${tab.hasUnsavedInput}`)
+
+  // Real typing, via input events the way a user produces them.
+  page.focus()
+  await page.executeJavaScript(`document.getElementById('t').focus(); void 0`)
+  for (const ch of 'hello') {
+    page.sendInputEvent({ type: 'char', keyCode: ch })
+    await delay(40)
+  }
+  await delay(2200)
+  const afterTyping = tab.hasUnsavedInput
+
+  if (baseline === false && afterTyping === true) {
+    log.info('unsaved probe: PASS — flag set by typing, not by a checkbox')
+  } else {
+    log.error(`unsaved probe: FAIL — baseline=${baseline} afterTyping=${afterTyping}`)
+  }
+
   app.quit()
 }
 

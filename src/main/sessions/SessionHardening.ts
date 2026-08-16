@@ -107,39 +107,56 @@ export class SessionHardening {
   }
 
   /**
-   * Removes the Electron and app tokens from the User-Agent.
+   * Declares who we are in the User-Agent: Chromium's version, plus `Slash/x.y`.
    *
-   * Electron's default UA advertises `Electron/43.4.0 adaptive-browser/0.1.0`.
-   * Some sites parse that and serve a degraded or blocked experience, so the
-   * browser would be broken through no fault of the page. The remaining string
-   * is an accurate Chrome UA — this is not an attempt to disguise the client
-   * beyond removing tokens that break feature detection.
+   * Two changes to Electron's default, in opposite directions:
+   *
+   *  - `Electron/43.4.0` is dropped. It names the toolkit, not the browser, and
+   *    sites that sniff for it serve a degraded page — a compatibility problem
+   *    with no upside, since the engine really is Chromium 150.
+   *  - `Slash/0.1.0` is *kept*. This browser is not Google Chrome and should not
+   *    claim to be. Vivaldi ships its token for the same reason.
+   *
+   * An earlier version stripped both, producing a string byte-identical to
+   * Chrome's. That was impersonation, it was not needed for compatibility, and
+   * it did not help with the thing it was suspected of helping with — see the
+   * measurement below.
    */
   static normaliseUserAgent(): void {
-    const cleaned = app.userAgentFallback
+    const base = app.userAgentFallback
       .replace(/\sElectron\/\S+/, '')
       .replace(new RegExp(`\\s${escapeRegExp(app.getName())}\\/\\S+`, 'i'), '')
       .replace(/\s{2,}/g, ' ')
       .trim()
-    app.userAgentFallback = cleaned
-    log.info(`user agent: ${cleaned}`)
+    const declared = `${base} Slash/${app.getVersion()}`
+    app.userAgentFallback = declared
+    log.info(`user agent: ${declared}`)
   }
 
   /*
-   * NOTE ON GOOGLE SIGN-IN, and why there is no workaround here.
+   * NOTE ON GOOGLE SIGN-IN — measured, not assumed.
    *
-   * Google refuses sign-in from this browser with "This browser or app may not
-   * be secure". The User-Agent is already a clean Chrome string — verified — so
-   * that is not the trigger. The remaining signal is Client Hints:
+   * Google refuses sign-in with "This browser or app may not be secure". The
+   * signal is User-Agent Client Hints, and the measured value here is not merely
+   * missing a product brand — it is entirely empty:
    *
-   *   navigator.userAgentData.brands
-   *     → [{ "Not;A=Brand" }, { "Chromium", "150" }]
+   *   navigator.userAgentData.brands            → []
+   *   navigator.userAgentData.platform          → ""
+   *   getHighEntropyValues().fullVersionList    → []
    *
-   * A real browser also reports a *product* brand there: Chrome reports "Google
-   * Chrome", Edge "Microsoft Edge", Brave "Brave". Electron reports none,
-   * because that list comes from Chromium's embedder identity and Electron does
-   * not expose an API to set it. An attempt to set it via a command-line switch
-   * was tried and verified to do nothing.
+   * Chrome reports `[{"Chromium","150"},{"Google Chrome","150"},{"Not;A=Brand"}]`
+   * and `platform: "Windows"`. An empty list is not a browser Google failed to
+   * recognise; it is the absence of the field the check reads.
+   *
+   * Verified with `SLASH_GOOGLE_DIAGNOSTIC` (see docs/testing/google-signin.md):
+   *
+   *  - The list is empty whether or not this class touches the UA string, so the
+   *    UA is not the cause and editing it is not the fix.
+   *  - `navigator.webdriver` is false; no automation marker is involved.
+   *  - Electron exposes `setUserAgent(string)` and nothing else — its typings
+   *    contain no reference to user-agent metadata, brands, or client hints.
+   *    There is no API to populate this, and a command-line switch was tried and
+   *    verified to do nothing.
    *
    * The only remaining route would be injecting script into every page to
    * redefine `navigator.userAgentData` and claim to be Google Chrome. That is
@@ -148,8 +165,7 @@ export class SessionHardening {
    * we are not is the wrong thing to build into a browser that tells its users
    * the truth elsewhere.
    *
-   * Google allowlists browsers. Brave and Vivaldi are accepted because they went
-   * through that process, not because they spoofed their way in.
+   * The honest answer is the hand-off — see shared/externalHandoff.ts.
    */
 }
 

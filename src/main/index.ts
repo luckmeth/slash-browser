@@ -61,6 +61,19 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const googlePath = process.env['SLASH_GOOGLE_DIAGNOSTIC']
+    if (googlePath) {
+      void import('./dev/spikeCapture').then(({ runGoogleDiagnostic }) =>
+        runGoogleDiagnostic(window, googlePath)
+      )
+    }
+
+    if (process.env['SLASH_UNSAVED_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runUnsavedInputCapture }) =>
+        runUnsavedInputCapture(window)
+      )
+    }
+
     const blockPath = process.env['ADAPTIVE_BLOCK_CAPTURE']
     if (blockPath) {
       void import('./dev/spikeCapture').then(({ runBlockingCapture }) =>

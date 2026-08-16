@@ -1,10 +1,14 @@
 /**
  * Sites known to refuse sign-in from browsers they do not recognise.
  *
- * Google checks `navigator.userAgentData.brands`, which reports only "Chromium"
- * here because that list comes from Chromium's embedder identity and Electron
- * exposes no way to set it. Google allowlists browsers; Brave and Vivaldi were
- * added to that list, they did not disguise themselves.
+ * Google checks User-Agent Client Hints, and the measured value here is empty —
+ * `navigator.userAgentData.brands` is `[]`, not a list missing a product name.
+ * That metadata comes from Chromium's embedder identity and Electron exposes no
+ * API to populate it. Google allowlists browsers; Brave and Vivaldi were added
+ * to that list, they did not disguise themselves.
+ *
+ * The measurement, and why the User-Agent string is not the cause, is in
+ * main/sessions/SessionHardening.ts and docs/testing/google-signin.md.
  *
  * Rather than impersonate Chrome to get past the check, the browser says what is
  * happening and offers to hand the page to the user's default browser. That is
