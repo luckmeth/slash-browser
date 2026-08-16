@@ -304,6 +304,34 @@ const m008_icon_names: Migration = {
   `
 }
 
+const m009_closed_tabs: Migration = {
+  version: 9,
+  name: 'closed_tabs',
+  sql: /* sql */ `
+    -- Recently-closed tabs, so Ctrl+Shift+T survives a restart.
+    --
+    -- This lived in a plain array in TabManager, which meant closing the browser
+    -- discarded it: the one moment you are most likely to want a tab back is
+    -- after reopening, and that was exactly when the list was empty.
+    --
+    -- Stores what a tab is, not what it was showing: url, title, favicon, where
+    -- it sat, and its back/forward history. No page content, no form state.
+    CREATE TABLE closed_tabs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      url           TEXT    NOT NULL,
+      title         TEXT    NOT NULL DEFAULT '',
+      favicon_url   TEXT,
+      tab_index     INTEGER NOT NULL DEFAULT 0,
+      is_pinned     INTEGER NOT NULL DEFAULT 0,
+      workspace_id  TEXT    NOT NULL,
+      -- JSON from webContents.navigationHistory, so Back still works on reopen.
+      navigation    TEXT    NOT NULL DEFAULT '',
+      closed_at     INTEGER NOT NULL
+    );
+    CREATE INDEX idx_closed_tabs_at ON closed_tabs (closed_at DESC);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -312,7 +340,8 @@ export const migrations: readonly Migration[] = [
   m005_snapshots,
   m006_memory,
   m007_ai,
-  m008_icon_names
+  m008_icon_names,
+  m009_closed_tabs
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

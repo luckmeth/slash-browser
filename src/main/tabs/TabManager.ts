@@ -18,13 +18,15 @@ const log = createLogger('tabs')
 /** Index in the window's contentView child list where the page view belongs. */
 const PAGE_VIEW_INDEX = 1
 
-interface ClosedTab {
+export interface ClosedTab {
   url: string
   title: string
   faviconUrl: string | null
   index: number
   isPinned: boolean
   workspaceId: string
+  /** Serialised back/forward history, so a reopened tab keeps its Back button. */
+  navigation: string
 }
 
 /** What TabManager needs to know about workspaces without owning them. */
@@ -63,6 +65,10 @@ export interface TabManagerHooks {
   shouldAllowPopup?: (tab: Tab, url: string, webContentsId: number) => boolean
   /** Slash Shield's verdict on a page-initiated top-level navigation. */
   shouldAllowNavigation?: (tab: Tab, url: string, webContentsId: number) => boolean
+  /** A tab closed — persisted so reopening it survives a restart. */
+  onTabClosed?: (entry: ClosedTab & { closedAt: number }) => void
+  /** The most recent persisted closed tab, consumed by reopen. */
+  takeClosedTab?: () => ClosedTab | null
 }
 
 /**
@@ -250,15 +256,36 @@ export class TabManager {
     // Internal pages are not worth reopening — Ctrl+Shift+T should bring back
     // something the user actually lost.
     if (!isInternalUrl(snap.url)) {
-      this.closed.push({
+      // Capture back/forward history before the view is destroyed — after that
+      // there is nothing left to ask, and a reopened tab with a dead Back button
+      // is only half the tab you lost.
+      let navigation = ''
+      const contents = tab.contents
+      if (contents && !contents.isDestroyed()) {
+        try {
+          navigation = JSON.stringify({
+            entries: contents.navigationHistory.getAllEntries(),
+            activeIndex: contents.navigationHistory.getActiveIndex()
+          })
+        } catch {
+          // A renderer that has already gone simply contributes no history.
+        }
+      }
+
+      const entry: ClosedTab = {
         url: snap.url,
         title: snap.title,
         faviconUrl: snap.faviconUrl,
         index: visibleIndex,
         isPinned: snap.isPinned,
-        workspaceId: snap.workspaceId
-      })
+        workspaceId: snap.workspaceId,
+        navigation
+      }
+      this.closed.push(entry)
       if (this.closed.length > CLOSED_TAB_STACK_LIMIT) this.closed.shift()
+      // Written through immediately rather than on quit: a crash is one of the
+      // times you most want the tab back, and a flush at shutdown never runs.
+      this.hooks.onTabClosed?.({ ...entry, closedAt: Date.now() })
     }
 
     const siblings = this.visibleTabs
@@ -310,11 +337,41 @@ export class TabManager {
     this.scheduleEmit()
   }
 
+  /**
+   * Brings back the most recently closed tab.
+   *
+   * Falls through to the persisted list when this window's own stack is empty,
+   * which is what makes the shortcut work after a restart — the moment you are
+   * most likely to want a tab back is just after reopening the browser, and that
+   * used to be exactly when the list was empty.
+   */
   reopenClosed(): void {
-    const entry = this.closed.pop()
+    const entry = this.closed.pop() ?? this.hooks.takeClosedTab?.() ?? null
     if (!entry) return
+
     const tab = new Tab({ workspaceId: entry.workspaceId, url: entry.url })
     tab.patch({ title: entry.title, faviconUrl: entry.faviconUrl, isPinned: entry.isPinned })
+
+    // Hand back the history before the view exists, so buildView restores it the
+    // same way waking a hibernated tab does.
+    if (entry.navigation) {
+      try {
+        const saved = JSON.parse(entry.navigation) as {
+          entries?: unknown[]
+          activeIndex?: number
+        }
+        if (Array.isArray(saved.entries) && saved.entries.length > 0) {
+          tab.seedFromSnapshot(
+            saved.entries as never,
+            saved.activeIndex ?? saved.entries.length - 1,
+            0
+          )
+        }
+      } catch {
+        // Unparseable history is not a reason to refuse the tab.
+      }
+    }
+
     this.tabs.push(tab)
     this.buildView(tab)
     this.activate(tab.id)

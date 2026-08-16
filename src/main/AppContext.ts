@@ -15,6 +15,7 @@ import { hostOf } from '@shared/url'
 import { PermissionRepository } from './db/repositories/PermissionRepository'
 import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
+import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
 import { MemoryIndexer } from './memory/MemoryIndexer'
@@ -48,6 +49,7 @@ export class AppContext {
   readonly permissionRepository: PermissionRepository
   readonly permissions: PermissionManager
   readonly snapshotRepository: SnapshotRepository
+  readonly closedTabs: ClosedTabRepository
   readonly snapshots: SessionSnapshotManager
   readonly memoryRepository: MemoryRepository
   readonly memory: MemoryIndexer
@@ -112,6 +114,7 @@ export class AppContext {
       (host) => this.blocker.engine.isKnownAdHost(host)
     )
     this.snapshotRepository = new SnapshotRepository(this.db)
+    this.closedTabs = new ClosedTabRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
       this.settings,
@@ -275,6 +278,13 @@ export class AppContext {
       settings: this.settings,
       downloads: this.downloads,
       onTabDiscarded: (tabId) => this.permissions.cancelForTab(tabId),
+      // Written through on close rather than flushed at quit: a crash is one of
+      // the times you most want a tab back, and a shutdown flush never runs.
+      onTabClosed: (entry) => this.closedTabs.add(entry),
+      takeClosedTab: () => {
+        const record = this.closedTabs.takeLatest()
+        return record ? { ...record } : null
+      },
       onPageLoaded: (contents, url) => {
         // Private-window support is not built yet, so `false` is the truthful
         // value here rather than a placeholder — the flag exists so the gate is

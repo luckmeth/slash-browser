@@ -15,7 +15,7 @@ import type { SessionRegistry } from '../sessions/SessionRegistry'
 import type { HistoryRepository } from '../db/repositories/HistoryRepository'
 import type { WorkspaceRepository } from '../db/repositories/WorkspaceRepository'
 import type { SettingsStore } from '../settings/SettingsStore'
-import { TabManager } from '../tabs/TabManager'
+import { TabManager, type ClosedTab as ClosedTabEntry } from '../tabs/TabManager'
 import { TabPerformanceManager } from '../performance/TabPerformanceManager'
 import { installPageContextMenu, type ContextMenuDeps } from '../menus/ContextMenus'
 import { createLogger } from '../logger'
@@ -37,6 +37,10 @@ export interface WindowDeps {
   onBookmarkRequested: (url: string, title: string) => void
   /** A tab closed — drop anything scoped to it. */
   onTabDiscarded: (tabId: string) => void
+  /** A tab closed — persisted so reopening it survives a restart. */
+  onTabClosed: (entry: ClosedTabEntry & { closedAt: number }) => void
+  /** The most recent persisted closed tab, consumed by reopen. */
+  takeClosedTab: () => ClosedTabEntry | null
   /** A page finished loading; the Web Memory indexer decides what to do with it. */
   onPageLoaded: (contents: WebContents, url: string) => void
   /** Slash Shield's verdict on a `window.open` from a page in this window. */
@@ -189,6 +193,8 @@ export class BrowserWindowController {
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
+        onTabClosed: (entry) => this.deps.onTabClosed(entry),
+        takeClosedTab: () => this.deps.takeClosedTab(),
         shouldAllowPopup: (tab, url, webContentsId) =>
           this.deps.shouldAllowPopup(tab.id, url, tab.snapshot.url, webContentsId),
         shouldAllowNavigation: (tab, url, webContentsId) =>
