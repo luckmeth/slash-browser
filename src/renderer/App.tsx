@@ -19,6 +19,7 @@ import { NewTabPage } from './features/newtab/NewTabPage'
 import { SidePanel } from './features/panels/SidePanel'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
 import { useWorkspaceTheme } from './features/workspaces/useWorkspaceTheme'
+import { useAppearance } from './features/settings/useAppearance'
 import { PrivateNotice, PRIVATE_NOTICE_HEIGHT } from './features/private/PrivateNotice'
 import { Icon } from './components/Icon'
 
@@ -48,6 +49,12 @@ export function App(): React.JSX.Element {
   // The whole chrome takes the active workspace's accent, so switching context
   // is felt rather than read off a small highlight in the rail.
   const isPrivate = useBrowserStore((s) => s.isPrivate)
+  const appearance = useBrowserStore((s) => s.settings)
+
+  // Order matters: appearance writes the global accent, then the workspace tint
+  // overwrites it while a coloured workspace is active. Telling contexts apart
+  // is a stronger claim on the accent than a standing preference.
+  useAppearance(appearance)
   // A private window keeps one fixed identity rather than following workspaces:
   // the colour is part of how you tell at a glance which window you are in, and
   // it must not shift under you.

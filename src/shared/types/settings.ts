@@ -15,6 +15,29 @@ export const SettingsSchema = z.object({
   searchEngineId: z.enum(['duckduckgo', 'google', 'bing', 'startpage']).default('duckduckgo'),
   homepage: z.string().default('app://newtab'),
   theme: z.enum(['system', 'light', 'dark']).default('system'),
+
+  // --- personalisation -------------------------------------------------------
+  /**
+   * Accent colour for the whole interface.
+   *
+   * A workspace's own colour still overrides this while that workspace is
+   * active — the workspace tint is about telling contexts apart, which is a
+   * stronger claim on the accent than a global preference.
+   */
+  accentColor: z
+    .enum(['default', 'blue', 'green', 'purple', 'amber', 'rose', 'teal'])
+    .default('default'),
+  /** Compact trades padding for rows on screen. */
+  uiDensity: z.enum(['comfortable', 'compact']).default('comfortable'),
+  /**
+   * How translucent the chrome is, 0–100.
+   *
+   * Not everyone wants acrylic: it costs GPU time, it is ignored on Windows 10,
+   * and over a busy wallpaper it hurts legibility. At 100 the bars are opaque
+   * and the blur is dropped entirely, which is also the sensible setting on a
+   * low-end machine.
+   */
+  glassOpacity: z.number().int().min(0).max(100).default(55),
   restoreTabsOnStartup: z.boolean().default(true),
   /** Ask before running a downloaded file with an executable extension. */
   warnOnExecutableDownload: z.boolean().default(true),
