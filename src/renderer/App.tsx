@@ -18,6 +18,7 @@ import { Toolbar } from './features/omnibox/Toolbar'
 import { NewTabPage } from './features/newtab/NewTabPage'
 import { SidePanel } from './features/panels/SidePanel'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
+import { useWorkspaceTheme } from './features/workspaces/useWorkspaceTheme'
 import { Icon } from './components/Icon'
 
 /**
@@ -40,6 +41,12 @@ export function App(): React.JSX.Element {
   const openFind = useBrowserStore((s) => s.openFind)
   const findOpen = useBrowserStore((s) => s.findOpen)
   const handoffDismissedHost = useBrowserStore((s) => s.handoffDismissedHost)
+  const workspaces = useBrowserStore((s) => s.workspaces)
+  const activeWorkspaceId = useBrowserStore((s) => s.activeWorkspaceId)
+
+  // The whole chrome takes the active workspace's accent, so switching context
+  // is felt rather than read off a small highlight in the rail.
+  useWorkspaceTheme(workspaces.find((w) => w.id === activeWorkspaceId)?.color ?? null)
 
   useEffect(() => {
     void hydrate()

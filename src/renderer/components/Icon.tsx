@@ -36,6 +36,8 @@ const paths = {
   menu: 'M3 12h18M3 6h18M3 18h18',
   external: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3',
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  // Sleeping tabs. A crescent reads as "asleep" without needing a label.
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
   shieldOff:
     'M19.7 14a8.6 8.6 0 0 0 .3-2V5l-8-3-3.2 1.2M4.7 7.7 4 8v4c0 6 8 10 8 10a15 15 0 0 0 4.3-3M2 2l20 20',
   eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',

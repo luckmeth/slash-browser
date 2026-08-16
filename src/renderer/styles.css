@@ -107,7 +107,17 @@ body {
  * stacks with the window material underneath to soften edges between panes.
  */
 .glass {
-  background: var(--glass-base);
+  /*
+   * Two layers: the workspace wash on top of the base fill. The wash is set by
+   * useWorkspaceTheme and defaults to fully transparent, so a browser with one
+   * workspace looks exactly as it did — the tint only appears once the user has
+   * made workspaces that differ.
+   */
+  background-color: var(--glass-base);
+  background-image: linear-gradient(
+    var(--workspace-wash, transparent),
+    var(--workspace-wash, transparent)
+  );
   backdrop-filter: blur(var(--blur-md)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur-md)) saturate(180%);
 }

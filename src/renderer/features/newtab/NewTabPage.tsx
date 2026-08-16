@@ -5,6 +5,7 @@ import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { BrandMark } from '../../components/BrandMark'
 import { Icon } from '../../components/Icon'
+import { SlashSummary } from './SlashSummary'
 
 /**
  * The start page.
@@ -86,6 +87,8 @@ export function NewTabPage(): React.JSX.Element {
             <Key>L</Key>
           </span>
         </button>
+
+        <SlashSummary />
 
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">
