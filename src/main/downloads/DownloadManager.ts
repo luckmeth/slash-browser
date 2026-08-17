@@ -128,6 +128,16 @@ export class DownloadManager {
     return false
   }
 
+  /**
+   * Where downloads are saved right now.
+   *
+   * Shared with the segmented engine so both paths land in the same folder —
+   * two download systems writing to two different places would be its own bug.
+   */
+  directory(): string {
+    return this.settings.getAll().downloadDirectory || app.getPath('downloads')
+  }
+
   pause(id: string): void {
     this.live.get(id)?.pause()
   }

@@ -33,6 +33,13 @@ export interface CreateBookmarkInput {
   faviconUrl: string | null
   parentId: number | null
   isFolder: boolean
+  /**
+   * When the bookmark was originally created. Defaults to now.
+   *
+   * Set only by the importer, so a bookmark someone saved in 2019 does not
+   * claim to have been created the moment they switched browsers.
+   */
+  createdAt?: number
 }
 
 export interface UpdateBookmarkInput {
@@ -75,7 +82,7 @@ export class BookmarkRepository {
         parent: input.parentId,
         isFolder: input.isFolder ? 1 : 0,
         sortOrder: next.next,
-        now: Date.now()
+        now: input.createdAt ?? Date.now()
       })
 
     return this.requireById(Number(info.lastInsertRowid))

@@ -20,6 +20,8 @@ export interface ContextMenuDeps {
   bookmarkUrl: (url: string, title: string) => void
   /** Confirmed before moving a tab across an isolation boundary. */
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void
+  /** Hands a link to the segmented download engine. */
+  enqueueDownload: (url: string) => void
 }
 
 /**
@@ -79,9 +81,19 @@ function buildPageMenu(
       {
         label: 'Copy link address',
         click: () => clipboard.writeText(url)
-      },
-      separator
+      }
     )
+
+    // Only offered for http(s). The engine writes whatever it fetches to disk,
+    // so a file:// or blob: link here would be a local file copy wearing a
+    // download's clothes.
+    if (/^https?:\/\//i.test(url)) {
+      items.push({
+        label: 'Download with Slash (managed)',
+        click: () => deps.enqueueDownload(url)
+      })
+    }
+    items.push(separator)
   }
 
   // --- image ---------------------------------------------------------------

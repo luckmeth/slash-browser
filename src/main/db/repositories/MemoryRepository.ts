@@ -1,5 +1,6 @@
 import type { ExtractedPage, MemoryResult, MemoryStats, ParsedQuery } from '@shared/types/memory'
 import type { Database } from '../Database'
+import type { VectorStore } from './VectorStore'
 import { toFtsQuery } from '../../memory/parseQuery'
 import { createLogger } from '../../logger'
 
@@ -16,20 +17,45 @@ interface ResultRow {
   snippet: string | null
 }
 
+/** A page row without any search scoring, for hydrating a semantic-only hit. */
+export interface MemoryPageRow {
+  pageId: number
+  url: string
+  title: string
+  siteName: string | null
+  excerpt: string
+  visitedAt: number
+}
+
 export class MemoryRepository {
+  /**
+   * The vector half of the index, when it exists.
+   *
+   * Held here rather than left to a caller because deletion is the one thing
+   * that must not be optional: `ON DELETE CASCADE` reaches the chunk rows but
+   * cannot reach a vec0 virtual table, so forgetting a page has to remove its
+   * vectors first. Making that a separate call some caller might forget is how
+   * "delete everything" ends up leaving something behind.
+   */
+  private vectors: VectorStore | null = null
+
   constructor(private readonly db: Database) {}
 
+  attachVectorStore(vectors: VectorStore): void {
+    this.vectors = vectors
+  }
+
   /**
-   * Stores or refreshes a page.
+   * Stores or refreshes a page, returning its id.
    *
    * `withContent` false records only title and URL — the state when the user has
    * enabled history indexing but not content indexing. Those are separate
    * settings because they are genuinely different levels of exposure.
    */
-  upsert(page: ExtractedPage, visitedAt: number, withContent: boolean): void {
+  upsert(page: ExtractedPage, visitedAt: number, withContent: boolean): number {
     const body = withContent ? page.body : ''
 
-    const write = this.db.connection.transaction(() => {
+    const write = this.db.connection.transaction((): number => {
       this.db.connection
         .prepare(
           `INSERT INTO memory_pages
@@ -65,9 +91,39 @@ export class MemoryRepository {
       this.db.connection
         .prepare('INSERT INTO memory_fts (title, body, url, page_id) VALUES (?, ?, ?, ?)')
         .run(page.title, body, page.url, row.id)
+
+      return row.id
     })
 
-    write()
+    return write()
+  }
+
+  /** Page metadata by id, for results that only the vector index found. */
+  pagesByIds(ids: readonly number[]): Map<number, MemoryPageRow> {
+    const found = new Map<number, MemoryPageRow>()
+    if (ids.length === 0) return found
+
+    // Built from the ids' own count rather than a fixed IN list: they come from
+    // our own index, never from the user, and every one is bound.
+    const placeholders = ids.map(() => '?').join(', ')
+    const rows = this.db.connection
+      .prepare(
+        `SELECT id AS page_id, url, title, site_name, excerpt, visited_at
+         FROM memory_pages WHERE id IN (${placeholders})`
+      )
+      .all(...ids) as ResultRow[]
+
+    for (const row of rows) {
+      found.set(row.page_id, {
+        pageId: row.page_id,
+        url: row.url,
+        title: row.title,
+        siteName: row.site_name,
+        excerpt: row.excerpt,
+        visitedAt: row.visited_at
+      })
+    }
+    return found
   }
 
   /**
@@ -162,6 +218,10 @@ export class MemoryRepository {
       | { id: number }
       | undefined
     if (!row) return
+    // Vectors first: they are keyed to chunk rows that the page's cascade is
+    // about to delete, and once those are gone there is nothing left to find
+    // them by.
+    this.vectors?.forgetPage(row.id)
     const remove = this.db.connection.transaction(() => {
       this.db.connection.prepare('DELETE FROM memory_fts WHERE page_id = ?').run(row.id)
       this.db.connection.prepare('DELETE FROM memory_pages WHERE id = ?').run(row.id)
@@ -170,6 +230,7 @@ export class MemoryRepository {
   }
 
   clearAll(): void {
+    this.vectors?.clearAll()
     const wipe = this.db.connection.transaction(() => {
       this.db.connection.prepare('DELETE FROM memory_fts').run()
       this.db.connection.prepare('DELETE FROM memory_pages').run()
@@ -185,6 +246,7 @@ export class MemoryRepository {
       .all(cutoff) as Array<{ id: number }>
     if (rows.length === 0) return 0
 
+    for (const row of rows) this.vectors?.forgetPage(row.id)
     const remove = this.db.connection.transaction(() => {
       const dropFts = this.db.connection.prepare('DELETE FROM memory_fts WHERE page_id = ?')
       const dropPage = this.db.connection.prepare('DELETE FROM memory_pages WHERE id = ?')

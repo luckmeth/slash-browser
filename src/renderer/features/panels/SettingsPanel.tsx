@@ -1,9 +1,14 @@
 import type { Settings } from '@shared/types/settings'
 import { SEARCH_ENGINES } from '@shared/constants'
+import { SEMANTIC_MODEL_MB } from '@shared/types/semantic'
 import { useBrowserStore } from '../../stores/browserStore'
+import { useSemanticStatus } from '../memory/useSemanticStatus'
+import { ImportSection } from './ImportSection'
+import { DiagnosticsSection } from './DiagnosticsSection'
 
 export function SettingsPanel(): React.JSX.Element {
   const settings = useBrowserStore((s) => s.settings)
+  const { status: semantic, setEnabled: setSemanticEnabled } = useSemanticStatus()
 
   if (!settings) return <p className="p-4 text-sm text-[var(--color-text-muted)]">Loading…</p>
 
@@ -53,6 +58,24 @@ export function SettingsPanel(): React.JSX.Element {
           </select>
         </Field>
 
+        <Field label="Tab strip">
+          <select
+            value={settings.tabStripPosition}
+            onChange={(event) =>
+              update({
+                tabStripPosition: event.target.value as Settings['tabStripPosition']
+              })
+            }
+            className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="top">Across the top</option>
+            <option value="left">Down the left side</option>
+          </select>
+          <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+            Vertical keeps titles readable past a dozen tabs, at the cost of some window width.
+          </p>
+        </Field>
+
         <Field label={`Glass ${settings.glassOpacity}%`}>
           <input
             type="range"
@@ -71,6 +94,15 @@ export function SettingsPanel(): React.JSX.Element {
             anyway.
           </p>
         </Field>
+      </Group>
+
+      {/*
+        Near the top on purpose. This is the first thing someone needs on a new
+        install and the least useful thing on their five-hundredth launch, so it
+        belongs where a new user will actually see it.
+      */}
+      <Group title="Import from another browser">
+        <ImportSection />
       </Group>
 
       <Group title="Search">
@@ -134,6 +166,27 @@ export function SettingsPanel(): React.JSX.Element {
           checked={settings.excludePrivateFromMemory}
           onChange={(excludePrivateFromMemory) => update({ excludePrivateFromMemory })}
         />
+        {/*
+          Driven through its own channel rather than `settings:update`, because
+          enabling it starts a download and the panel has to be able to show the
+          progress and the failure. The handler writes the same setting, so the
+          two routes cannot disagree.
+        */}
+        <Toggle
+          label="Search by meaning as well as by words"
+          hint={
+            semantic?.state === 'unsupported'
+              ? semantic.detail
+              : semantic?.state === 'off' || !semantic
+                ? `Runs a ${SEMANTIC_MODEL_MB} MB model that ships with Slash — offline, nothing sent anywhere. Works on titles alone, but far better with page text indexing on.`
+                : semantic.detail
+          }
+          checked={
+            semantic !== null && semantic.state !== 'off' && semantic.state !== 'unsupported'
+          }
+          disabled={semantic === null || semantic.state === 'unsupported'}
+          onChange={setSemanticEnabled}
+        />
       </Group>
 
       <Group title="Restore points">
@@ -163,6 +216,18 @@ export function SettingsPanel(): React.JSX.Element {
           checked={settings.warnOnExecutableDownload}
           onChange={(warnOnExecutableDownload) => update({ warnOnExecutableDownload })}
         />
+        {/*
+          Not a setting — a signpost. Private browsing lives entirely in the
+          application menu, which is hidden behind Alt on Windows, so the feature
+          was effectively undiscoverable from the one screen people open when
+          they go looking for privacy controls.
+        */}
+        <p className="pt-1 text-xs text-[var(--color-text-muted)]">
+          <span className="text-[var(--color-text-primary)]">Private window</span> — Ctrl+Shift+N, or
+          File → New Private Window. It records no history, no browsing memory and no reopenable
+          tabs, and is left out of session restore. It does not hide you from the sites you visit or
+          from your network.
+        </p>
       </Group>
 
       <Group title="Downloads">
@@ -177,25 +242,23 @@ export function SettingsPanel(): React.JSX.Element {
         Capabilities that genuinely are not built are listed as such rather than
         shown as controls, so nothing on this screen implies something the build
         cannot do.
+
+        The reverse matters just as much: this group claimed private browsing did
+        not exist for as long as private browsing existed, so the one place a
+        user goes to check told them the feature was missing. A stale "not built"
+        is as much a lie as an overstated capability.
       */}
+      <Group title="Crash reports">
+        <DiagnosticsSection />
+      </Group>
+
       <Group title="Not built yet">
-        <Toggle
-          label="Semantic search"
-          checked={false}
-          disabled
-          hint="Keyword search works. Finding a page by a paraphrase needs a local embedding model, which is not installed."
-          onChange={() => {}}
-        />
-        <Toggle
-          label="Private browsing"
-          checked={false}
-          disabled
-          hint="There is no private window yet. Memory already honours the setting for when there is."
-          onChange={() => {}}
-        />
-        <p className="pt-1 text-xs text-[var(--color-text-muted)]">
-          This build also has no automatic updates. Chromium ships security fixes regularly, so
-          check for a newer version yourself rather than assuming this one is current.
+        <p className="text-xs text-[var(--color-text-muted)]">
+          <span className="text-[var(--color-text-primary)]">Automatic updates.</span> This build
+          cannot update itself, and it is not code-signed. Chromium ships security fixes roughly
+          monthly, so check for a newer version yourself rather than assuming this one is current.
+          Both need a signing certificate before they can exist — an unsigned update channel would be
+          an unauthenticated way onto your machine, which is worse than none.
         </p>
       </Group>
     </div>

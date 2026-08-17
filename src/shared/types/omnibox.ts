@@ -8,7 +8,15 @@ export const SuggestionKindSchema = z.enum([
   'history',
   'bookmark',
   /** A tab already open on this URL — switch instead of opening a duplicate. */
-  'open-tab'
+  'open-tab',
+  /**
+   * A page from browsing memory, matched on what was *on* it.
+   *
+   * Distinct from 'history', which only ever matches a title or an address. This
+   * is the row that answers "that article about database indexes" when the word
+   * "article" appears nowhere and you never knew the title.
+   */
+  'memory'
 ])
 export type SuggestionKind = z.infer<typeof SuggestionKindSchema>
 

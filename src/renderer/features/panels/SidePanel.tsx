@@ -3,6 +3,12 @@ import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { HistoryPanel } from './HistoryPanel'
 import { BookmarksPanel } from './BookmarksPanel'
+import { DownloadsCenter } from '../downloads/DownloadsCenter'
+import { GuardianPanel } from '../downloads/GuardianPanel'
+import { TabBrainPanel } from '../tabbrain/TabBrainPanel'
+import { PageInsightPanel } from '../insight/PageInsightPanel'
+import { RedirectXRayPanel } from '../shield/RedirectXRayPanel'
+import { AiHubPanel } from '../ai/AiHubPanel'
 import { DownloadsPanel } from './DownloadsPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { WorkspaceEditor } from '../workspaces/WorkspaceEditor'
@@ -23,6 +29,9 @@ const TITLES = {
   permissions: 'Permissions',
   timemachine: 'Restore points',
   memory: 'Browsing memory',
+  tabbrain: 'Tab Brain',
+  insight: 'Page Insight',
+  redirects: 'Redirect X-Ray',
   ai: 'Assistant'
 } as const
 
@@ -87,13 +96,40 @@ export function SidePanel(): React.JSX.Element | null {
           <>
             {panel === 'history' && <HistoryPanel />}
             {panel === 'bookmarks' && <BookmarksPanel />}
-            {panel === 'downloads' && <DownloadsPanel />}
+            {panel === 'downloads' && (
+              <>
+                {/* Electron-initiated downloads above, engine-managed below.
+                    Two systems, so the panel says which is which rather than
+                    mixing them into one list where pause behaves differently
+                    depending on an invisible distinction. */}
+                <GuardianPanel />
+                <DownloadsPanel />
+                <div className="border-t border-[var(--color-border-subtle)] pt-2">
+                  <p className="px-3 pb-1 text-[10px] font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+                    Managed downloads
+                  </p>
+                  <DownloadsCenter />
+                </div>
+              </>
+            )}
             {panel === 'settings' && <SettingsPanel />}
             {panel === 'performance' && <PerformancePanel />}
             {panel === 'permissions' && <PermissionsPanel />}
             {panel === 'timemachine' && <TimeMachinePanel />}
             {panel === 'memory' && <MemoryPanel />}
-            {panel === 'ai' && <AiPanel />}
+            {panel === 'tabbrain' && <TabBrainPanel />}
+            {panel === 'insight' && <PageInsightPanel />}
+            {panel === 'redirects' && <RedirectXRayPanel />}
+            {panel === 'ai' && (
+              <>
+                {/* Providers first: the assistant below is unusable until one is
+                    connected, so the connection step belongs above it. */}
+                <AiHubPanel />
+                <div className="border-t border-[var(--color-border-subtle)]">
+                  <AiPanel />
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

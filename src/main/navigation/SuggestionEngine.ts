@@ -1,7 +1,9 @@
 import { MAX_SUGGESTIONS, type Suggestion } from '@shared/types/omnibox'
 import { SEARCH_ENGINES, type SearchEngineId } from '@shared/constants'
+import { DEFAULT_SETTINGS } from '@shared/types/settings'
 import { hostOf } from '@shared/url'
 import type { HistoryEntry, Bookmark } from '@shared/types/browsing'
+import type { MemoryResult } from '@shared/types/memory'
 import type { Tab } from '@shared/types/tab'
 import { resolveInput } from './UrlResolver'
 
@@ -10,7 +12,16 @@ export interface SuggestionSources {
   bookmarks: Bookmark[]
   openTabs: Tab[]
   engineId: SearchEngineId
+  /**
+   * Pages from browsing memory, best first. Empty when indexing is off, which
+   * is the default — so the omnibox behaves exactly as before for anyone who
+   * has not opted in.
+   */
+  memory?: MemoryResult[]
 }
+
+/** Memory rows shown before the plain history list gets its turn. */
+const MAX_MEMORY_SUGGESTIONS = 3
 
 /**
  * Ranks omnibox suggestions.
@@ -25,7 +36,10 @@ export function buildSuggestions(rawQuery: string, sources: SuggestionSources): 
 
   const lower = query.toLowerCase()
   const resolved = resolveInput(query, sources.engineId)
-  const engine = SEARCH_ENGINES[sources.engineId] ?? SEARCH_ENGINES.duckduckgo
+  // Same rule as UrlResolver: fall back to the configured default rather than
+  // to a hardcoded engine, so the row never offers to search somewhere the user
+  // did not pick.
+  const engine = SEARCH_ENGINES[sources.engineId] ?? SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId]
   const suggestions: Suggestion[] = []
 
   // 1. The literal interpretation of what was typed, first — pressing Enter
@@ -93,7 +107,35 @@ export function buildSuggestions(rawQuery: string, sources: SuggestionSources): 
     })
   }
 
-  // 4. History, already ordered by visit count then recency upstream.
+  // 4. Browsing memory — pages matched on their *contents*, above plain history
+  //    because a content match is a stronger signal than a title containing the
+  //    same letters. Capped so a memory index can never crowd the list: the
+  //    literal interpretation of what was typed must stay reachable.
+  let fromMemory = 0
+  for (const result of sources.memory ?? []) {
+    if (suggestions.length >= MAX_SUGGESTIONS) break
+    if (fromMemory >= MAX_MEMORY_SUGGESTIONS) break
+    const key = normalise(result.url)
+    if (seen.has(key)) continue
+    seen.add(key)
+    fromMemory++
+
+    // The reason is the whole point of this row. Without it the user cannot tell
+    // why a page they do not recognise is being offered, and a memory hit is
+    // then indistinguishable from a bad guess.
+    const reason = result.reasons[0]?.detail
+    suggestions.push({
+      id: `memory:${result.pageId}`,
+      kind: 'memory',
+      title: result.title || hostOf(result.url),
+      subtitle: reason ? `${hostOf(result.url)} · ${reason}` : hostOf(result.url),
+      url: result.url,
+      tabId: null,
+      faviconUrl: null
+    })
+  }
+
+  // 5. History, already ordered by visit count then recency upstream.
   for (const entry of sources.history) {
     if (suggestions.length >= MAX_SUGGESTIONS) break
     const key = normalise(entry.url)

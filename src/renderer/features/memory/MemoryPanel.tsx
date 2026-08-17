@@ -3,6 +3,8 @@ import type { MemoryResult, MemoryStats, ParsedQuery } from '@shared/types/memor
 import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
+import { SemanticStatusCard } from './SemanticStatusCard'
+import { useSemanticStatus } from './useSemanticStatus'
 
 /**
  * Web Memory search.
@@ -20,6 +22,7 @@ export function MemoryPanel(): React.JSX.Element {
   const [stats, setStats] = useState<MemoryStats | null>(null)
   const [searching, setSearching] = useState(false)
   const settings = useBrowserStore((s) => s.settings)
+  const { status: semantic, setEnabled: setSemanticEnabled } = useSemanticStatus()
 
   const loadStats = (): void => {
     void window.browser.invoke('memory:stats', undefined).then((result) => {
@@ -69,6 +72,17 @@ export function MemoryPanel(): React.JSX.Element {
             from <span className="text-[var(--color-accent)]">{parsed.timeLabel}</span>
           </p>
         )}
+        {/*
+          Said while it is true, not only on the empty screen. Results during a
+          backfill are correct but incomplete, and a user who does not know that
+          reads a thin result list as "it did not find it".
+        */}
+        {semantic?.state === 'indexing' && query.trim() !== '' && (
+          <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
+            Still reading {semantic.pendingPages.toLocaleString()} older page
+            {semantic.pendingPages === 1 ? '' : 's'} — matches by meaning will improve.
+          </p>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -97,22 +111,13 @@ export function MemoryPanel(): React.JSX.Element {
                     value={new Date(stats.oldestIndexedAt).toLocaleDateString()}
                   />
                 )}
-                <Row
-                  label="Semantic search"
-                  value={
-                    stats.semanticAvailable
-                      ? stats.semanticEnabled
-                        ? 'on'
-                        : 'available, off'
-                      : 'not installed'
-                  }
-                />
               </dl>
             )}
             <p className="text-xs text-[var(--color-text-muted)]">
               Examples: <em>postgres scaling last month</em> · <em>invoice 3 days ago</em> ·{' '}
               <em>that article about react auth</em>
             </p>
+            <SemanticStatusCard status={semantic} onSetEnabled={setSemanticEnabled} />
           </div>
         ) : searching ? (
           <p className="text-sm text-[var(--color-text-muted)]">Searching…</p>
@@ -154,7 +159,16 @@ export function MemoryPanel(): React.JSX.Element {
                   {result.reasons.map((reason, index) => (
                     <span
                       key={index}
-                      className="rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                      // A meaning match is marked out because it is a different
+                      // kind of claim from a word match: the browser is saying
+                      // these are *about* the same thing, which the user should
+                      // be able to weigh differently from "this word is on the
+                      // page".
+                      className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                        reason.kind === 'semantic'
+                          ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+                          : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'
+                      }`}
                     >
                       {reason.detail}
                     </span>

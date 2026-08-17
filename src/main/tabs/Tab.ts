@@ -93,9 +93,20 @@ export class Tab {
     return view.webContents
   }
 
-  /** True when this tab's URL requires a real renderer. */
+  /**
+   * True when this tab's URL requires a real renderer.
+   *
+   * A tab holding an error does **not**. Its view is detached so the chrome's
+   * own error page shows through the content hole — the same mechanism the new
+   * tab page and the hibernation placeholder use. Without this, the only thing
+   * on screen would be Chromium's default failure page, which cannot say
+   * whether Slash Shield refused the request or the site is simply down.
+   *
+   * The error is cleared by `did-start-navigation`, so retrying restores the
+   * renderer on its own.
+   */
   get needsView(): boolean {
-    return !isInternalUrl(this.state.url)
+    return !isInternalUrl(this.state.url) && this.state.error === null
   }
 
   patch(update: Partial<TabSnapshot>): void {

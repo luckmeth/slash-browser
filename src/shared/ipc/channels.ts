@@ -35,6 +35,7 @@ export const INVOKE_CHANNELS = [
 
   // --- tabs ---
   'tabs:list',
+  'tabs:listAll',
   'tabs:create',
   'tabs:close',
   'tabs:activate',
@@ -100,6 +101,8 @@ export const INVOKE_CHANNELS = [
   'memory:stats',
   'memory:forget',
   'memory:clear',
+  'memory:semanticStatus',
+  'memory:setSemanticEnabled',
 
   // --- ai action engine ---
   'ai:status',
@@ -119,6 +122,14 @@ export const INVOKE_CHANNELS = [
   'shield:setSiteLock',
   'shield:setMode',
   'shield:clearActivity',
+
+  // --- reader mode ---
+  'reader:open',
+  'reader:get',
+
+  // --- import from another browser ---
+  'import:sources',
+  'import:run',
 
   // --- history ---
   'history:search',
@@ -140,7 +151,52 @@ export const INVOKE_CHANNELS = [
   'downloads:openFile',
   'downloads:showInFolder',
   'downloads:remove',
-  'downloads:clearCompleted'
+  'downloads:clearCompleted',
+
+  // --- advanced download engine ---
+  'downloadEngine:list',
+  'downloadEngine:enqueue',
+  'downloadEngine:pause',
+  'downloadEngine:resume',
+  'downloadEngine:cancel',
+  'downloadEngine:remove',
+  'downloadEngine:setPriority',
+  'downloadEngine:clearFinished',
+  'downloadEngine:startNow',
+
+  // --- diagnostics / crash reporting ---
+  'crashes:report',
+  'crashes:clear',
+  'crashes:openFolder',
+
+  // --- ai hub ---
+  'aiHub:status',
+  'aiHub:connect',
+  'aiHub:disconnect',
+  'aiHub:setDefault',
+
+  // --- redirect x-ray ---
+  'redirects:chains',
+  'redirects:clear',
+  'redirects:blockDomain',
+
+  // --- page insight ---
+  'insight:analyse',
+
+  // --- cleanup mode ---
+  'cleanup:apply',
+  'cleanup:restore',
+  'cleanup:status',
+  'cleanup:setDisabledForHost',
+
+  // --- tab brain ---
+  'tabBrain:analyse',
+  'tabBrain:closeTabs',
+  'tabBrain:groupIntoWorkspace',
+
+  // --- download guardian / media detection ---
+  'guardian:scanDownloads',
+  'guardian:scanMedia'
 ] as const
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number]
@@ -158,6 +214,18 @@ export const EVENT_CHANNELS = [
   'omnibox:state',
   'permissions:prompt',
   'permissions:changed',
+  /**
+   * Model download and backfill progress.
+   *
+   * Pushed rather than polled: preparing the model involves a download that can
+   * take minutes, and a progress bar the renderer has to ask about repeatedly is
+   * both jerkier and more expensive than one it is told about.
+   */
+  'memory:semanticChanged',
+  /** Engine download progress. Pushed, because it changes several times a second. */
+  'downloadEngine:changed',
+  /** A redirect chain finished and is worth the user's attention. */
+  'redirects:chain',
   /** Menu accelerators that must be handled by the UI, not the main process. */
   'ui:command',
   /** Slash Shield held a popup; the chrome view offers it to the user. */

@@ -14,6 +14,9 @@ export type PanelId =
   | 'permissions'
   | 'timemachine'
   | 'memory'
+  | 'tabbrain'
+  | 'insight'
+  | 'redirects'
   | 'ai'
 
 interface BrowserState {

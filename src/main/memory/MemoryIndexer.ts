@@ -4,6 +4,7 @@ import { originOf } from '@shared/url'
 import { isInternalUrl } from '@shared/types/tab'
 import type { MemoryRepository } from '../db/repositories/MemoryRepository'
 import type { SettingsStore } from '../settings/SettingsStore'
+import type { SemanticIndex } from './embedding/SemanticIndex'
 import { createLogger } from '../logger'
 import { buildExtractionScript } from './extractionScript'
 
@@ -30,7 +31,8 @@ export class MemoryIndexer {
 
   constructor(
     private readonly repository: MemoryRepository,
-    private readonly settings: SettingsStore
+    private readonly settings: SettingsStore,
+    private readonly semantic: SemanticIndex
   ) {}
 
   start(): void {
@@ -95,6 +97,12 @@ export class MemoryIndexer {
           Date.now(),
           false
         )
+        // Metadata-only pages are embeddable too — the chunker builds a header
+        // passage from the title and site. Skipping this would make a page
+        // indexed without its text invisible to meaning-based search while
+        // still appearing in the index, which is the kind of quiet gap the
+        // user has no way to notice.
+        this.semantic.notePageIndexed()
         return
       }
 
@@ -112,6 +120,10 @@ export class MemoryIndexer {
       if (!this.decide(parsed.data.url, isPrivate).content) return
 
       this.repository.upsert(parsed.data, Date.now(), true)
+      // Nudge, not a request: the semantic layer picks the page up on its own
+      // schedule if it is running, and does nothing at all if it is not. The
+      // page load never waits on it.
+      this.semantic.notePageIndexed()
       log.debug(`indexed ${originOf(parsed.data.url)} (${parsed.data.wordCount} words)`)
     } catch (error) {
       log.warn(`could not index ${originOf(url)}`, error)

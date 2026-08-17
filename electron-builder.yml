@@ -16,12 +16,59 @@ files:
   - '!**/node_modules/better-sqlite3/prebuilds/linux-*.node'
   - '!**/node_modules/better-sqlite3/prebuilds/linuxmusl-*.node'
   - '!**/node_modules/better-sqlite3/prebuilds/win32-arm64.node'
+  # sqlite-vec publishes one package per platform and installs all of them.
+  - '!**/node_modules/sqlite-vec-darwin-*'
+  - '!**/node_modules/sqlite-vec-linux-*'
+  # onnxruntime-node carries the runtime for every platform — roughly 270 MB, of
+  # which a Windows x64 build needs about 15. THIS LIST NEEDS UPDATING IF A
+  # PLATFORM TARGET IS ADDED.
+  - '!**/node_modules/onnxruntime-node/bin/napi-v*/darwin/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v*/linux/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**'
+  # The DirectML execution provider — 38 MB of GPU DLLs for a code path we never
+  # take. The embedding worker asks for CPU with a single thread on purpose: a
+  # background convenience does not get to contend with the compositor for the
+  # GPU. Verified by deleting these from a packaged build and re-running the
+  # semantic probe, which still passed. TAKING THE GPU PATH MEANS RESTORING THEM.
+  - '!**/node_modules/onnxruntime-node/bin/**/DirectML.dll'
+  - '!**/node_modules/onnxruntime-node/bin/**/dxcompiler.dll'
+  - '!**/node_modules/onnxruntime-node/bin/**/dxil.dll'
+  # sharp is NOT excluded, tempting though it is: nothing here runs an image
+  # model, but transformers.js requires it at the *top level* of its bundle
+  # (`src/utils/image.js`), so removing it makes `require('@huggingface/
+  # transformers')` throw before the worker can load anything. Verified by
+  # renaming node_modules/sharp and watching the import fail. Only its
+  # non-Windows binaries go.
+  - '!**/node_modules/@img/sharp-darwin*'
+  - '!**/node_modules/@img/sharp-linux*'
+  - '!**/node_modules/@img/sharp-libvips-darwin*'
+  - '!**/node_modules/@img/sharp-libvips-linux*'
+  - '!**/node_modules/@img/sharp-wasm32*'
+  - '!**/node_modules/@img/sharp-win32-!(x64)*'
 
 # better-sqlite3 is a native module: keep it unpacked so the .node binary is a
 # real file on disk rather than an entry inside app.asar, which cannot be dlopen'd.
+#
+# Everything with a native binary has to be unpacked for the same reason: a
+# .node addon or a .dll cannot be dlopen'd from inside app.asar.
+# The embedding model, shipped rather than downloaded on first use — see
+# resources/models/README.md for why. It goes beside app.asar, not inside it:
+# the ONNX runtime opens these files natively and cannot read through an archive.
+extraResources:
+  - from: resources/models
+    to: models
+
 asar: true
 asarUnpack:
   - '**/node_modules/better-sqlite3/**'
+  # vec0.dll, loaded through SQLite's extension mechanism.
+  - '**/node_modules/sqlite-vec-windows-x64/**'
+  # onnxruntime_binding.node plus the ONNX Runtime DLLs beside it.
+  - '**/node_modules/onnxruntime-node/**'
+  # sharp's addon, loaded by transformers.js at import time whether or not any
+  # image model is ever used.
+  - '**/node_modules/@img/**'
+  - '**/node_modules/sharp/**'
 
 # better-sqlite3 v13 ships N-API prebuilds (prebuilds/win32-x64.node, resolved by
 # platform+arch with no ABI version in the name). N-API binaries are ABI-stable
@@ -40,6 +87,28 @@ win:
   # electron-builder converts this to a multi-size .ico and embeds it in the exe,
   # so the taskbar, Alt+Tab and window all show it instead of Electron's logo.
   icon: build/icon.png
+  #
+  # --- code signing -----------------------------------------------------------
+  #
+  # Deliberately driven by environment variables and nothing else, so this
+  # repository never contains a certificate or its password.
+  #
+  #   CSC_LINK           path to the .pfx, or its base64 contents
+  #   CSC_KEY_PASSWORD   the password for it
+  #
+  # With neither set, electron-builder skips signing and the build still
+  # succeeds — which is the current state, and why every artefact reports
+  # NotSigned. Setting them is the whole of what turns this build signed; no code
+  # change is involved.
+  #
+  # Until then Windows SmartScreen shows "unknown publisher" to every user, and
+  # an EV certificate additionally starts with no reputation, so the warning
+  # persists for a while after the first signed release.
+  signAndEditExecutable: true
+  # Refuse to install an update whose signature does not match the installed
+  # app's. Meaningless while unsigned, and exactly right the moment it is not —
+  # it is the check that stops a tampered update being accepted.
+  verifyUpdateCodeSignature: true
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 nsis:

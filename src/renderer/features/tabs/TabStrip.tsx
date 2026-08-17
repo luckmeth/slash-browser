@@ -18,7 +18,20 @@ const PINNED_TAB_WIDTH = 42
  *  - tabs shrink to fit rather than scrolling, the way Chrome and Edge do. A
  *    horizontally scrolling strip is a desktop-app pattern; browsers compress.
  */
-export function TabStrip(): React.JSX.Element {
+/**
+ * The tab strip, horizontal or vertical.
+ *
+ * Vertical is not a restyling of the same thing: horizontal tabs share a fixed
+ * width between them and shrink until unreadable, whereas a vertical list gives
+ * every tab a full-width label and scrolls instead. So the width maths below
+ * applies only to the horizontal case, and the vertical case deliberately has
+ * none.
+ */
+export function TabStrip({
+  orientation = 'horizontal'
+}: {
+  orientation?: 'horizontal' | 'vertical'
+} = {}): React.JSX.Element {
   const tabs = useBrowserStore((s) => s.tabs)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
   const [dragId, setDragId] = useState<string | null>(null)
@@ -40,12 +53,18 @@ export function TabStrip(): React.JSX.Element {
     setDropIndex(null)
   }
 
+  const vertical = orientation === 'vertical'
+
   return (
     <div
       ref={(node) => {
         if (node) setStripWidth(node.clientWidth)
       }}
-      className="flex min-w-0 flex-1 items-end gap-0.5 overflow-hidden px-2 pt-1.5"
+      className={
+        vertical
+          ? 'flex min-h-0 flex-1 flex-col items-stretch gap-0.5 overflow-y-auto px-1.5 py-1.5'
+          : 'flex min-w-0 flex-1 items-end gap-0.5 overflow-hidden px-2 pt-1.5'
+      }
       role="tablist"
       aria-label="Tabs"
     >
@@ -53,7 +72,10 @@ export function TabStrip(): React.JSX.Element {
         <TabItem
           key={tab.id}
           tab={tab}
-          width={tab.isPinned ? PINNED_TAB_WIDTH : tabWidth}
+          vertical={vertical}
+          // A vertical row is always full width; only the horizontal strip has
+          // to divide a fixed space between however many tabs there are.
+          width={vertical ? 0 : tab.isPinned ? PINNED_TAB_WIDTH : tabWidth}
           isActive={tab.id === activeTabId}
           isDropTarget={dropIndex === index}
           canAcceptDrop={
@@ -75,9 +97,12 @@ export function TabStrip(): React.JSX.Element {
         title="New tab (Ctrl+T)"
         aria-label="New tab"
         onClick={() => void window.browser.invoke('tabs:create', { background: false })}
-        className="app-no-drag mb-1 shrink-0 cursor-default rounded-md p-1.5 text-[var(--color-text-muted)] transition hover:bg-white/10 hover:text-[var(--color-text-primary)]"
+        className={`app-no-drag shrink-0 cursor-default rounded-md p-1.5 text-[var(--color-text-muted)] transition hover:bg-white/10 hover:text-[var(--color-text-primary)] ${
+          vertical ? 'mt-0.5 flex items-center gap-2 px-2 text-xs' : 'mb-1'
+        }`}
       >
         <Icon name="plus" size={15} />
+        {vertical && <span>New tab</span>}
       </button>
     </div>
   )
@@ -86,6 +111,7 @@ export function TabStrip(): React.JSX.Element {
 function TabItem({
   tab,
   width,
+  vertical = false,
   isActive,
   isDropTarget,
   canAcceptDrop,
@@ -96,6 +122,7 @@ function TabItem({
 }: {
   tab: Tab
   width: number
+  vertical?: boolean
   isActive: boolean
   isDropTarget: boolean
   canAcceptDrop: boolean
@@ -107,8 +134,9 @@ function TabItem({
   const internal = isInternalUrl(tab.url)
   const label = tab.title || (internal ? 'New tab' : hostOf(tab.url)) || 'Untitled'
   // Below this the label is unreadable anyway, so show icon only — the same
-  // thing Chrome does as tabs compress.
-  const compact = width < 90
+  // thing Chrome does as tabs compress. A vertical row never compresses: it is
+  // full width whatever else is open, which is the whole reason to use it.
+  const compact = !vertical && width < 90
 
   return (
     <div
@@ -141,9 +169,12 @@ function TabItem({
       aria-selected={isActive}
       tabIndex={0}
       title={internal ? label : `${label}\n${tab.url}`}
-      style={{ width }}
+      style={vertical ? undefined : { width }}
       className={[
-        'app-no-drag group relative flex h-[31px] shrink-0 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-[13px] transition-colors',
+        'app-no-drag group relative flex h-[31px] shrink-0 cursor-default items-center gap-2 px-2.5 text-[13px] transition-colors',
+        // Horizontal tabs are pages hanging from the title bar, so they round at
+        // the top only. A vertical row is a list item and rounds all the way.
+        vertical ? 'w-full rounded-md' : 'rounded-t-lg',
         compact ? 'justify-center' : '',
         // The active tab gets a lit pane; inactive ones stay legible rather than
         // fading into the glass, which is what happened at lower contrast.

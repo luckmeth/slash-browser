@@ -70,12 +70,26 @@ export class SessionRegistry {
     this.blocker = blocker
   }
 
+  /**
+   * Watches every partition for redirect status codes.
+   *
+   * A separate slot from the blocker for the same reason the blocker has one: a
+   * session created through another path would be unobserved, and Redirect X-Ray
+   * would silently show nothing for isolated workspaces.
+   */
+  setRedirectObserver(observer: { attachToSession: (session: Session, label: string) => void }): void {
+    this.redirectObserver = observer
+  }
+
   private blocker: { apply: (session: Session, label: string) => void } | null = null
+  private redirectObserver: { attachToSession: (session: Session, label: string) => void } | null =
+    null
 
   private harden(target: Session, key: string): Session {
     if (!this.hardened.has(key)) {
       this.hardening.apply(target, key)
       this.blocker?.apply(target, key)
+      this.redirectObserver?.attachToSession(target, key)
       this.hardened.add(key)
     }
     return target

@@ -3,6 +3,8 @@ import type { OverlayState } from '@shared/ipc/contracts'
 import { SuggestionList } from './features/omnibox/SuggestionList'
 import { SpikeReport } from './features/diagnostics/SpikeReport'
 import { PermissionPrompt } from './features/permissions/PermissionPrompt'
+import { TabSearch } from './features/tabsearch/TabSearch'
+import { Reader } from './features/reader/Reader'
 
 /**
  * Root of the overlay document.
@@ -40,6 +42,10 @@ export function OverlayApp(): React.JSX.Element | null {
       return <SuggestionList />
     case 'permission-prompt':
       return <PermissionPrompt />
+    case 'tab-search':
+      return <TabSearch />
+    case 'reader':
+      return <Reader />
     case 'spike':
       return <SpikeReport />
     case 'none':

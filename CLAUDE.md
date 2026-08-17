@@ -40,6 +40,8 @@ These are not aspirations; they constrain the code.
 | Permission revocation | Chromium caches some grants renderer-side | Revoke updates our store *and* offers "Revoke & reload tab" |
 | Restore my session | Cookies persist; SPA in-memory state does not | Restore URL/title/order/pinned/scroll + full back-forward history via `navigationHistory.restore()`. UI says: pages, not logged-in state |
 | React UI over page content | `WebContentsView` is a native view — CSS `z-index` cannot cover it | Transparent overlay `WebContentsView` stacked above page views, hosting `overlay.html` |
+| Semantic search out of the box | Running a language model needs weights from somewhere | MiniLM **ships with the app** (`resources/models/`, ~23 MB) rather than being fetched on first enable. Downloading it would have turned a local search feature into an outbound request to a third party. Still opt-in, and keyword search never depends on it |
+| "Find any page by meaning" | Only the first ~8,000 characters of a page are embedded (10 passages), and MiniLM reads 256 word-pieces at a time | The cap is stated in the UI. A long page is matched on its opening, not its entirety |
 
 ## Architecture rules
 
@@ -92,6 +94,40 @@ These are not aspirations; they constrain the code.
 - **Rust migration seam:** `ResourceSampler` and `EmbeddingWorker` are the two candidates. Both are
   interfaces with an in-process TS implementation, invoked asynchronously, so either can become a
   sidecar speaking JSON-RPC over stdio without touching callers.
+- **The embedding runtime never loads in the main process.** `src/main/memory/embedding/worker.ts`
+  is a second rollup entry (`out/main/embeddingWorker.js`) launched with `utilityProcess.fork`.
+  Loading ONNX blocks its thread for hundreds of milliseconds; in main that is every tab switch and
+  every IPC reply. The worker imports nothing from `shared/types` — the vector width is passed in
+  the `prepare` message — because importing a schema module drags zod into a 4 KB bundle.
+- **A tab showing an error has no page view.** `Tab.needsView` is false while `error` is set, so
+  the view is detached and the chrome's `ErrorPage` fills the content hole — the same mechanism as
+  the new tab page and the hibernation placeholder. Chromium's own failure page cannot say whether
+  Slash Shield refused the request, which is the whole point of having our own. Retrying clears the
+  error and **must reattach the view**; `navigate` and `reload` both do.
+- **Reader mode carries text blocks, never HTML.** Readability's `content` is markup derived from a
+  web page, and the overlay that renders it holds the privileged IPC bridge. `readerScript.ts`
+  walks the parsed DOM in a detached container and returns typed blocks, which React escapes.
+- **Vertical tabs inset the native page view.** `tabStripPosition: 'left'` widens
+  `ViewLayoutManager.setSidebarWidth` by `VERTICAL_TAB_STRIP_WIDTH`. Moving the strip in React alone
+  would draw the tab column underneath the page — same trap as side panels.
+- **The importer reads bookmarks and history only.** Chromium's passwords are DPAPI-encrypted
+  against the user's own account and *could* be decrypted here. Lifting a credential store on the
+  strength of one "Import" button is not a thing this browser does. Chromium locks `History` while
+  running, so it is copied — with its `-wal` — before being read.
+- **The embedding model is bundled and `allowRemoteModels` is `false`.** `resources/models/` ships
+  via `extraResources`, so it lands *beside* app.asar — the ONNX runtime opens those files natively
+  and cannot read through the archive. A missing file fails loudly instead of silently reaching for
+  huggingface.co. Verify by moving `resources/models` aside and re-running the semantic probe.
+- **`memory_vectors` is created at runtime, never in a migration.** A vec0 virtual table needs the
+  sqlite-vec extension loaded, and a failed migration takes the whole database, and therefore the
+  browser, down with it. `VectorStore.enable()` creates it the first time the feature is switched on.
+- **vec0 rowids must be bound as `BigInt`.** better-sqlite3 passes a plain JS number to SQLite as a
+  float and vec0 rejects it ("Only integers are allows for primary key values"). Every insert and
+  delete against `memory_vectors` binds `BigInt(id)`.
+- **Deleting a page deletes its vectors first.** `ON DELETE CASCADE` reaches `memory_chunks` but not
+  a virtual table, so `MemoryRepository` holds the `VectorStore` and calls `forgetPage` *before* the
+  page row goes. `VectorStore.enable()` also prunes orphans left by a session where the extension
+  never loaded.
 
 ## Stack
 

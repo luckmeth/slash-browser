@@ -120,4 +120,69 @@ describe('buildSuggestions', () => {
     expect(first?.url).toBe('https://www.google.com/search?q=typescript')
     expect(first?.subtitle).toContain('Google')
   })
+
+  describe('browsing memory rows', () => {
+    const memory = (url: string, title: string, reason = 'matched indexes') => ({
+      pageId: url.length,
+      url,
+      title,
+      siteName: null,
+      snippet: '',
+      visitedAt: 0,
+      score: 1,
+      reasons: [{ kind: 'keyword' as const, detail: reason }]
+    })
+
+    it('offers a page matched on its contents', () => {
+      // The words are nowhere in the title or the address — this row can only
+      // have come from what was on the page, which is the entire point.
+      const result = buildSuggestions(
+        'database speed',
+        sources({ memory: [memory('https://example.com/a', 'Indexing explained')] })
+      )
+      const hit = result.find((s) => s.kind === 'memory')
+      expect(hit?.title).toBe('Indexing explained')
+    })
+
+    it('says why it matched', () => {
+      const result = buildSuggestions(
+        'database speed',
+        sources({ memory: [memory('https://example.com/a', 'Indexing', 'similar in meaning')] })
+      )
+      // Without the reason, a page the user does not recognise is
+      // indistinguishable from a bad guess.
+      expect(result.find((s) => s.kind === 'memory')?.subtitle).toBe(
+        'example.com · similar in meaning'
+      )
+    })
+
+    it('never crowds out the literal reading of the input', () => {
+      const many = Array.from({ length: 20 }, (_, i) =>
+        memory(`https://example.com/${i}`, `Page ${i}`)
+      )
+      const result = buildSuggestions('database speed', sources({ memory: many }))
+      expect(result[0]?.kind).toBe('search')
+      expect(result.filter((s) => s.kind === 'memory')).toHaveLength(3)
+    })
+
+    it('does not repeat a page already offered as an open tab', () => {
+      const result = buildSuggestions(
+        'database',
+        sources({
+          openTabs: [tab('https://example.com/a', 'Database')],
+          memory: [memory('https://example.com/a', 'Database')]
+        })
+      )
+      expect(result.filter((s) => s.url === 'https://example.com/a')).toHaveLength(1)
+    })
+
+    it('changes nothing when memory is off', () => {
+      // The default install passes no memory at all; the omnibox must behave
+      // exactly as it did before the feature existed.
+      const without = buildSuggestions('database speed', sources())
+      const empty = buildSuggestions('database speed', sources({ memory: [] }))
+      expect(without).toEqual(empty)
+      expect(without.some((s) => s.kind === 'memory')).toBe(false)
+    })
+  })
 })

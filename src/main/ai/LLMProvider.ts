@@ -14,7 +14,7 @@ export interface PlanRequest {
 }
 
 export interface LLMProvider {
-  readonly id: 'anthropic' | 'openai-compatible'
+  readonly id: 'anthropic' | 'openai-compatible' | 'google'
   readonly model: string
   /** Returns the raw structured object; the caller validates it with zod. */
   proposePlan(request: PlanRequest): Promise<unknown>
@@ -165,6 +165,92 @@ export class OpenAICompatibleProvider implements LLMProvider {
       clearTimeout(timer)
     }
   }
+}
+
+/**
+ * Google's Generative Language API (Gemini).
+ *
+ * Structured output comes from `responseSchema` with a JSON mime type, which is
+ * Gemini's equivalent of a forced tool call — a guarantee rather than a request
+ * to please reply with JSON.
+ *
+ * The key goes in a header rather than the query string: a URL carrying a
+ * credential ends up in logs and crash reports, and this browser is not going to
+ * be the thing that puts it there.
+ */
+export class GoogleProvider implements LLMProvider {
+  readonly id = 'google' as const
+
+  constructor(
+    private readonly apiKey: string,
+    readonly model: string
+  ) {}
+
+  async proposePlan(request: PlanRequest): Promise<unknown> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    request.signal?.addEventListener('abort', () => controller.abort())
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-goog-api-key': this.apiKey
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: request.system }] },
+            contents: [
+              { role: 'user', parts: [{ text: `${request.userRequest}
+
+${request.context}` }] }
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              responseSchema: toGeminiSchema(request.outputSchema)
+            }
+          })
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error(`Google returned ${response.status}`)
+      }
+
+      const body = (await response.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[]
+      }
+      const text = body.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!text) throw new Error('Google returned no content')
+      return JSON.parse(text)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
+/**
+ * Strips a JSON Schema down to the subset Gemini accepts.
+ *
+ * It rejects `additionalProperties`, `$schema` and several other standard keys
+ * outright with a 400, so they are removed rather than sent and hoped for.
+ */
+function toGeminiSchema(schema: Record<string, unknown>): unknown {
+  const rejected = new Set(['additionalProperties', '$schema', 'definitions', '$defs', 'default'])
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk)
+    if (node === null || typeof node !== 'object') return node
+    const output: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(node)) {
+      if (rejected.has(key)) continue
+      output[key] = walk(value)
+    }
+    return output
+  }
+  return walk(schema)
 }
 
 export function describeProviderError(error: unknown): string {

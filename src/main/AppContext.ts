@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { app, type WebContents } from 'electron'
 import { Database } from './db/Database'
 import { HistoryRepository } from './db/repositories/HistoryRepository'
@@ -18,17 +19,42 @@ import { SnapshotRepository } from './db/repositories/SnapshotRepository'
 import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
+import { VectorStore } from './db/repositories/VectorStore'
 import { MemoryIndexer } from './memory/MemoryIndexer'
+import { SemanticIndex } from './memory/embedding/SemanticIndex'
+import { MemorySearchService } from './memory/MemorySearchService'
+import { ChromiumImporter } from './import/ChromiumImporter'
+import { ReaderService } from './reader/ReaderService'
+import { CleanupService } from './cleanup/CleanupService'
+import { PageInsightService } from './insight/PageInsightService'
+import { DownloadQueue } from './downloads/engine/DownloadQueue'
+import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
 import { AiEngine } from './ai/AiEngine'
+import { ProviderRegistry } from './ai/ProviderRegistry'
 import { ContentBlocker } from './shield/NetworkPolicy'
 import { PopupGuard } from './shield/PopupGuard'
 import { RedirectGuard } from './shield/RedirectGuard'
 import { GestureTracker } from './shield/GestureTracker'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
+import { CrashReporting } from './diagnostics/CrashReporting'
 import { createLogger } from './logger'
 
 const log = createLogger('app')
+
+/**
+ * Where the bundled embedding model lives.
+ *
+ * Shipped via electron-builder `extraResources`, which places it *beside*
+ * app.asar rather than inside it. That is deliberate: the ONNX runtime opens
+ * these files natively, and a native file open cannot see through an asar
+ * archive — the same trap that broke sqlite-vec's extension path.
+ */
+function bundledModelsDir(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'models')
+    : join(app.getAppPath(), 'resources', 'models')
+}
 
 /**
  * Composition root.
@@ -52,8 +78,20 @@ export class AppContext {
   readonly closedTabs: ClosedTabRepository
   readonly snapshots: SessionSnapshotManager
   readonly memoryRepository: MemoryRepository
+  readonly vectors: VectorStore
+  readonly semantic: SemanticIndex
+  readonly memorySearch: MemorySearchService
   readonly memory: MemoryIndexer
+  readonly importer: ChromiumImporter
+  readonly reader = new ReaderService()
+  readonly cleanup = new CleanupService()
+  readonly insight = new PageInsightService()
+  readonly downloadEngine: DownloadQueue
+  readonly guardian: DownloadGuardian
+  readonly crashes: CrashReporting
   readonly ai: AiEngine
+  /** The AI Hub's provider catalogue and credential store. */
+  readonly providers: ProviderRegistry
   readonly blocker: ContentBlocker
   readonly popups: PopupGuard
   readonly redirects: RedirectGuard
@@ -73,6 +111,8 @@ export class AppContext {
   private readonly hardening = new SessionHardening()
   private readonly downloadRepository: DownloadRepository
   private readonly windows: BrowserWindowController[] = []
+  /** Sessions hardened so far, replayed to each new window's recorder. */
+  private readonly observedSessions: { session: Electron.Session; label: string }[] = []
   private disposeContentSignals: (() => void) | null = null
   private started = false
 
@@ -92,8 +132,33 @@ export class AppContext {
       onGrantsChanged: () => {}
     })
     this.memoryRepository = new MemoryRepository(this.db)
-    this.memory = new MemoryIndexer(this.memoryRepository, this.settings)
+    // Constructed even when semantic search is off. It stays inert until
+    // `enable()` succeeds, and the repository needs the handle regardless so
+    // that forgetting a page can take its vectors with it.
+    this.vectors = new VectorStore(this.db)
+    this.memoryRepository.attachVectorStore(this.vectors)
+    this.semantic = new SemanticIndex(
+      this.vectors,
+      this.settings,
+      bundledModelsDir(),
+      (status) => this.broadcastAll('memory:semanticChanged', status)
+    )
+    this.memorySearch = new MemorySearchService(this.memoryRepository, this.semantic)
+    this.memory = new MemoryIndexer(this.memoryRepository, this.settings, this.semantic)
+    this.importer = new ChromiumImporter(this.bookmarks, this.history)
+    // The engine runs alongside Electron's own download path rather than
+    // replacing it: an ordinary click-to-download still goes through
+    // DownloadManager, while explicitly managed transfers get segmenting,
+    // queueing and retries.
+    this.downloadEngine = new DownloadQueue(
+      () => this.downloads.directory(),
+      () => this.settings.getAll().downloadConnections,
+      () => this.settings.getAll().downloadBandwidthLimit,
+      (items) => this.broadcastAll('downloadEngine:changed', items)
+    )
+    this.crashes = new CrashReporting(this.db)
     this.ai = new AiEngine(this.settings, this.db)
+    this.providers = new ProviderRegistry(this.db, this.settings)
     // Hooks are replaced in start(); until then a blocked navigation has no UI
     // to report to, but the request is still refused.
     this.blocker = new ContentBlocker(this.settings, {
@@ -101,6 +166,9 @@ export class AppContext {
       onCountsChanged: () => {},
       resolvePageUrl: (webContentsId) => this.pageUrlFor(webContentsId)
     })
+    // Reuses Shield's existing host list rather than keeping a second copy that
+    // could disagree with it about what counts as an ad network.
+    this.guardian = new DownloadGuardian((host) => this.blocker.engine.isKnownAdHost(host))
     // Both guards ask "was this the user?", so they share one gesture history —
     // two would be two answers that can disagree. Hooks are replaced in start()
     // once there is a window to report a block to.
@@ -125,6 +193,18 @@ export class AppContext {
     // Registered before any session is acquired, so every partition — including
     // an isolated workspace's — gets the filter rather than browsing unfiltered.
     this.sessions.setContentBlocker(this.blocker)
+    // Redirect status codes are only available from webRequest, and only for the
+    // sessions actually in use — including isolated workspaces' partitions.
+    // Sessions are hardened before the first window exists — the default one is
+    // acquired during start() — so they are remembered here and every window's
+    // recorder is attached to all of them at construction. Iterating windows
+    // alone would silently miss the default session and record no status codes.
+    this.sessions.setRedirectObserver({
+      attachToSession: (session, label) => {
+        this.observedSessions.push({ session, label })
+        for (const window of this.windows) window.redirectRecorder.attachToSession(session, label)
+      }
+    })
     this.downloads = new DownloadManager(this.downloadRepository, this.settings, {
       onChanged: (items) => this.broadcastAll('downloads:changed', items),
       getWindow: () => this.focusedWindow()?.browserWindow ?? null
@@ -256,13 +336,34 @@ export class AppContext {
     this.permissions.start()
     this.snapshots.start()
     this.memory.start()
+    // Loading the model and backfilling are both slow and both entirely
+    // optional, so this is not awaited: startup must not wait on a feature the
+    // user may never search with this session.
+    this.semantic.syncWithSettings()
 
     registerHandlers(this)
 
     this.settings.onChange((next) => {
       this.broadcastAll('settings:changed', next)
       // Keep each window's policy in step with the setting.
-      for (const window of this.windows) window.performance.policy.setMode(next.performanceMode)
+      for (const window of this.windows) {
+        window.performance.policy.setMode(next.performanceMode)
+        // Moving the tab strip changes how far the native page view is inset.
+        // React redrawing alone would leave the page covering the new column.
+        window.applySidebarWidth()
+      }
+      // The toggle is the switch; changing it anywhere — settings panel, memory
+      // panel, a future import — starts or stops the layer.
+      this.semantic.syncWithSettings()
+    })
+
+    // GPU and utility-process crashes never reach a tab's handler, so they are
+    // caught at the app level or they are lost entirely.
+    app.on('child-process-gone', (_event, details) => {
+      this.crashes.record(details.type, details.reason, details.exitCode ?? null)
+    })
+    app.on('render-process-gone', (_event, _contents, details) => {
+      this.crashes.record('renderer', details.reason, details.exitCode ?? null)
     })
 
     this.started = true
@@ -304,6 +405,23 @@ export class AppContext {
         // The gate has always taken this flag; until now there was no private
         // window to pass `true` from.
         void this.memory.indexPage(contents, url, isPrivate)
+
+        // A new document carries none of the injected cleanup CSS, so any tab
+        // showing this page is no longer cleaned. Continuing to report it as
+        // cleaned would leave a Restore button that does nothing.
+        for (const window of this.windows) {
+          const tab = window.tabs.allTabs().find((candidate) => candidate.contents === contents)
+          if (tab) this.cleanup.forget(tab.id)
+        }
+      },
+      enqueueDownload: (url) => this.downloadEngine.enqueue(url),
+      isKnownAdHost: (host) => this.blocker.engine.isKnownAdHost(host),
+      onRedirectChain: (chain) => {
+        // Only chains worth attention are pushed. Broadcasting every http→https
+        // hop would make the event useless and the panel unreadable.
+        if (chain.verdict === 'suspicious' || chain.verdict === 'notable') {
+          this.broadcastAll('redirects:chain', chain)
+        }
       },
       onBookmarkRequested: (url, title) => {
         if (this.bookmarks.findByUrl(url)) return
@@ -333,6 +451,10 @@ export class AppContext {
           siteLocked: this.siteLockedTabs.has(tabId)
         })
     })
+    // Catch the new window's recorder up on every session already in use.
+    for (const { session, label } of this.observedSessions) {
+      window.redirectRecorder.attachToSession(session, label)
+    }
     this.windows.push(window)
     // `close` fires while the views are still alive; `closed` fires after the
     // window is gone and has already been removed from this.windows, which is
@@ -431,6 +553,12 @@ export class AppContext {
     // Settles every pending prompt as denied; an unresolved permission promise
     // would leave the page's callback hanging.
     this.permissions.stop()
+    // Kills the utility process. Not awaited — `will-quit` is synchronous and
+    // the child is killed outright if it does not answer, so there is nothing
+    // to wait for that would change the outcome.
+    this.downloadEngine.dispose()
+    void this.semantic.stop()
+    this.memory.stop()
     this.downloads.dispose()
     this.ipc.dispose()
     this.db.close()

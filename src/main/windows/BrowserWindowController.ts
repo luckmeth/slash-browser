@@ -3,6 +3,7 @@ import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'el
 import {
   VIEW_KIND,
   WORKSPACE_RAIL_WIDTH,
+  VERTICAL_TAB_STRIP_WIDTH,
   TITLE_BAR_HEIGHT,
   PAGE_INSET
 } from '@shared/constants'
@@ -10,6 +11,9 @@ import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
 import type { OmniboxState } from '@shared/types/omnibox'
 import type { PermissionRequest } from '@shared/types/permission'
+import type { ReaderResult } from '@shared/types/reader'
+import type { RedirectChain } from '@shared/types/redirectChain'
+import { RedirectRecorder } from '../shield/RedirectRecorder'
 import type { IpcRegistry } from '../ipc/registry'
 import type { SessionRegistry } from '../sessions/SessionRegistry'
 import type { HistoryRepository } from '../db/repositories/HistoryRepository'
@@ -43,6 +47,12 @@ export interface WindowDeps {
   downloads: { hasActiveDownloadFrom: (webContentsId: number) => boolean }
   /** Invoked by the tab context menu's "Bookmark this tab". */
   onBookmarkRequested: (url: string, title: string) => void
+  /** Hands a link to the segmented download engine, from the link context menu. */
+  enqueueDownload?: (url: string) => void
+  /** Shield's known ad/tracking host list, for classifying redirect chains. */
+  isKnownAdHost?: (host: string) => boolean
+  /** A redirect chain finished and is worth reporting to the user. */
+  onRedirectChain?: (chain: RedirectChain) => void
   /** A tab closed — drop anything scoped to it. */
   onTabDiscarded: (tabId: string) => void
   /** A tab closed — persisted so reopening it survives a restart. */
@@ -81,6 +91,8 @@ export class BrowserWindowController {
   private readonly layout = new ViewLayoutManager()
   private readonly chromeView: WebContentsView
   readonly overlay: OverlayController
+  /** Redirect X-Ray's record of main-frame chains in this window. */
+  readonly redirectRecorder: RedirectRecorder
   readonly tabs: TabManager
   readonly performance: TabPerformanceManager
   /**
@@ -178,6 +190,12 @@ export class BrowserWindowController {
 
     this.overlay = new OverlayController(this.window, this.deps.ipc)
 
+    // Constructed before TabManager, which hands it every new page view.
+    this.redirectRecorder = new RedirectRecorder(
+      (host) => this.deps.isKnownAdHost?.(host) ?? false,
+      (chain) => this.deps.onRedirectChain?.(chain)
+    )
+
     this.tabs = new TabManager(
       this.window,
       {
@@ -216,6 +234,7 @@ export class BrowserWindowController {
           if (!this.deps.settings.getAll().recordHistory) return
           this.deps.history.updateMetadata(url, title, faviconUrl)
         },
+        observeRedirects: (tabId, contents) => this.redirectRecorder.attachToTab(tabId, contents),
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
@@ -244,9 +263,10 @@ export class BrowserWindowController {
     this.performance.policy.setMode(this.deps.settings.getAll().performanceMode)
     this.performance.start()
 
-    // The workspace rail is always visible in Phase 2, so the page view is
-    // permanently inset by its width. Both sides read the same constant.
-    this.layout.setSidebarWidth(WORKSPACE_RAIL_WIDTH)
+    // The workspace rail is always visible, so the page view is permanently
+    // inset by its width; a vertical tab strip sits beside it and widens the
+    // same inset. Both sides read the same constants.
+    this.applySidebarWidth()
     // Leaves a gutter of glass around the page, so the chrome frames it rather
     // than the page covering every pixel below the toolbar.
     this.layout.setPageInset(PAGE_INSET)
@@ -304,6 +324,7 @@ export class BrowserWindowController {
       workspaces: this.deps.workspaces,
       searchEngineId: () => this.deps.settings.getAll().searchEngineId,
       bookmarkUrl: (url, title) => this.deps.onBookmarkRequested(url, title),
+      enqueueDownload: (url) => this.deps.enqueueDownload?.(url),
       moveTabToWorkspace: (tabId, workspaceId) => {
         const from = this.tabs.findById(tabId)?.snapshot.workspaceId
         const target = this.deps.workspaces.findById(workspaceId)
@@ -370,12 +391,60 @@ export class BrowserWindowController {
     this.deps.ipc.broadcast('permissions:prompt', request, this.privilegedContents())
   }
 
+  /**
+   * Opens tab search over the page.
+   *
+   * Modal and focused: it is a picker the user just asked for, and it has a text
+   * field that must receive their next keystroke. Driven from the menu, so it
+   * works regardless of whether focus was in the page or the chrome — a renderer
+   * keydown handler would never see Ctrl+Shift+A while a web page had focus.
+   */
+  showTabSearch(): void {
+    const state = this.overlay.show('tab-search', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
+   * Holds the extracted article between `reader:open` and the overlay mounting.
+   *
+   * The overlay document loads asynchronously after `show()`, so it cannot be
+   * handed the article directly — it pulls it once it is alive, the same race
+   * the permission prompt and the omnibox dropdown already solve this way.
+   */
+  pendingReader: ReaderResult | null = null
+
+  showReader(result: ReaderResult): void {
+    this.pendingReader = result
+    const state = this.overlay.show('reader', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
   dismissPermissionPrompt(requestId: string): void {
     if (this.pendingPermission?.requestId !== requestId) return
     this.pendingPermission = null
     const state = this.overlay.hide()
     this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
     this.deps.ipc.broadcast('permissions:prompt', null, this.privilegedContents())
+  }
+
+  /**
+   * Re-insets the page for the current tab-strip position.
+   *
+   * Called at construction and whenever the setting changes. The native page
+   * view knows nothing about our CSS, so moving the strip in React without this
+   * would draw the tab column *underneath* the page — the same trap that makes
+   * side panels inset rather than float.
+   */
+  applySidebarWidth(): void {
+    const vertical = this.deps.settings.getAll().tabStripPosition === 'left'
+    this.layout.setSidebarWidth(WORKSPACE_RAIL_WIDTH + (vertical ? VERTICAL_TAB_STRIP_WIDTH : 0))
+    this.applyLayout()
   }
 
   /** Chrome grew or shrank — e.g. the find bar opened. */

@@ -4,12 +4,18 @@ import { parseQuery as parseQueryForDev } from './memory/parseQuery'
 import { buildApplicationMenu } from './menu'
 import { createLogger } from './logger'
 import { prepareUserDataPath } from './userData'
+import { CrashReporting } from './diagnostics/CrashReporting'
 
 const log = createLogger('main')
 
 // Before anything reads a path, and before the single-instance lock, which is
 // itself keyed off the user-data location.
 prepareUserDataPath()
+
+// Before any renderer exists. Chromium writes a minidump when one dies, but
+// discards it unless the reporter is running — and the most interesting crash is
+// often the one during startup, which a later call would miss.
+CrashReporting.start()
 
 // A browser is a single-instance application: a second launch must hand its
 // arguments to the running copy rather than open a rival process that would
@@ -158,6 +164,231 @@ if (!app.requestSingleInstanceLock()) {
             context.memoryRepository.clearAll()
             context.settings.update({ excludedOrigins: [] })
           }
+        })
+      )
+    }
+
+    if (process.env['SLASH_CRASH_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runCrashCapture }) =>
+        runCrashCapture(window, {
+          report: () => context.crashes.report(),
+          clear: () => context.crashes.clear()
+        })
+      )
+    }
+
+    if (process.env['SLASH_AIHUB_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runAiHubCapture }) =>
+        runAiHubCapture({
+          status: () => context.providers.status(),
+          connect: (input) =>
+            context.providers.connect(input as Parameters<typeof context.providers.connect>[0]),
+          disconnect: (provider) =>
+            context.providers.disconnect(provider as Parameters<typeof context.providers.disconnect>[0]),
+          setDefault: (provider) =>
+            context.providers.setDefault(provider as Parameters<typeof context.providers.setDefault>[0]),
+          canBuild: (provider) =>
+            context.providers.build(provider as Parameters<typeof context.providers.build>[0]) !== null,
+          // Reads the ciphertext straight off disk, to prove it is not the key.
+          rawStoredBytes: (provider) => {
+            const row = context.db.connection
+              .prepare('SELECT api_key FROM ai_credentials WHERE provider = ?')
+              .get(provider) as { api_key: Buffer | null } | undefined
+            return row?.api_key ? row.api_key.toString('latin1') : null
+          }
+        })
+      )
+    }
+
+    const chainPath = process.env['SLASH_REDIRECT_CHAIN_CAPTURE']
+    if (chainPath) {
+      void import('./dev/spikeCapture').then(({ runRedirectChainCapture }) =>
+        runRedirectChainCapture(window, chainPath, {
+          chains: () => window.redirectRecorder.list()
+        })
+      )
+    }
+
+    const insightPath = process.env['SLASH_INSIGHT_CAPTURE']
+    if (insightPath) {
+      void import('./dev/spikeCapture').then(({ runInsightCapture }) =>
+        runInsightCapture(window, insightPath, {
+          analyse: () => context.insight.analyse(window.tabs.activeTab?.contents ?? null)
+        })
+      )
+    }
+
+    const cleanupPath = process.env['SLASH_CLEANUP_CAPTURE']
+    if (cleanupPath) {
+      void import('./dev/spikeCapture').then(({ runCleanupCapture }) => {
+        const contents = () => window.tabs.activeTab?.contents ?? null
+        const evaluate = async (expression: string): Promise<number> => {
+          const target = contents()
+          if (!target) return 0
+          return (await target.executeJavaScript(expression, true)) as number
+        }
+        return runCleanupCapture(window, cleanupPath, {
+          apply: (mode) => context.cleanup.apply(window.tabs.activeTab?.id ?? '', contents(), mode),
+          restore: () => context.cleanup.restore(window.tabs.activeTab?.id ?? '', contents()),
+          // No whitespace normalisation: the probe compares this figure against
+          // itself before and after cleaning, so consistency is all that matters
+          // and a regex inside a nested string literal is an escaping hazard for
+          // no benefit.
+          contentLength: () =>
+            evaluate(
+              "(document.querySelector('main, article, #content') || document.body).innerText.trim().length"
+            ),
+          hiddenCount: () => evaluate("document.querySelectorAll('.slash-cleanup-hidden').length")
+        })
+      })
+    }
+
+    const tabBrainPath = process.env['SLASH_TABBRAIN_CAPTURE']
+    if (tabBrainPath) {
+      void Promise.all([
+        import('./dev/spikeCapture'),
+        import('./tabs/brain/tabAnalysis')
+      ]).then(([{ runTabBrainCapture }, { analyseTabs }]) =>
+        runTabBrainCapture(window, tabBrainPath, {
+          analyse: () =>
+            analyseTabs(window.tabs.allTabs().map((tab) => tab.snapshot), Date.now()),
+          titleOf: (tabId) => window.tabs.findById(tabId)?.snapshot.title ?? '(gone)'
+        })
+      )
+    }
+
+    if (process.env['SLASH_GUARDIAN_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runGuardianCapture }) =>
+        runGuardianCapture(window, {
+          scanDownloads: () => context.guardian.scanDownloads(window.tabs.activeTab?.contents ?? null),
+          scanMedia: () => context.guardian.scanMedia(window.tabs.activeTab?.contents ?? null)
+        })
+      )
+    }
+
+    if (process.env['SLASH_DOWNLOAD_PROBE']) {
+      void Promise.all([
+        import('./dev/spikeCapture'),
+        import('./downloads/engine/SegmentedDownload'),
+        import('./downloads/engine/planning'),
+        import('node:os'),
+        import('node:fs')
+      ]).then(async ([{ runDownloadEngineCapture }, { SegmentedDownload }, { planConnections }, os, fs]) => {
+        const tempDir = fs.mkdtempSync(`${os.tmpdir()}/slash-dl-`)
+        const { createServer } = await import('node:http')
+
+        // Deterministic bytes, so a reassembly bug shows up as a checksum
+        // mismatch rather than as "it looked fine".
+        const big = Buffer.alloc(12 * 1024 * 1024)
+        for (let i = 0; i < big.length; i++) big[i] = (i * 31 + (i >> 16)) & 0xff
+        const small = big.subarray(0, 64 * 1024)
+
+        const server = createServer((request, response) => {
+          const plain = request.url === '/plain.bin'
+          const body = request.url === '/small.bin' ? small : big
+          const range = plain ? undefined : request.headers.range
+
+          if (!plain) response.setHeader('Accept-Ranges', 'bytes')
+          response.setHeader('Content-Type', 'application/octet-stream')
+          response.setHeader('ETag', '"probe-fixture-v1"')
+
+          const match = range ? /bytes=(\d+)-(\d*)/.exec(range) : null
+          if (match) {
+            const start = Number(match[1])
+            const end = match[2] ? Number(match[2]) : body.length - 1
+            response.statusCode = 206
+            response.setHeader('Content-Range', `bytes ${start}-${end}/${body.length}`)
+            response.setHeader('Content-Length', String(end - start + 1))
+            response.end(body.subarray(start, end + 1))
+            return
+          }
+          response.statusCode = 200
+          response.setHeader('Content-Length', String(body.length))
+          response.end(body)
+        })
+
+        const baseUrl = await new Promise<string>((resolve) => {
+          server.listen(0, '127.0.0.1', () => {
+            const address = server.address()
+            resolve(`http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`)
+          })
+        })
+
+        return runDownloadEngineCapture({
+          tempDir,
+          baseUrl,
+          download: async (url, destination, connections) => {
+            const download = new SegmentedDownload({
+              url,
+              destination,
+              connections,
+              onProgress: () => {}
+            })
+            const capabilities = await download.probe()
+            const plan = planConnections(capabilities, connections)
+            await download.run(capabilities.totalBytes, plan.connections)
+            return {
+              receivedBytes: download.receivedBytes,
+              totalBytes: capabilities.totalBytes,
+              segments: download.currentSegments.length,
+              note: plan.note,
+              checksum: await download.checksum(),
+              acceptsRanges: capabilities.acceptsRanges
+            }
+          }
+        })
+      })
+    }
+
+    const featuresPath = process.env['SLASH_FEATURES_CAPTURE']
+    if (featuresPath) {
+      void import('./dev/spikeCapture').then(({ runFeaturesCapture }) =>
+        runFeaturesCapture(window, featuresPath, {
+          setVerticalTabs: (on) =>
+            context.settings.update({ tabStripPosition: on ? 'left' : 'top' }),
+          activeError: () => window.tabs.activeTab?.snapshot.error ?? null,
+          isViewAttached: () => window.tabs.hasAttachedView,
+          readArticle: async () => {
+            const result = await context.reader.extract(window.tabs.activeTab?.contents ?? null)
+            return {
+              ok: result.article !== null,
+              title: result.article?.title ?? '',
+              blocks: result.article?.blocks.length ?? 0,
+              reason: result.reason
+            }
+          },
+          tabCount: () => window.tabs.allTabs().length
+        })
+      )
+    }
+
+    if (process.env['SLASH_IMPORT_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runImportCapture }) =>
+        runImportCapture({
+          discover: () => context.importer.discover(),
+          run: (id) => context.importer.run(id, { bookmarks: true, history: true }),
+          bookmarkCount: () => context.bookmarks.list().length,
+          historyCount: () => context.history.search('', 100000, 0).length
+        })
+      )
+    }
+
+    const semanticPath = process.env['SLASH_SEMANTIC_CAPTURE']
+    if (semanticPath) {
+      void import('./dev/spikeCapture').then(({ runSemanticCapture }) =>
+        runSemanticCapture(window, semanticPath, {
+          setIndexing: (history, content) =>
+            context.settings.update({ indexHistory: history, indexPageContent: content }),
+          enableSemantic: () => context.semantic.enable(),
+          disableSemantic: () => context.semantic.disable(),
+          status: () => context.semantic.status(),
+          search: (query) => context.memorySearch.search(parseQueryForDev(query), 10),
+          // Straight to the repository, bypassing fusion: this is the control
+          // case, and it has to be the keyword index alone or the comparison
+          // proves nothing.
+          keywordOnly: (query) => context.memoryRepository.search(parseQueryForDev(query), 10),
+          forget: (url) => context.memoryRepository.forget(url),
+          clear: () => context.memoryRepository.clearAll()
         })
       )
     }

@@ -46,6 +46,56 @@ export class HistoryRepository {
       .run({ url, title, favicon: faviconUrl, now: Date.now() })
   }
 
+  /**
+   * Adds a visit from another browser, preserving its own timestamp and count.
+   *
+   * Deliberately not `recordVisit`: that stamps `last_visited_at` with the
+   * current time and adds one to the counter, which is right for a real visit
+   * and wrong for every row of an import — it would date a decade of someone's
+   * browsing to the minute they pressed the button, destroying the ordering that
+   * makes history worth importing at all.
+   *
+   * On conflict it takes the *larger* of each value, so importing twice, or
+   * importing a profile that overlaps with pages already visited here, merges
+   * rather than double-counting or moving a page backwards in time.
+   *
+   * Returns whether this was a new URL, so the summary can distinguish pages
+   * added from pages merged.
+   */
+  importVisit(
+    url: string,
+    title: string,
+    visitCount: number,
+    lastVisitedAt: number
+  ): { added: boolean } {
+    const existing = this.db.connection
+      .prepare('SELECT 1 FROM history_visits WHERE url = ?')
+      .get(url)
+
+    this.db.connection
+      .prepare(
+        `INSERT INTO history_visits (url, title, favicon_url, visit_count, last_visited_at)
+         VALUES (@url, @title, NULL, @count, @at)
+         ON CONFLICT(url) DO UPDATE SET
+           visit_count     = MAX(visit_count, @count),
+           last_visited_at = MAX(last_visited_at, @at),
+           title           = CASE WHEN title = '' THEN @title ELSE title END`
+      )
+      .run({ url, title, count: Math.max(1, visitCount), at: lastVisitedAt })
+
+    return { added: existing === undefined }
+  }
+
+  /**
+   * Wraps `work` in a single SQLite transaction.
+   *
+   * Exists for the importer: twenty thousand individually committed rows take
+   * minutes and leave a half-import behind if anything fails partway.
+   */
+  transaction<T>(work: () => T): () => T {
+    return this.db.connection.transaction(work)
+  }
+
   /** Updates metadata for an existing URL without counting another visit. */
   updateMetadata(url: string, title: string, faviconUrl: string | null): void {
     this.db.connection

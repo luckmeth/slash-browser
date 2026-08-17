@@ -78,20 +78,88 @@ appear nowhere in the page's title or URL.
 7. *Forget* a single result — it disappears and the count drops.
 8. *Delete everything indexed* — the count goes to zero.
 
-## What is not built
+## The semantic layer (opt-in)
 
-**The optional semantic layer.** Keyword search is complete and always works, which is what the plan
-specified ships first. `sqlite-vec` is installed and verified loading in Electron (v0.1.9), and the
-`SearchProvider` seam and result-explanation format already accommodate a `semantic` match reason —
-but the local ONNX embedding worker is not implemented.
+Keyword search ships first and always works. On top of it, an optional local embedding layer finds
+pages by **meaning** — the query "how to make database queries return faster" reaching an article
+titled *Database index*, which BM25 cannot do because the two share no term.
 
-Consequences, stated plainly:
+How it fits together:
 
-- **Paraphrase queries do not work.** "The article about making Postgres handle more traffic" will
-  not find a page that only ever says "scaling". You have to use words that are actually on the page.
-- The Memory panel reports semantic search as **"not installed"** rather than as off, because off
-  would imply a switch that exists.
+```
+enable → sqlite-vec loads → vec0 table created → MiniLM loads in a utility process
+       → pages chunked (800 chars, 120 overlap, 10 max) → vectors in memory_vectors
+search → FTS5 ranking ⊕ nearest-neighbour ranking, fused by reciprocal rank
+```
 
-Adding it means `@huggingface/transformers` + `onnxruntime-node` (~300 MB installed) running MiniLM
-in a utility process — never the main process, which must not block — with vectors in `sqlite-vec`
-and results fused with BM25 by reciprocal-rank fusion.
+**The model ships with the browser** (`resources/models/`, ~23 MB) rather than being downloaded on
+first use, and `allowRemoteModels` is `false`. Fetching it would have made switching on a *local*
+search feature into a request to a third party. Nothing here ever touches the network.
+
+Nothing about it is on the critical path. The model runs in its own process, a search issued while
+the model is still loading returns keyword results immediately, and a worker crash disables the
+layer without touching the browser.
+
+### Automated probe
+
+```bash
+npx electron-vite build
+SLASH_SEMANTIC_CAPTURE=semantic.png npx electron .
+```
+
+Six checks, in a real Electron process — because the parts that break here are runtime facts that
+no unit test can reach: the extension DLL loading under Electron's ABI, ONNX starting in a utility
+process, and vec0 accepting better-sqlite3's bindings.
+
+```
+semantic probe: PASS — model loaded
+semantic probe: PASS — a page was found by meaning, and said so
+semantic probe: PASS — the unrelated page did not outrank the right one
+semantic probe: PASS — a forgotten page is gone from the vector index
+semantic probe: PASS — keyword search unaffected with semantic off
+```
+
+**Result 2026-08-16: PASS.** The load-bearing line is the second: keyword search returned **0**
+results for that paraphrase and the fused search returned the right page, labelled *close in
+meaning*. Model load: 0.5 s, every time — it is read from disk, not fetched.
+
+**Prove it is offline.** Move `resources/models` aside and run the probe again. It must report
+*error* with "the files that ship with Slash look missing or damaged", not quietly download a
+replacement. **Result 2026-08-16: PASS** — refused, and keyword search kept working.
+
+**Run it against the packaged build too** — `release/win-unpacked/Slash.exe` with the same
+environment variable. This is not redundant. The dev build passed while the packaged build failed
+with *"the vector extension could not be loaded"*, because `require.resolve` returns a path inside
+`app.asar` and `loadExtension` hands that string straight to SQLite, which knows nothing about asar.
+Electron's shim covers `require` and `fs`; it does not cover a native library opening a file.
+**Result 2026-08-16, packaged: PASS.**
+
+### Manual checks
+
+9. With semantic off, the memory panel says the model already ships with Slash and that it runs
+   offline. Nothing about turning it on should suggest a network request, because there is not one.
+10. Turn it on. The state goes `loading → reading → on`, and `loading` lasts about a second.
+11. While it says *reading*, search anyway. Results arrive immediately from the keyword index, and
+    the panel says older pages are still being read rather than pretending the index is complete.
+12. Search a paraphrase using **none** of the page's own words. The page is found, and the result
+    carries an accent-coloured *close in meaning* chip distinguishing it from a word match.
+13. Search something you have never visited. It returns **nothing** — the similarity floor is what
+    stops a vector index from always handing back its nearest neighbours however unrelated.
+14. *Forget* a semantic result, then repeat the query. It is gone: the vectors went with the page,
+    not just the text.
+15. Turn semantic off. Keyword search is unchanged. Turn it back on — it is ready immediately, since
+    the model and the vectors were kept.
+16. *Delete everything indexed* clears pages, passages **and** vectors.
+
+### Known limits
+
+- **Only the opening of a long page is embedded** — ten passages, roughly 8,000 characters. A fact
+  buried in the last third of a longread is findable by keyword, not by meaning.
+- Similarity is shown as a phrase, not a percentage. MiniLM's scale is nothing like what a percentage
+  implies — a genuinely good match often scores under 0.4 — so "39%" beside the top result would read
+  as failure when it is not.
+- Turning the layer off keeps the stored vectors, so re-enabling is instant. They are page-derived
+  data and are removed by *Delete everything indexed*.
+- The weights cost every user ~23 MB of installer whether or not they ever switch this on. That is
+  the price of the feature never needing the network, and it is the right way round for this
+  browser — but it is a real cost paid by people who will not use it.

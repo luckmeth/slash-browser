@@ -332,6 +332,105 @@ const m009_closed_tabs: Migration = {
   `
 }
 
+const m010_semantic: Migration = {
+  version: 10,
+  name: 'semantic',
+  sql: /* sql */ `
+    -- Text as the embedding model saw it. Kept rather than recomputed because a
+    -- search result quotes the passage that actually matched — reconstructing it
+    -- from memory_fts would mean re-running the chunker and hoping it split the
+    -- page the same way it did months ago.
+    --
+    -- ON DELETE CASCADE from memory_pages, so forgetting a page cannot leave its
+    -- text behind here. The vectors are the one thing a cascade cannot reach:
+    -- vec0 is a virtual table and carries no foreign keys, so VectorStore deletes
+    -- those explicitly *before* the page row goes.
+    CREATE TABLE memory_chunks (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      page_id INTEGER NOT NULL REFERENCES memory_pages (id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL,
+      text    TEXT    NOT NULL,
+      UNIQUE (page_id, ordinal)
+    );
+    CREATE INDEX idx_memory_chunks_page ON memory_chunks (page_id);
+
+    -- What has been embedded, with what. The hash is of the text that was fed to
+    -- the model: re-visiting an unchanged page must not re-embed it, and an
+    -- edited page must. The model id is recorded because vectors from two models
+    -- are not comparable — changing models invalidates every row here.
+    CREATE TABLE memory_embedded_pages (
+      page_id      INTEGER PRIMARY KEY REFERENCES memory_pages (id) ON DELETE CASCADE,
+      model        TEXT    NOT NULL,
+      content_hash TEXT    NOT NULL,
+      chunk_count  INTEGER NOT NULL DEFAULT 0,
+      embedded_at  INTEGER NOT NULL
+    );
+
+    -- The vec0 virtual table is deliberately NOT created here. It needs the
+    -- sqlite-vec extension loaded, and a migration that fails takes the whole
+    -- database — and therefore the browser — down with it. Semantic search is
+    -- optional; the browser starting is not. VectorStore creates the table the
+    -- first time the feature is switched on, by which point a failure has
+    -- somewhere honest to be reported.
+  `
+}
+
+const m011_ai_providers: Migration = {
+  version: 11,
+  name: 'ai_providers',
+  sql: /* sql */ `
+    -- One credential row per provider, replacing the single-key table.
+    --
+    -- The browser supports several AI providers at once, so a single row keyed
+    -- \`id = 1\` could only ever hold one of them — connecting a second silently
+    -- overwrote the first.
+    --
+    -- \`api_key\` is a BLOB because it is ciphertext from the OS keychain
+    -- (DPAPI on Windows), never readable text. \`model\` and \`base_url\` sit
+    -- beside it so each provider keeps its own choice rather than sharing one
+    -- global model name that is wrong for three of them.
+    CREATE TABLE ai_credentials (
+      provider   TEXT    PRIMARY KEY,
+      api_key    BLOB,
+      model      TEXT    NOT NULL DEFAULT '',
+      base_url   TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    -- Carry the existing key forward rather than making the user re-enter it.
+    -- The old table named no provider, but the only one that could have written
+    -- a key while the setting was 'anthropic' is Anthropic, and an unusable key
+    -- under the wrong provider is a disconnect away from being fixed.
+    INSERT INTO ai_credentials (provider, api_key, model, base_url, created_at)
+    SELECT 'anthropic', api_key, '', NULL, unixepoch() * 1000
+    FROM ai_secrets WHERE id = 1;
+  `
+}
+
+const m012_crashes: Migration = {
+  version: 12,
+  name: 'crashes',
+  sql: /* sql */ `
+    -- What crashed, when, and which process. Nothing about the page itself.
+    --
+    -- A URL is deliberately NOT recorded: a crash log that accumulates the
+    -- addresses of pages the user visited is a browsing history under another
+    -- name, and it would survive "delete my history". The reason a renderer died
+    -- is in the dump; where the user was is not our business.
+    CREATE TABLE crash_events (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      at      INTEGER NOT NULL,
+      -- 'renderer' | 'gpu' | 'utility' | 'main'
+      process TEXT    NOT NULL,
+      -- Chromium's own reason string: 'crashed', 'oom', 'killed', ...
+      reason  TEXT    NOT NULL,
+      -- Exit code where one was reported.
+      code    INTEGER
+    );
+    CREATE INDEX idx_crash_events_at ON crash_events (at DESC);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -341,7 +440,10 @@ export const migrations: readonly Migration[] = [
   m006_memory,
   m007_ai,
   m008_icon_names,
-  m009_closed_tabs
+  m009_closed_tabs,
+  m010_semantic,
+  m011_ai_providers,
+  m012_crashes
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

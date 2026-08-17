@@ -11,6 +11,17 @@ import { PerformanceSnapshotSchema } from '../types/performance'
 import { OmniboxStateSchema, SuggestionSchema } from '../types/omnibox'
 import { SnapshotSchema, SnapshotDetailSchema } from '../types/snapshot'
 import { MemoryResultSchema, MemoryStatsSchema, ParsedQuerySchema } from '../types/memory'
+import { SemanticStatusSchema } from '../types/semantic'
+import { ImportSourceSchema, ImportSummarySchema } from '../types/importer'
+import { ReaderResultSchema } from '../types/reader'
+import { DownloadPrioritySchema, EngineDownloadSchema } from '../types/downloadEngine'
+import { DownloadScanSchema, MediaScanSchema } from '../types/downloadGuardian'
+import { TabAnalysisSchema } from '../types/tabBrain'
+import { CleanupModeSchema, CleanupResultSchema, CleanupStatusSchema } from '../types/cleanup'
+import { PageInsightSchema } from '../types/pageInsight'
+import { RedirectChainSchema } from '../types/redirectChain'
+import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
+import { CrashReportSchema } from '../types/diagnostics'
 import {
   BlockingStatusSchema,
   PopupBlockedSchema,
@@ -88,7 +99,15 @@ export type DbStatus = z.infer<typeof DbStatusSchema>
 
 export const OverlayStateSchema = z.object({
   visible: z.boolean(),
-  surface: z.enum(['none', 'spike', 'command-bar', 'dialog', 'permission-prompt'])
+  surface: z.enum([
+    'none',
+    'spike',
+    'command-bar',
+    'dialog',
+    'permission-prompt',
+    'tab-search',
+    'reader'
+  ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
 
@@ -157,6 +176,15 @@ export const invokeContracts = {
 
   // Tab mutations return the resulting snapshot as well as broadcasting it. The
   // caller then updates from its own response instead of racing the broadcast.
+  /**
+   * Every tab in the window, including workspaces the user is not looking at.
+   *
+   * Distinct from `tabs:list`, which is scoped to the active workspace because
+   * that is what the tab strip draws. Tab search is the one surface that has to
+   * see across the whole window — a tab you cannot find because it is in another
+   * workspace is exactly the tab you opened tab search to find.
+   */
+  'tabs:listAll': { request: z.void(), response: TabsSnapshotSchema },
   'tabs:list': { request: z.void(), response: TabsSnapshotSchema },
   'tabs:create': {
     request: z.object({
@@ -379,6 +407,19 @@ export const invokeContracts = {
   'memory:stats': { request: z.void(), response: MemoryStatsSchema },
   'memory:forget': { request: z.object({ url: z.string() }), response: MemoryStatsSchema },
   'memory:clear': { request: z.void(), response: MemoryStatsSchema },
+  'memory:semanticStatus': { request: z.void(), response: SemanticStatusSchema },
+  /**
+   * Turns the local embedding layer on or off.
+   *
+   * Returns immediately with the status after the switch — `preparing` on the
+   * first enable, not `ready`. Loading the model can take minutes on a slow
+   * connection, and an IPC call that blocks until it finishes would hang the
+   * settings panel; progress arrives on `memory:semanticChanged`.
+   */
+  'memory:setSemanticEnabled': {
+    request: z.object({ enabled: z.boolean() }),
+    response: SemanticStatusSchema
+  },
 
   'ai:status': { request: z.void(), response: AiStatusSchema },
   /** The key is write-only across IPC; it is never sent back to the renderer. */
@@ -453,6 +494,170 @@ export const invokeContracts = {
     request: z.object({ tabId: z.string() }),
     response: BlockingStatusSchema
   },
+
+  /**
+   * Extracts the active tab as an article and opens the reader over it.
+   *
+   * Returns the result as well as showing it, so the toolbar can say "this is
+   * not an article" in place rather than opening an empty reader.
+   */
+  'reader:open': { request: z.void(), response: ReaderResultSchema },
+  /** Pulled by the overlay document once it has mounted. */
+  'reader:get': { request: z.void(), response: ReaderResultSchema },
+
+  'import:sources': { request: z.void(), response: z.array(ImportSourceSchema) },
+  /**
+   * Takes a source **id**, never a filesystem path.
+   *
+   * Main resolves the id against its own freshly-scanned list, so a compromised
+   * chrome view cannot turn this into "read any file I name and put it in the
+   * database".
+   */
+  'import:run': {
+    request: z.object({
+      sourceId: z.string(),
+      bookmarks: z.boolean().default(true),
+      history: z.boolean().default(true)
+    }),
+    response: ImportSummarySchema
+  },
+
+  'downloadEngine:list': { request: z.void(), response: z.array(EngineDownloadSchema) },
+  /**
+   * Starts a managed download.
+   *
+   * Takes a URL because this is invoked from our own chrome in response to a
+   * user action — a link's context menu, or the media panel. It is not reachable
+   * from web content: the sender allowlist blocks page views outright.
+   */
+  'downloadEngine:enqueue': {
+    request: z.object({
+      url: z.string().url(),
+      priority: DownloadPrioritySchema.default('normal'),
+      /** Epoch ms to hold the download until, for off-peak transfers. */
+      startAfter: z.number().int().nullable().default(null)
+    }),
+    response: z.object({ id: z.string() })
+  },
+  'downloadEngine:pause': { request: z.object({ id: z.string() }), response: z.void() },
+  'downloadEngine:resume': { request: z.object({ id: z.string() }), response: z.void() },
+  'downloadEngine:cancel': { request: z.object({ id: z.string() }), response: z.void() },
+  'downloadEngine:remove': { request: z.object({ id: z.string() }), response: z.void() },
+  'downloadEngine:setPriority': {
+    request: z.object({ id: z.string(), priority: DownloadPrioritySchema }),
+    response: z.void()
+  },
+  'downloadEngine:clearFinished': { request: z.void(), response: z.void() },
+  /** Releases a scheduled download from its hold. */
+  'downloadEngine:startNow': { request: z.object({ id: z.string() }), response: z.void() },
+
+  /**
+   * Inventories and classifies the download links on the active page.
+   *
+   * Scanned on demand. Doing this on every page load would walk 400 anchors of
+   * every page anyone visits to answer a question almost nobody asks.
+   */
+  /**
+   * Analyses the window's tabs locally — no AI, no network.
+   *
+   * On demand rather than continuously: clustering every tab set change would
+   * burn CPU to keep a panel warm that is usually closed.
+   */
+  /**
+   * Cleans the active tab's page.
+   *
+   * Injected CSS only, held in the live document — reloading restores the page
+   * exactly, which is why this can never corrupt a site.
+   */
+  /**
+   * Reads the active page and reports what it declares about itself.
+   *
+   * Local heuristics over markup — no AI and no network, which the panel states
+   * so findings are not over-trusted as a model's reading of the page.
+   */
+  'insight:analyse': { request: z.void(), response: PageInsightSchema },
+
+  /**
+   * Local crash record. Dumps stay on the machine — there is no upload server,
+   * and the payload says so rather than leaving the user to assume.
+   */
+  'crashes:report': { request: z.void(), response: CrashReportSchema },
+  'crashes:clear': { request: z.void(), response: CrashReportSchema },
+  'crashes:openFolder': { request: z.void(), response: z.void() },
+
+  /** Which AI providers exist, and which are connected. Never returns a key. */
+  'aiHub:status': { request: z.void(), response: AiHubStatusSchema },
+  /**
+   * Stores a provider's credentials.
+   *
+   * The key travels renderer → main once and is immediately encrypted with the
+   * OS keychain. There is deliberately no channel that returns one, so a
+   * compromised renderer cannot read back what was stored.
+   */
+  'aiHub:connect': {
+    request: z.object({
+      provider: AiProviderIdSchema,
+      apiKey: z.string().max(400).optional(),
+      model: z.string().max(120).optional(),
+      baseUrl: z.string().max(300).optional()
+    }),
+    response: z.object({ error: z.string().nullable(), status: AiHubStatusSchema })
+  },
+  'aiHub:disconnect': {
+    request: z.object({ provider: AiProviderIdSchema }),
+    response: AiHubStatusSchema
+  },
+  'aiHub:setDefault': {
+    request: z.object({ provider: AiProviderIdSchema }),
+    response: z.object({ error: z.string().nullable(), status: AiHubStatusSchema })
+  },
+
+  /** Recorded main-frame redirect chains for this window, newest first. */
+  'redirects:chains': { request: z.void(), response: z.array(RedirectChainSchema) },
+  'redirects:clear': { request: z.void(), response: z.void() },
+  /**
+   * Adds a domain to the user's own block rules.
+   *
+   * Takes a host rather than a rule expression: this is invoked from a chain the
+   * user is looking at, and letting the renderer author arbitrary filter syntax
+   * would be a wider surface than the feature needs.
+   */
+  'redirects:blockDomain': {
+    request: z.object({ host: z.string().min(1).max(253) }),
+    response: z.object({ blocked: z.array(z.string()) })
+  },
+
+  'cleanup:apply': {
+    request: z.object({ mode: CleanupModeSchema.optional() }),
+    response: CleanupResultSchema
+  },
+  'cleanup:restore': { request: z.void(), response: CleanupStatusSchema },
+  'cleanup:status': { request: z.void(), response: CleanupStatusSchema },
+  /** Turns cleanup off for the current site, or back on. */
+  'cleanup:setDisabledForHost': {
+    request: z.object({ disabled: z.boolean() }),
+    response: CleanupStatusSchema
+  },
+
+  'tabBrain:analyse': { request: z.void(), response: TabAnalysisSchema },
+  /**
+   * Closes tabs the user selected from the suggestions.
+   *
+   * Explicit ids rather than "close everything you suggested", so what the user
+   * saw and what happens cannot drift apart between render and click.
+   */
+  'tabBrain:closeTabs': {
+    request: z.object({ tabIds: z.array(z.string()).max(200) }),
+    response: TabAnalysisSchema
+  },
+  /** Moves a suggested group into a workspace of its own. */
+  'tabBrain:groupIntoWorkspace': {
+    request: z.object({ tabIds: z.array(z.string()).max(200), name: z.string().min(1).max(60) }),
+    response: z.object({ workspaceId: z.string(), moved: z.number().int() })
+  },
+
+  'guardian:scanDownloads': { request: z.void(), response: DownloadScanSchema },
+  'guardian:scanMedia': { request: z.void(), response: MediaScanSchema },
 
   'history:search': {
     request: HistoryQuerySchema,
@@ -533,6 +738,9 @@ export const UiCommandSchema = z.object({
     'open-permissions',
     'open-timemachine',
     'open-memory',
+    'open-tabbrain',
+    'open-insight',
+    'open-redirects',
     'open-ai',
     'bookmark-current-tab',
     'close-panel'
@@ -552,6 +760,9 @@ export const eventContracts = {
   'omnibox:state': OmniboxStateSchema,
   'permissions:prompt': PermissionRequestSchema.nullable(),
   'permissions:changed': z.array(PermissionGrantSchema),
+  'memory:semanticChanged': SemanticStatusSchema,
+  'redirects:chain': RedirectChainSchema,
+  'downloadEngine:changed': z.array(EngineDownloadSchema),
   'ui:command': UiCommandSchema,
   'shield:popupBlocked': PopupBlockedSchema,
   'shield:navigationBlocked': NavigationNoticeSchema,

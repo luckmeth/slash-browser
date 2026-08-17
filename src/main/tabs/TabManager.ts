@@ -48,6 +48,8 @@ export interface TabManagerHooks {
    * bookmarks and the search engine setting, which the menu needs.
    */
   installPageContextMenu: (contents: WebContents) => void
+  /** Wires a new page view's navigation events into Redirect X-Ray. */
+  observeRedirects?: (tabId: string, contents: WebContents) => void
   /**
    * A tab is gone or has navigated away.
    *
@@ -131,6 +133,16 @@ export class TabManager {
   /** Total across all workspaces — used by Phase 3's performance engine. */
   allTabs(): Tab[] {
     return [...this.tabs]
+  }
+
+  /**
+   * Whether a page view is currently on the window.
+   *
+   * False for internal pages, hibernated tabs and tabs showing an error — the
+   * three cases where the chrome document is what fills the content hole.
+   */
+  get hasAttachedView(): boolean {
+    return this.attachedView !== null
   }
 
   get currentWorkspaceId(): string {
@@ -664,6 +676,10 @@ export class TabManager {
       if (this.activeId === id) this.attachView(tab)
       return
     }
+    // The view may be detached because this tab was showing an error page. The
+    // error has just been cleared, so the renderer has to come back — otherwise
+    // the page loads correctly into a view nobody can see.
+    if (this.activeId === id) this.attachView(tab)
     void tab.contents?.loadURL(url)
     this.scheduleEmit()
   }
@@ -690,6 +706,14 @@ export class TabManager {
       this.buildView(tab)
       if (this.activeId === id) this.attachView(tab)
       return
+    }
+    // Retrying from the error page: clearing the error is what lets the view be
+    // attached again, and `did-start-navigation` would clear it a moment later
+    // anyway — doing it here means the page is on screen from the first frame
+    // rather than after a flash of the error.
+    if (tab.snapshot.error) {
+      tab.patch({ error: null })
+      if (this.activeId === id) this.attachView(tab)
     }
     if (ignoreCache) tab.contents.reloadIgnoringCache()
     else tab.contents.reload()
@@ -734,7 +758,15 @@ export class TabManager {
       onPageLoaded: (t, url) => this.hooks.onPageLoaded(t, url),
       onMetadata: (t) =>
         this.hooks.onMetadata(t.snapshot.url, t.snapshot.title, t.snapshot.faviconUrl),
-      onCrashed: () => this.scheduleEmit()
+      onCrashed: () => this.scheduleEmit(),
+      onLoadFailed: (failed) => {
+        // `needsView` is now false for this tab, so detaching is what makes the
+        // chrome's error page visible. The view is kept rather than destroyed:
+        // Retry is a reload, and rebuilding a renderer is slower than reusing
+        // the one already there.
+        if (this.activeId === failed.id) this.detachCurrentView()
+        this.scheduleEmit()
+      }
     })
 
     installNavigationGuards(view.webContents, {
@@ -749,6 +781,7 @@ export class TabManager {
     })
 
     this.hooks.installPageContextMenu(view.webContents)
+    this.hooks.observeRedirects?.(tab.id, view.webContents)
 
     if (tab.snapshot.isMuted) view.webContents.setAudioMuted(true)
 

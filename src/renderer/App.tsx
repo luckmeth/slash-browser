@@ -4,6 +4,7 @@ import {
   CHROME_HEIGHT,
   TITLE_BAR_HEIGHT,
   TOOLBAR_HEIGHT,
+  VERTICAL_TAB_STRIP_WIDTH,
   WINDOW_CONTROLS_WIDTH
 } from '@shared/constants'
 import { FindBar, FIND_BAR_HEIGHT } from './features/find/FindBar'
@@ -16,6 +17,7 @@ import { useBrowserStore } from './stores/browserStore'
 import { TabStrip } from './features/tabs/TabStrip'
 import { Toolbar } from './features/omnibox/Toolbar'
 import { NewTabPage } from './features/newtab/NewTabPage'
+import { ErrorPage } from './features/errors/ErrorPage'
 import { SidePanel } from './features/panels/SidePanel'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
 import { useWorkspaceTheme } from './features/workspaces/useWorkspaceTheme'
@@ -139,6 +141,15 @@ export function App(): React.JSX.Element {
         case 'open-memory':
           togglePanel('memory')
           break
+        case 'open-tabbrain':
+          togglePanel('tabbrain')
+          break
+        case 'open-insight':
+          togglePanel('insight')
+          break
+        case 'open-redirects':
+          togglePanel('redirects')
+          break
         case 'open-ai':
           togglePanel('ai')
           break
@@ -153,10 +164,15 @@ export function App(): React.JSX.Element {
   }, [togglePanel, setPanel, requestOmniboxFocus, refreshHistory])
 
   const showNewTab = activeTab?.url === NEW_TAB_URL
+  // Main insets the native page view to match; the two read the same constant.
+  const verticalTabs = appearance?.tabStripPosition === 'left'
   const crashed = activeTab?.status === 'crashed'
   // A hibernated tab has no view attached, so the chrome shows through the
   // content hole — the same mechanism that renders the new tab page.
   const hibernated = activeTab?.status === 'hibernated'
+  // A crash has its own screen, so it must not also count as a failed load —
+  // both set `error`, and the sad tab is the more specific of the two.
+  const failed = !crashed && activeTab?.error ? activeTab.error : null
 
   return (
     // No opaque background: the window's acrylic is the backdrop, and each row
@@ -171,13 +187,26 @@ export function App(): React.JSX.Element {
         className="app-drag glass flex shrink-0 items-stretch"
         style={{ height: TITLE_BAR_HEIGHT, paddingRight: WINDOW_CONTROLS_WIDTH }}
       >
-        <TabStrip />
+        {/* With the strip on the left this row keeps only the drag region and
+            the window controls — it cannot be removed, or there is nowhere left
+            to grab the window. */}
+        {!verticalTabs && <TabStrip />}
       </div>
 
       {/* Row 2: workspace rail on the left, toolbar and content to its right —
-          matching the native page view's inset (WORKSPACE_RAIL_WIDTH). */}
+          matching the native page view's inset (WORKSPACE_RAIL_WIDTH, plus the
+          tab column when the strip is vertical). */}
       <div className="flex min-h-0 flex-1">
         <WorkspaceRail />
+
+        {verticalTabs && (
+          <div
+            className="glass glass-divide-r flex shrink-0 flex-col"
+            style={{ width: VERTICAL_TAB_STRIP_WIDTH }}
+          >
+            <TabStrip orientation="vertical" />
+          </div>
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div
@@ -208,6 +237,10 @@ export function App(): React.JSX.Element {
                 <SadTab />
               ) : hibernated ? (
                 <HibernatedTab />
+              ) : failed && activeTab ? (
+                // The view is detached while an error is showing, so this is
+                // what occupies the content hole.
+                <ErrorPage error={failed} tabId={activeTab.id} />
               ) : showNewTab ? (
                 <NewTabPage />
               ) : null}

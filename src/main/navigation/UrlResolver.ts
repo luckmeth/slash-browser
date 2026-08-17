@@ -1,4 +1,5 @@
 import { SEARCH_ENGINES, type SearchEngineId } from '@shared/constants'
+import { DEFAULT_SETTINGS } from '@shared/types/settings'
 import { NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
 
 export type ResolvedInput =
@@ -81,7 +82,13 @@ export function resolveInput(rawInput: string, engineId: SearchEngineId): Resolv
 }
 
 function search(query: string, engineId: SearchEngineId): ResolvedInput {
-  const engine = SEARCH_ENGINES[engineId] ?? SEARCH_ENGINES.duckduckgo
+  // Falls back to the *configured default*, not to a hardcoded engine. This
+  // used to name DuckDuckGo directly, which meant any path that lost the
+  // setting — a stale renderer copy, an unrecognised id from an older profile —
+  // silently searched somewhere the user had not chosen, while Settings went on
+  // showing their real preference. A default that disagrees with the schema's
+  // default is indistinguishable from the setting being ignored.
+  const engine = SEARCH_ENGINES[engineId] ?? SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId]
   return {
     kind: 'search',
     query,

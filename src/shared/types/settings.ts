@@ -30,6 +30,15 @@ export const SettingsSchema = z.object({
   /** Compact trades padding for rows on screen. */
   uiDensity: z.enum(['comfortable', 'compact']).default('comfortable'),
   /**
+   * Where the tab strip lives.
+   *
+   * Vertical is the better answer past about fifteen tabs — horizontal titles
+   * truncate to nothing while a list just keeps scrolling — but it costs screen
+   * width permanently, which is the wrong trade for someone who keeps four tabs
+   * open. Hence a preference rather than a default.
+   */
+  tabStripPosition: z.enum(['top', 'left']).default('top'),
+  /**
    * How translucent the chrome is, 0–100.
    *
    * Not everyone wants acrylic: it costs GPU time, it is ignored on Windows 10,
@@ -54,6 +63,16 @@ export const SettingsSchema = z.object({
   downloadDirectory: z.string().default(''),
   /** Prompt for a save location on every download instead of using the folder above. */
   askWhereToSaveDownloads: z.boolean().default(false),
+  /**
+   * Connections the download engine may open per file.
+   *
+   * Only used when the server supports range requests. More is not reliably
+   * faster: a server that caps total bandwidth per client gains nothing, and
+   * some refuse many parallel connections outright.
+   */
+  downloadConnections: z.number().int().min(1).max(8).default(4),
+  /** Ceiling in bytes per second across all downloads. 0 = unlimited. */
+  downloadBandwidthLimit: z.number().int().min(0).default(0),
 
   // --- content blocking ------------------------------------------------------
   /**
@@ -90,6 +109,18 @@ export const SettingsSchema = z.object({
   protectionMode: z.enum(['standard', 'strict']).default('standard'),
   /** Extra domains to block, one per line, authored by the user. */
   customBlockRules: z.array(z.string()).default([]),
+
+  // --- cleanup mode ----------------------------------------------------------
+  /** Which Cleanup Mode the Clean This Page button uses. */
+  cleanupMode: z.enum(['light', 'balanced', 'aggressive']).default('balanced'),
+  /**
+   * Hosts where cleanup is switched off.
+   *
+   * Essential rather than a nicety: the rules fire on the *shape* of an element,
+   * so there will always be a site where the thing named "sticky" is the thing
+   * you need.
+   */
+  cleanupDisabledHosts: z.array(z.string()).default([]),
 
   // --- Phase 3: performance --------------------------------------------------
   performanceMode: z.enum(['off', 'balanced', 'aggressive']).default('balanced'),

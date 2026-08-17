@@ -7,7 +7,11 @@ const KIND_ICON: Record<string, IconName> = {
   search: 'search',
   history: 'clock',
   bookmark: 'star',
-  'open-tab': 'forward'
+  'open-tab': 'forward',
+  // A book, not a clock: this row is "a page you read", matched on what was on
+  // it. Sharing the history icon would hide the one thing that makes it
+  // different from the row above it.
+  memory: 'wsReading'
 }
 
 /**

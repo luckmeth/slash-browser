@@ -38,6 +38,17 @@ export const PAGE_RADIUS = 12
  */
 export const WORKSPACE_RAIL_WIDTH = 56
 
+/**
+ * Width of the vertical tab column, when the strip is on the left.
+ *
+ * Wide enough for a readable title, which is the entire reason to move the
+ * strip: horizontal tabs become unreadable somewhere past fifteen, and a
+ * vertical list simply keeps scrolling. Main insets the native page view by
+ * this plus the workspace rail — a mismatch would clip the page or leave a dead
+ * strip beside it.
+ */
+export const VERTICAL_TAB_STRIP_WIDTH = 208
+
 /** How many closed tabs the reopen stack remembers. */
 export const CLOSED_TAB_STACK_LIMIT = 25
 
@@ -54,9 +65,14 @@ export const VIEW_KIND = {
 
 export type ViewKind = (typeof VIEW_KIND)[keyof typeof VIEW_KIND]
 
+// Google first, because insertion order is what the Settings dropdown renders
+// and what an unbound <select> falls back to displaying. A list whose first
+// entry is not the default engine shows the wrong engine as selected the moment
+// the bound value is missing for a frame — which reads as "my setting was
+// ignored" and is indistinguishable from it.
 export const SEARCH_ENGINES = {
-  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
   google: { name: 'Google', url: 'https://www.google.com/search?q=%s' },
+  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
   bing: { name: 'Bing', url: 'https://www.bing.com/search?q=%s' },
   startpage: { name: 'Startpage', url: 'https://www.startpage.com/sp/search?query=%s' }
 } as const

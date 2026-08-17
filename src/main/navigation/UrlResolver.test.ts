@@ -1,9 +1,32 @@
 import { describe, it, expect } from 'vitest'
 import { resolveInput } from './UrlResolver'
 import { formatUrlForDisplay } from '@shared/url'
+import { DEFAULT_SETTINGS } from '@shared/types/settings'
 import { NEW_TAB_URL } from '@shared/types/tab'
+import type { SearchEngineId } from '@shared/constants'
 
 const resolve = (input: string) => resolveInput(input, 'duckduckgo')
+
+describe('search engine selection', () => {
+  it('uses the engine it was given', () => {
+    expect(resolveInput('cats', 'google').url).toBe('https://www.google.com/search?q=cats')
+    expect(resolveInput('cats', 'bing').url).toBe('https://www.bing.com/search?q=cats')
+  })
+
+  it('falls back to the configured default, not to a hardcoded engine', () => {
+    // The regression: an id the enum does not know — a hand-edited profile, a
+    // renamed engine, a settings object that lost the key — used to resolve to
+    // DuckDuckGo no matter what the user had chosen, while Settings went on
+    // displaying their real preference. Silently searching somewhere the user
+    // did not pick is worse than any wrong-but-visible answer.
+    const unknown = 'yahoo-2003' as SearchEngineId
+    expect(resolveInput('cats', unknown).url).toBe('https://www.google.com/search?q=cats')
+  })
+
+  it('ships with Google as the default', () => {
+    expect(DEFAULT_SETTINGS.searchEngineId).toBe('google')
+  })
+})
 
 describe('resolveInput', () => {
   it('passes through explicit http(s) URLs', () => {

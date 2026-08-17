@@ -29,7 +29,20 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/main/index.ts') }
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          /**
+           * The embedding worker is a second entry, not part of the main bundle.
+           * `utilityProcess.fork` needs a real file to launch, and the ONNX
+           * runtime it pulls in must never be loadable from the main process by
+           * accident — a separate entry makes that structural rather than a
+           * convention someone has to remember.
+           *
+           * Emitted next to index.js, so `join(__dirname, 'embeddingWorker.js')`
+           * resolves identically in dev and inside the asar.
+           */
+          embeddingWorker: resolve(__dirname, 'src/main/memory/embedding/worker.ts')
+        }
       }
     }
   },

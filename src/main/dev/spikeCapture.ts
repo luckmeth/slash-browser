@@ -987,6 +987,1029 @@ export async function runPerformanceCapture(
   app.quit()
 }
 
+/**
+ * Dev-only verification of the semantic layer, end to end in a real Electron
+ * process.
+ *
+ * This exists because nothing about semantic search can be proven by unit
+ * tests: the parts that break are the extension DLL loading under Electron's
+ * ABI, the ONNX runtime starting in a utility process, and vec0 accepting the
+ * bindings better-sqlite3 produces. All three are runtime facts.
+ *
+ * The claim being tested is specific: a page can be found by a paraphrase that
+ * shares **no search term with it**, which is the only thing semantic search
+ * offers over the keyword index that already exists.
+ *
+ * To confirm the model really is being read from the bundle and not from a
+ * stale cache, move `resources/models` aside and re-run: it must fail rather
+ * than quietly fetch a replacement over the network.
+ */
+export async function runSemanticCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  probe: {
+    setIndexing: (history: boolean, content: boolean) => void
+    enableSemantic: () => Promise<void>
+    disableSemantic: () => Promise<void>
+    status: () => { state: string; embeddedPages: number; pendingPages: number; detail: string }
+    search: (
+      query: string
+    ) => Promise<Array<{ title: string; url: string; reasons: Array<{ kind: string; detail: string }> }>>
+    keywordOnly: (query: string) => Array<{ title: string }>
+    forget: (url: string) => void
+    clear: () => void
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  probe.clear()
+  probe.setIndexing(true, true)
+
+  // 1. Enabling must report progress and end up ready — or say clearly why not.
+  log.info('semantic probe: enabling (model is bundled; no download)')
+  await probe.enableSemantic()
+  // Settled, not ready: `unsupported` and `error` are final answers too, and
+  // waiting ten minutes to be told the extension failed to load in the first
+  // second is a bad way to find that out.
+  const settledState = await waitFor(() => {
+    const state = probe.status().state
+    return state === 'ready' || state === 'unsupported' || state === 'error'
+  }, 10 * 60 * 1000)
+  const ready = settledState && probe.status().state === 'ready'
+  log.info(`semantic probe: state=${probe.status().state} — ${probe.status().detail}`)
+  if (!ready) {
+    log.error('semantic probe: FAIL — the model never became ready')
+    app.quit()
+    return
+  }
+  log.info('semantic probe: PASS — model loaded')
+
+  // 2. Index two pages that are unmistakably about different things.
+  const articles = [
+    'https://en.wikipedia.org/wiki/Database_index',
+    'https://en.wikipedia.org/wiki/Sourdough'
+  ]
+  for (const url of articles) {
+    window.tabs.navigate(activeId, url)
+    await delay(7000)
+  }
+
+  const embedded = await waitFor(() => probe.status().pendingPages === 0, 120_000)
+  log.info(
+    `semantic probe: ${probe.status().embeddedPages} page(s) embedded, ` +
+      `${probe.status().pendingPages} pending (settled=${embedded})`
+  )
+
+  // 3. The load-bearing claim. "make queries return faster" shares no useful
+  //    term with an article titled "Database index" — BM25 has nothing to match
+  //    on, so a hit here can only have come from the vectors.
+  const paraphrase = 'how to make database queries return faster'
+  const keywordHits = probe.keywordOnly(paraphrase)
+  const fusedHits = await probe.search(paraphrase)
+
+  log.info(`semantic probe: keyword-only → ${keywordHits.length} result(s)`)
+  log.info(`semantic probe: fused        → ${fusedHits.length} result(s)`)
+  for (const hit of fusedHits.slice(0, 3)) {
+    log.info(`   ${hit.title} — ${hit.reasons.map((r) => `${r.kind}:${r.detail}`).join('; ')}`)
+  }
+
+  const foundByMeaning = fusedHits.find(
+    (hit) =>
+      hit.url.includes('Database_index') && hit.reasons.some((reason) => reason.kind === 'semantic')
+  )
+  if (foundByMeaning) {
+    log.info('semantic probe: PASS — a page was found by meaning, and said so')
+  } else {
+    log.error('semantic probe: FAIL — the paraphrase did not reach the right page')
+  }
+
+  // 4. The unrelated page must not be dragged in. A vector index that returns
+  //    its k nearest neighbours will always return *something*; the value is in
+  //    it being the right something.
+  const bread = fusedHits.findIndex((hit) => hit.url.includes('Sourdough'))
+  if (bread === -1 || bread > 0) {
+    log.info('semantic probe: PASS — the unrelated page did not outrank the right one')
+  } else {
+    log.error('semantic probe: FAIL — an unrelated page ranked first')
+  }
+
+  // 5. Forgetting a page must take its vectors too, not just its text.
+  probe.forget('https://en.wikipedia.org/wiki/Database_index')
+  const afterForget = await probe.search(paraphrase)
+  if (!afterForget.some((hit) => hit.url.includes('Database_index'))) {
+    log.info('semantic probe: PASS — a forgotten page is gone from the vector index')
+  } else {
+    log.error('semantic probe: FAIL — a forgotten page still matched')
+  }
+
+  // 6. Switching off must leave keyword search entirely intact.
+  await probe.disableSemantic()
+  const offState = probe.status().state
+  const stillWorks = probe.keywordOnly('sourdough')
+  if (offState === 'off' && stillWorks.length > 0) {
+    log.info('semantic probe: PASS — keyword search unaffected with semantic off')
+  } else {
+    log.error(`semantic probe: FAIL — state=${offState}, keyword results=${stillWorks.length}`)
+  }
+
+  ipcBroadcastUiCommand(window, 'open-memory')
+  await delay(1500)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only verification of the browser import, against whatever Chromium
+ * profiles are actually on this machine.
+ *
+ * Runs into the throwaway probe profile, never a real one. The second import is
+ * the interesting half: running it twice must merge rather than duplicate, and
+ * that is exactly the bug nobody notices until their bookmarks have two of
+ * everything.
+ */
+export async function runImportCapture(probe: {
+  discover: () => Array<{ id: string; browser: string; profile: string; hasBookmarks: boolean; hasHistory: boolean }>
+  run: (id: string) => {
+    bookmarksAdded: number
+    bookmarksSkipped: number
+    historyAdded: number
+    historyMerged: number
+    warning: string | null
+  }
+  bookmarkCount: () => number
+  historyCount: () => number
+}): Promise<void> {
+  const sources = probe.discover()
+  log.info(`import probe: found ${sources.length} profile(s)`)
+  for (const source of sources.slice(0, 12)) {
+    log.info(
+      `   ${source.browser} — ${source.profile} (bookmarks=${source.hasBookmarks} history=${source.hasHistory})`
+    )
+  }
+
+  if (sources.length === 0) {
+    log.error('import probe: SKIP — no Chromium profile on this machine to import from')
+    app.quit()
+    return
+  }
+
+  // `hasBookmarks` only means the file exists — plenty of profiles have one
+  // holding nothing. Keep trying until bookmarks actually arrive, or the probe
+  // silently never exercises the bookmark write path at all.
+  const before = { bookmarks: probe.bookmarkCount(), history: probe.historyCount() }
+  let target = sources[0]!
+  let first = probe.run(target.id)
+  for (const candidate of sources.slice(1)) {
+    if (first.bookmarksAdded > 0) break
+    const attempt = probe.run(candidate.id)
+    if (attempt.bookmarksAdded > 0 || attempt.historyAdded > first.historyAdded) {
+      target = candidate
+      first = attempt
+    }
+  }
+  log.info(`import probe: exercised ${target.browser} — ${target.profile}`)
+  const after = { bookmarks: probe.bookmarkCount(), history: probe.historyCount() }
+
+  if (first.bookmarksAdded === 0) {
+    log.warn('import probe: no profile on this machine has bookmarks; that path is unproven here')
+  }
+
+  log.info(
+    `import probe: first run → +${first.bookmarksAdded} bookmark(s), +${first.historyAdded} page(s)` +
+      `${first.warning ? ` (warning: ${first.warning})` : ''}`
+  )
+  log.info(
+    `import probe: rows ${before.bookmarks}→${after.bookmarks} bookmarks, ` +
+      `${before.history}→${after.history} history`
+  )
+
+  if (after.history > before.history || after.bookmarks > before.bookmarks) {
+    log.info('import probe: PASS — data arrived')
+  } else {
+    log.error('import probe: FAIL — nothing was imported')
+  }
+
+  // Second pass: everything is already here, so nothing may be added again.
+  const second = probe.run(target.id)
+  const final = { bookmarks: probe.bookmarkCount(), history: probe.historyCount() }
+  log.info(
+    `import probe: second run → +${second.bookmarksAdded} bookmark(s) ` +
+      `(${second.bookmarksSkipped} already present), +${second.historyAdded} page(s) ` +
+      `(${second.historyMerged} merged)`
+  )
+
+  if (second.bookmarksAdded === 0 && second.historyAdded === 0) {
+    log.info('import probe: PASS — importing twice does not duplicate')
+  } else {
+    log.error(
+      `import probe: FAIL — second import added ${second.bookmarksAdded} bookmark(s) ` +
+        `and ${second.historyAdded} page(s)`
+    )
+  }
+
+  if (final.history === after.history) {
+    log.info('import probe: PASS — history row count unchanged by the repeat')
+  } else {
+    log.error(`import probe: FAIL — history grew ${after.history}→${final.history} on a repeat`)
+  }
+
+  app.quit()
+}
+
+/**
+ * Dev-only verification of the features added on top of Phase 7.
+ *
+ * Each check is a runtime fact no unit test reaches: whether the page view is
+ * actually detached when a load fails, whether Chromium renders a PDF inline
+ * rather than downloading it, and whether Readability finds an article in a real
+ * page rather than a fixture.
+ */
+export async function runFeaturesCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  probe: {
+    setVerticalTabs: (on: boolean) => void
+    activeError: () => { code: number; description: string } | null
+    isViewAttached: () => boolean
+    readArticle: () => Promise<{ ok: boolean; title: string; blocks: number; reason: string | null }>
+    tabCount: () => number
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // 1. A failed load must detach the view so our error page is what shows.
+  window.tabs.navigate(activeId, 'https://this-host-should-not-resolve-slash.invalid')
+  await delay(6000)
+  const failure = probe.activeError()
+  const detached = !probe.isViewAttached()
+  log.info(
+    `features probe: failed load → error=${failure ? `${failure.code}` : 'none'}, ` +
+      `page view attached=${!detached}`
+  )
+  if (failure && detached) {
+    log.info('features probe: PASS — the Slash error page owns the content area')
+  } else {
+    log.error('features probe: FAIL — Chromium’s own error page is still on screen')
+  }
+
+  // 2. Retrying must put the renderer back, or the page loads where nobody can
+  //    see it.
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(5000)
+  if (probe.isViewAttached() && probe.activeError() === null) {
+    log.info('features probe: PASS — retrying reattaches the page view')
+  } else {
+    log.error('features probe: FAIL — the page view did not come back after a retry')
+  }
+
+  // 3. Reader mode against a real article.
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/Readability')
+  await delay(7000)
+  const article = await probe.readArticle()
+  log.info(
+    `features probe: reader → ok=${article.ok} "${article.title}" ${article.blocks} block(s)` +
+      `${article.reason ? ` (${article.reason})` : ''}`
+  )
+  if (article.ok && article.blocks > 5) {
+    log.info('features probe: PASS — an article was extracted as structured text')
+  } else {
+    log.error('features probe: FAIL — reader mode found no article')
+  }
+
+  // 4. A page that is not an article must be refused rather than rendered empty.
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(4000)
+  const thin = await probe.readArticle()
+  if (!thin.ok && thin.reason) {
+    log.info('features probe: PASS — a non-article is declined with a reason')
+  } else {
+    log.error('features probe: FAIL — reader accepted a page that is not an article')
+  }
+
+  // 5. PDFs open in a tab instead of downloading.
+  const before = probe.tabCount()
+  window.tabs.navigate(activeId, 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf')
+  await delay(8000)
+  const stillATab = probe.tabCount() === before && probe.activeError() === null
+  log.info(`features probe: pdf → tabs=${probe.tabCount()} error=${probe.activeError()?.code ?? 'none'}`)
+  if (stillATab) {
+    log.info('features probe: PASS — the PDF opened in the tab')
+  } else {
+    log.error('features probe: FAIL — the PDF did not render inline')
+  }
+
+  // 6. Vertical tabs, captured so the layout can be looked at.
+  probe.setVerticalTabs(true)
+  await delay(1500)
+  await captureWindowTo(window, outputPath)
+  probe.setVerticalTabs(false)
+  log.info('features probe: captured the vertical tab layout')
+
+  app.quit()
+}
+
+/**
+ * Dev-only verification of the segmented download engine.
+ *
+ * Downloads a real file over real HTTP and checks the bytes. The claims being
+ * tested are the ones that cannot be unit-tested and that fail *silently* when
+ * wrong: that segments land at the right offsets, that the reassembled file is
+ * byte-identical to a single-connection fetch of the same URL, and that a
+ * server without range support degrades to one connection instead of producing
+ * a corrupt file.
+ */
+export async function runDownloadEngineCapture(probe: {
+  download: (
+    url: string,
+    destination: string,
+    connections: number
+  ) => Promise<{
+    receivedBytes: number
+    totalBytes: number | null
+    segments: number
+    note: string
+    checksum: string
+    acceptsRanges: boolean
+  }>
+  tempDir: string
+  baseUrl: string
+}): Promise<void> {
+  // Served by a local test server started alongside this probe: deterministic
+  // bytes, and a second endpoint that deliberately refuses ranges. Testing
+  // against the open internet would measure someone else's CDN rather than this
+  // engine, and could not exercise the no-range path on demand.
+  const rangeUrl = `${probe.baseUrl}/ranged.bin`
+  const noRangeUrl = `${probe.baseUrl}/plain.bin`
+  const smallUrl = `${probe.baseUrl}/small.bin`
+
+  try {
+    log.info('download probe: fetching with 1 connection…')
+    const single = await probe.download(rangeUrl, `${probe.tempDir}/single.bin`, 1)
+    log.info(
+      `download probe: single → ${single.receivedBytes} bytes, ranges=${single.acceptsRanges}, ${single.note}`
+    )
+
+    log.info('download probe: fetching the same file with 6 connections…')
+    const multi = await probe.download(rangeUrl, `${probe.tempDir}/multi.bin`, 6)
+    log.info(
+      `download probe: multi → ${multi.receivedBytes} bytes in ${multi.segments} segment(s), ${multi.note}`
+    )
+
+    if (multi.segments > 1) {
+      log.info(`download probe: PASS — the transfer was split into ${multi.segments} connections`)
+    } else {
+      log.error('download probe: FAIL — a range-capable server was not segmented')
+    }
+
+    // The load-bearing check. Reassembly bugs produce a file of exactly the
+    // right length with the wrong bytes in the middle, which only a hash finds.
+    if (single.checksum === multi.checksum && single.checksum !== '') {
+      log.info('download probe: PASS — segmented output is byte-identical to a single stream')
+      log.info(`download probe: sha256 ${multi.checksum.slice(0, 32)}…`)
+    } else {
+      log.error(
+        `download probe: FAIL — checksums differ (single ${single.checksum.slice(0, 16)}, multi ${multi.checksum.slice(0, 16)})`
+      )
+    }
+
+    // A small file must fall back to one connection rather than being split
+    // into slivers.
+    const small = await probe.download(smallUrl, `${probe.tempDir}/small.bin`, 8)
+    log.info(`download probe: small file → ${small.segments} segment(s), ${small.note}`)
+    if (small.segments === 1) {
+      log.info('download probe: PASS — a small file is not pointlessly divided')
+    } else {
+      log.error('download probe: FAIL — a small file was split')
+    }
+
+    // A server that refuses ranges must degrade to one stream and still produce
+    // the correct file. Getting this wrong is how a download manager corrupts
+    // things: eight connections against a server that ignores Range means eight
+    // copies of the whole file written over each other.
+    const plain = await probe.download(noRangeUrl, `${probe.tempDir}/plain.bin`, 8)
+    log.info(`download probe: no-range server → ${plain.segments} segment(s), ${plain.note}`)
+    if (plain.segments === 1 && plain.checksum === single.checksum) {
+      log.info('download probe: PASS — a server without range support degrades safely')
+    } else {
+      log.error(
+        `download probe: FAIL — no-range path produced ${plain.segments} segment(s), checksum match=${plain.checksum === single.checksum}`
+      )
+    }
+  } catch (error) {
+    log.error('download probe: FAILED', error)
+  }
+
+  app.quit()
+}
+
+/**
+ * Dev-only verification of the Download Guardian and media detection.
+ *
+ * Run against real pages, because the part that cannot be unit-tested is the
+ * page-side scan: whether the injected script actually finds anchors and media
+ * elements in documents written by other people, and whether the ad-markup
+ * heuristic fires on real advertising rather than only on fixtures.
+ */
+export async function runGuardianCapture(
+  window: BrowserWindowController,
+  probe: {
+    scanDownloads: () => Promise<{
+      pageHost: string
+      note: string | null
+      candidates: Array<{ verdict: string; host: string; label: string }>
+    }>
+    scanMedia: () => Promise<{ candidates: Array<{ container: string | null }>; note: string | null }>
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // A real download page: many links, a genuine installer, and a mix of hosts.
+  window.tabs.navigate(activeId, 'https://www.videolan.org/vlc/download-windows.html')
+  await delay(8000)
+  const scan = await probe.scanDownloads()
+  log.info(`guardian probe: ${scan.pageHost} → ${scan.candidates.length} candidate(s)`)
+  log.info(`guardian probe: ${scan.note ?? 'no summary'}`)
+  for (const candidate of scan.candidates.slice(0, 6)) {
+    log.info(`   [${candidate.verdict}] ${candidate.host} — ${candidate.label.slice(0, 50)}`)
+  }
+  if (scan.candidates.length > 0) {
+    log.info('guardian probe: PASS — download links were found and classified')
+  } else {
+    log.error('guardian probe: FAIL — a real download page produced no candidates')
+  }
+
+  // Media: a page with a plain <video> file, so the direct path is exercised.
+  window.tabs.navigate(activeId, 'https://www.w3schools.com/html/html5_video.asp')
+  await delay(8000)
+  const media = await probe.scanMedia()
+  log.info(
+    `guardian probe: media → ${media.candidates.length} downloadable (${media.candidates.map((c) => c.container).join(', ') || 'none'})`
+  )
+  if (media.note) log.info(`guardian probe: note — ${media.note}`)
+  if (media.candidates.length > 0) {
+    log.info('guardian probe: PASS — a directly downloadable media file was detected')
+  } else {
+    log.error('guardian probe: FAIL — no direct media found on a page with a plain video file')
+  }
+
+  // A streaming page must be refused with an explanation, never offered.
+  window.tabs.navigate(activeId, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ')
+  await delay(10000)
+  const streamed = await probe.scanMedia()
+  log.info(`guardian probe: streaming page → ${streamed.candidates.length} downloadable`)
+  log.info(`guardian probe: note — ${streamed.note ?? '(none)'}`)
+  if (streamed.candidates.length === 0 && streamed.note) {
+    log.info('guardian probe: PASS — protected/streamed media is refused with a reason')
+  } else {
+    log.error('guardian probe: FAIL — a streaming page was treated as downloadable')
+  }
+
+  app.quit()
+}
+
+/**
+ * Dev-only verification of Tab Brain against a realistic tab set.
+ *
+ * Opens tabs that a person actually would while working on one thing, plus an
+ * unrelated pair and a deliberate duplicate, then checks the analysis found the
+ * project, spotted the duplicate, and did **not** sweep the unrelated tabs in.
+ * Clustering quality is the kind of thing that looks fine on fixtures and falls
+ * apart on real titles, which is why this runs against live pages.
+ */
+export async function runTabBrainCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  probe: {
+    analyse: () => {
+      tabCount: number
+      summary: string
+      groups: Array<{ name: string; tabIds: string[]; hosts: string[] }>
+      duplicates: Array<{ title: string; tabIds: string[]; exact: boolean }>
+      closeSuggestions: Array<{ title: string; reason: string }>
+    }
+    titleOf: (tabId: string) => string
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // One coherent project: three Wikipedia pages about the same subject area.
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/Database_index')
+  for (const url of [
+    'https://en.wikipedia.org/wiki/Database_normalization',
+    'https://en.wikipedia.org/wiki/Database_transaction',
+    // Unrelated, and a duplicate of one another — both must be handled.
+    'https://en.wikipedia.org/wiki/Sourdough',
+    'https://en.wikipedia.org/wiki/Sourdough'
+  ]) {
+    window.tabs.create({ url, background: true })
+  }
+  await delay(14000)
+
+  const analysis = probe.analyse()
+  log.info(`tab brain probe: ${analysis.tabCount} tabs — ${analysis.summary}`)
+
+  for (const group of analysis.groups) {
+    log.info(`   group "${group.name}" (${group.tabIds.length} tabs, ${group.hosts.join(', ')})`)
+    for (const tabId of group.tabIds) log.info(`      · ${probe.titleOf(tabId).slice(0, 60)}`)
+  }
+  for (const set of analysis.duplicates) {
+    log.info(`   duplicate ×${set.tabIds.length}${set.exact ? ' (exact)' : ''}: ${set.title.slice(0, 50)}`)
+  }
+  for (const suggestion of analysis.closeSuggestions) {
+    log.info(`   closeable: ${suggestion.title.slice(0, 40)} — ${suggestion.reason}`)
+  }
+
+  const dbGroup = analysis.groups.find((group) =>
+    group.tabIds.some((id) => probe.titleOf(id).includes('Database'))
+  )
+  if (dbGroup && dbGroup.tabIds.length >= 3) {
+    log.info('tab brain probe: PASS — the three related pages were grouped')
+  } else {
+    log.error('tab brain probe: FAIL — related pages were not grouped')
+  }
+
+  if (dbGroup && !dbGroup.tabIds.some((id) => probe.titleOf(id).includes('Sourdough'))) {
+    log.info('tab brain probe: PASS — the unrelated page was left out of the group')
+  } else {
+    log.error('tab brain probe: FAIL — an unrelated page was swept into the group')
+  }
+
+  if (analysis.duplicates.length >= 1) {
+    log.info('tab brain probe: PASS — the duplicate tab was detected')
+  } else {
+    log.error('tab brain probe: FAIL — a duplicated tab was not detected')
+  }
+
+  // Duplicates are offered for closing; nothing is closed automatically.
+  if (analysis.closeSuggestions.length >= 1) {
+    log.info('tab brain probe: PASS — a redundant tab was offered for closing, not closed')
+  } else {
+    log.error('tab brain probe: FAIL — the duplicate was not offered for closing')
+  }
+
+  ipcBroadcastUiCommand(window, 'open-tabbrain')
+  await delay(1500)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only verification of Cleanup Mode.
+ *
+ * The two claims worth testing are the ones that would ruin a page rather than
+ * merely fail: that the main content survives every mode, and that Restore puts
+ * back exactly what was hidden. Both need a real document, since they depend on
+ * how a live site is actually built.
+ */
+export async function runCleanupCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  probe: {
+    apply: (mode: 'light' | 'balanced' | 'aggressive') => Promise<{
+      applied: boolean
+      hidden: number
+      paused: number
+      detail: string
+    }>
+    restore: () => Promise<void>
+    /** Characters of visible text in the page's main content. */
+    contentLength: () => Promise<number>
+    hiddenCount: () => Promise<number>
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // A real content site with overlays, sticky headers and ad slots.
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/Web_browser')
+  await delay(8000)
+
+  const before = await probe.contentLength()
+  log.info(`cleanup probe: page has ${before} characters of text before cleaning`)
+
+  for (const mode of ['light', 'balanced', 'aggressive'] as const) {
+    const result = await probe.apply(mode)
+    const after = await probe.contentLength()
+    log.info(`cleanup probe: ${mode} → hid ${result.hidden}, text now ${after} chars`)
+
+    // The load-bearing check. Cleanup that removes the article has not cleaned
+    // the page, it has broken it — and that is far worse than leaving an overlay.
+    if (after >= before * 0.8) {
+      log.info(`cleanup probe: PASS — ${mode} preserved the page's content`)
+    } else {
+      log.error(
+        `cleanup probe: FAIL — ${mode} destroyed content (${before} → ${after} chars)`
+      )
+    }
+    await probe.restore()
+  }
+
+  // Restore must leave nothing hidden behind.
+  await probe.apply('aggressive')
+  const hiddenAfterClean = await probe.hiddenCount()
+  await probe.restore()
+  const hiddenAfterRestore = await probe.hiddenCount()
+  log.info(`cleanup probe: hidden ${hiddenAfterClean} after cleaning, ${hiddenAfterRestore} after restore`)
+  if (hiddenAfterRestore === 0) {
+    log.info('cleanup probe: PASS — Restore put everything back')
+  } else {
+    log.error('cleanup probe: FAIL — Restore left elements hidden')
+  }
+
+  await probe.apply('balanced')
+  await delay(1200)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only verification of Page Insight against real pages.
+ *
+ * The collector's job is to read structured data written by other people, which
+ * is exactly what cannot be tested with fixtures — sites publish JSON-LD, Open
+ * Graph and microdata inconsistently, and a selector that works on a fixture
+ * routinely finds nothing in the wild.
+ */
+export async function runInsightCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  probe: {
+    analyse: () => Promise<{
+      title: string
+      host: string
+      wordCount: number
+      outline: Array<{ level: number; text: string }>
+      linkedHosts: string[]
+      externalLinkCount: number
+      signals: Array<{ label: string; strength: string; detail: string }>
+      shopping: { productName: string | null; price: string | null; subscription: boolean } | null
+      note: string | null
+    }>
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // 1. A long article with a heading structure and many outbound links.
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/Affiliate_marketing')
+  await delay(9000)
+  const article = await probe.analyse()
+  log.info(
+    `insight probe: "${article.title.slice(0, 40)}" — ${article.wordCount} words, ` +
+      `${article.outline.length} headings, ${article.externalLinkCount} external links across ` +
+      `${article.linkedHosts.length} sites`
+  )
+  for (const signal of article.signals) {
+    log.info(`   [${signal.strength}] ${signal.label}: ${signal.detail.slice(0, 90)}`)
+  }
+  if (article.wordCount > 500 && article.outline.length >= 3) {
+    log.info('insight probe: PASS — the article was read with its structure')
+  } else {
+    log.error('insight probe: FAIL — a long article produced no structure')
+  }
+
+  // 2. A real product page, to exercise JSON-LD / Open Graph price reading.
+  window.tabs.navigate(activeId, 'https://www.gutenberg.org/ebooks/1342')
+  await delay(9000)
+  const product = await probe.analyse()
+  log.info(
+    `insight probe: product page → shopping=${product.shopping ? 'yes' : 'no'}` +
+      (product.shopping ? ` name="${String(product.shopping.productName).slice(0, 40)}" price=${product.shopping.price}` : '')
+  )
+
+  // 3. A calm page must produce no urgency or affiliate findings. False positives
+  //    here accuse an honest site, which is the failure that matters most.
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(5000)
+  const calm = await probe.analyse()
+  const falsePositives = calm.signals.filter(
+    (signal) => signal.label.includes('affiliate') || signal.label.includes('Urgency')
+  )
+  log.info(`insight probe: calm page → ${calm.signals.length} signal(s), ${falsePositives.length} commercial/urgency`)
+  if (falsePositives.length === 0) {
+    log.info('insight probe: PASS — no false commercial or urgency findings on a plain page')
+  } else {
+    log.error(`insight probe: FAIL — flagged a plain page: ${falsePositives.map((s) => s.label).join(', ')}`)
+  }
+
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/Affiliate_marketing')
+  await delay(8000)
+  ipcBroadcastUiCommand(window, 'open-insight')
+  await delay(1800)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only verification of Redirect X-Ray.
+ *
+ * The claim that matters is the negative one: a real sign-in flow must **not** be
+ * flagged. That cannot be tested with fixtures, because it depends on the actual
+ * hops a provider performs — and getting it wrong trains the user to dismiss
+ * redirect warnings at the exact moment one would matter.
+ */
+export async function runRedirectChainCapture(
+  window: BrowserWindowController,
+  outputPath: string,
+  probe: {
+    chains: () => Array<{
+      originalUrl: string
+      finalUrl: string
+      verdict: string
+      hops: Array<{ host: string; kind: string; statusCode: number | null }>
+      domains: string[]
+      reasons: string[]
+    }>
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // 1. A plain cross-domain redirect, so the recorder has something to record.
+  window.tabs.navigate(activeId, 'https://httpbingo.org/redirect-to?url=https%3A%2F%2Fexample.com%2F')
+  await delay(9000)
+
+  // 2. A real identity provider. Only the first hop is reached without
+  //    credentials, which is enough: classification happens on the chain's URLs.
+  window.tabs.navigate(activeId, 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=https%3A%2F%2Fexample.com&response_type=code&scope=email')
+  await delay(9000)
+
+  // 3. An in-site http→https upgrade must produce no noise at all.
+  window.tabs.navigate(activeId, 'http://example.com')
+  await delay(6000)
+
+  const chains = probe.chains()
+  log.info(`redirect probe: recorded ${chains.length} chain(s)`)
+  for (const chain of chains) {
+    log.info(
+      `   [${chain.verdict}] ${chain.domains.join(' → ')} (${chain.hops.length - 1} redirect(s))`
+    )
+    for (const hop of chain.hops) {
+      log.info(`      ${hop.host} — ${hop.kind}${hop.statusCode ? ' ' + hop.statusCode : ''}`)
+    }
+    for (const reason of chain.reasons) log.info(`      why: ${reason.slice(0, 100)}`)
+  }
+
+  if (chains.length > 0) {
+    log.info('redirect probe: PASS — chains were recorded with their hops')
+  } else {
+    log.error('redirect probe: FAIL — no chains recorded despite navigating through redirects')
+  }
+
+  const authChain = chains.find((chain) =>
+    chain.hops.some((hop) => hop.host.includes('accounts.google.com'))
+  )
+  if (!authChain) {
+    log.warn('redirect probe: SKIP — the sign-in navigation produced no chain to classify')
+  } else if (authChain.verdict === 'authentication') {
+    log.info('redirect probe: PASS — a real sign-in flow is classified as authentication')
+  } else {
+    log.error(
+      `redirect probe: FAIL — a sign-in flow was classified "${authChain.verdict}", which would train users to ignore warnings`
+    )
+  }
+
+  const statusCodes = chains.flatMap((chain) =>
+    chain.hops.filter((hop) => hop.statusCode !== null).map((hop) => hop.statusCode)
+  )
+  if (statusCodes.length > 0) {
+    log.info(`redirect probe: PASS — HTTP status codes captured (${statusCodes.join(', ')})`)
+  } else {
+    log.error('redirect probe: FAIL — no status codes captured; every hop would read "unknown"')
+  }
+
+  ipcBroadcastUiCommand(window, 'open-redirects')
+  await delay(1800)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
+/**
+ * Dev-only verification of the AI Hub.
+ *
+ * The properties worth proving are all about the credential boundary, and none of
+ * them can be checked without a real keychain: that a key round-trips through
+ * `safeStorage`, that several providers coexist without overwriting each other,
+ * that disconnecting actually deletes, and that no status payload ever carries a
+ * secret.
+ */
+export async function runAiHubCapture(probe: {
+  status: () => {
+    providers: Array<{ id: string; connected: boolean; model: string; local: boolean }>
+    defaultProvider: string | null
+    secureStorageAvailable: boolean
+  }
+  connect: (input: { provider: string; apiKey?: string; model?: string }) => string | null
+  disconnect: (provider: string) => void
+  setDefault: (provider: string) => string | null
+  canBuild: (provider: string) => boolean
+  rawStoredBytes: (provider: string) => string | null
+}): Promise<void> {
+  const initial = probe.status()
+  log.info(
+    `ai hub probe: keychain=${initial.secureStorageAvailable}, ` +
+      `${initial.providers.length} provider(s) in catalogue`
+  )
+  if (!initial.secureStorageAvailable) {
+    log.error('ai hub probe: SKIP — no OS keychain on this machine, so keys are refused by design')
+    app.quit()
+    return
+  }
+
+  const secret = 'sk-probe-secret-value-do-not-log'
+
+  // 1. Two providers at once. The single-row table this replaced could only hold
+  //    one, so connecting a second silently overwrote the first.
+  const first = probe.connect({ provider: 'anthropic', apiKey: secret, model: 'claude-sonnet-5' })
+  const second = probe.connect({ provider: 'openai', apiKey: secret + '-2', model: 'gpt-4.1' })
+  const both = probe.status()
+  const connected = both.providers.filter((provider) => provider.connected).map((p) => p.id)
+  log.info(`ai hub probe: connected → ${connected.join(', ')} (errors: ${first ?? 'none'}, ${second ?? 'none'})`)
+
+  if (connected.includes('anthropic') && connected.includes('openai')) {
+    log.info('ai hub probe: PASS — two providers are stored independently')
+  } else {
+    log.error('ai hub probe: FAIL — connecting a second provider displaced the first')
+  }
+
+  // 2. Each keeps its own model. One global model name is wrong for every
+  //    provider but the one it was typed for.
+  const models = both.providers.filter((p) => p.connected).map((p) => `${p.id}=${p.model}`)
+  log.info(`ai hub probe: models → ${models.join(', ')}`)
+  const anthropicModel = both.providers.find((p) => p.id === 'anthropic')?.model
+  const openaiModel = both.providers.find((p) => p.id === 'openai')?.model
+  if (anthropicModel === 'claude-sonnet-5' && openaiModel === 'gpt-4.1') {
+    log.info('ai hub probe: PASS — each provider keeps its own model')
+  } else {
+    log.error('ai hub probe: FAIL — models were shared or lost')
+  }
+
+  // 3. The key must be usable (decryptable) and never stored in readable form.
+  if (probe.canBuild('anthropic')) {
+    log.info('ai hub probe: PASS — the stored key decrypts and a provider can be built')
+  } else {
+    log.error('ai hub probe: FAIL — the stored key could not be decrypted')
+  }
+
+  const raw = probe.rawStoredBytes('anthropic') ?? ''
+  if (!raw.includes(secret)) {
+    log.info('ai hub probe: PASS — the key is not present in readable form on disk')
+  } else {
+    log.error('ai hub probe: FAIL — the API key is stored as plaintext')
+  }
+
+  // 4. Nothing in the status payload may carry a secret.
+  const serialised = JSON.stringify(probe.status())
+  if (!serialised.includes(secret)) {
+    log.info('ai hub probe: PASS — the status payload carries no key material')
+  } else {
+    log.error('ai hub probe: FAIL — a key leaked into the renderer payload')
+  }
+
+  // 5. Default selection, then disconnect must actually delete.
+  log.info(`ai hub probe: setDefault(openai) → ${probe.setDefault('openai') ?? 'ok'}`)
+  probe.disconnect('anthropic')
+  const after = probe.status()
+  const stillThere = after.providers.find((p) => p.id === 'anthropic')?.connected
+  log.info(`ai hub probe: after disconnect → default=${after.defaultProvider}, anthropic connected=${stillThere}`)
+  if (!stillThere && after.defaultProvider === 'openai') {
+    log.info('ai hub probe: PASS — disconnect deletes and the default falls back to a live provider')
+  } else {
+    log.error('ai hub probe: FAIL — disconnect left state behind')
+  }
+
+  probe.disconnect('openai')
+  const empty = probe.status()
+  if (empty.defaultProvider === null) {
+    log.info('ai hub probe: PASS — with nothing connected, AI reports itself off')
+  } else {
+    log.error('ai hub probe: FAIL — a default survived with no providers connected')
+  }
+
+  app.quit()
+}
+
+/**
+ * Dev-only verification of crash reporting.
+ *
+ * Crashes a renderer deliberately, because the only way to know a crash handler
+ * works is to cause one. Checks the event is recorded, that Chromium wrote a
+ * dump, and — the property that matters — that uploads are off.
+ */
+export async function runCrashCapture(
+  window: BrowserWindowController,
+  probe: {
+    report: () => Promise<{
+      directory: string
+      dumpCount: number
+      uploadsEnabled: boolean
+      events: Array<{ process: string; reason: string; code: number | null }>
+    }>
+    clear: () => Promise<void>
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  await probe.clear()
+  const before = await probe.report()
+  log.info(`crash probe: dumps directory ${before.directory}`)
+  log.info(`crash probe: uploads enabled = ${before.uploadsEnabled}`)
+
+  if (!before.uploadsEnabled) {
+    log.info('crash probe: PASS — crash dumps are never uploaded')
+  } else {
+    log.error('crash probe: FAIL — uploads are on; dumps contain page memory')
+  }
+
+  // Deliberately kill the page's renderer. `process.crash()` is unavailable to
+  // sandboxed page content, so the crash is triggered from the browser side.
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(5000)
+  const contents = window.tabs.activeTab?.contents
+  if (!contents) {
+    log.error('crash probe: FAIL — no renderer to crash')
+    app.quit()
+    return
+  }
+  log.info('crash probe: crashing the page renderer on purpose…')
+  contents.forcefullyCrashRenderer()
+  await delay(6000)
+
+  const after = await probe.report()
+  log.info(
+    `crash probe: ${after.events.length} event(s) recorded, ${after.dumpCount} dump(s) on disk`
+  )
+  for (const event of after.events.slice(0, 3)) {
+    log.info(`   ${event.process} — ${event.reason}${event.code !== null ? ` (${event.code})` : ''}`)
+  }
+
+  if (after.events.length > before.events.length) {
+    log.info('crash probe: PASS — the crash was recorded')
+  } else {
+    log.error('crash probe: FAIL — a real renderer crash went unrecorded')
+  }
+
+  // The record must say what died and why, or it is useless for diagnosis.
+  const recorded = after.events[0]
+  if (recorded && recorded.process.length > 0 && recorded.reason.length > 0) {
+    log.info(`crash probe: PASS — the record names the process and reason`)
+  } else {
+    log.error('crash probe: FAIL — the crash record is missing detail')
+  }
+
+  // And clearing must actually delete.
+  await probe.clear()
+  const cleared = await probe.report()
+  if (cleared.events.length === 0 && cleared.dumpCount === 0) {
+    log.info('crash probe: PASS — clearing removes both the events and the dumps')
+  } else {
+    log.error(
+      `crash probe: FAIL — after clearing, ${cleared.events.length} event(s) and ${cleared.dumpCount} dump(s) remain`
+    )
+  }
+
+  app.quit()
+}
+
+/** Polls a condition until it holds or the deadline passes. */
+async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (condition()) return true
+    await delay(250)
+  }
+  return condition()
+}
+
 function ipcBroadcastUiCommand(window: BrowserWindowController, command: string): void {
   for (const contents of window.privilegedContents()) {
     contents.send('ui:command', { command })

@@ -123,6 +123,24 @@ export class Database {
     return row?.note === note
   }
 
+  /**
+   * Loads a SQLite loadable extension into this connection.
+   *
+   * Separate from `open()` and never called during migration: an extension is
+   * an optional capability, and a browser that will not start because a search
+   * feature's DLL is missing has its priorities backwards. Callers get a boolean
+   * and are expected to carry on without it.
+   */
+  loadExtension(path: string): boolean {
+    try {
+      this.require().loadExtension(path)
+      return true
+    } catch (error) {
+      log.warn(`could not load SQLite extension at ${path}`, error)
+      return false
+    }
+  }
+
   get connection(): SqliteDatabase {
     return this.require()
   }

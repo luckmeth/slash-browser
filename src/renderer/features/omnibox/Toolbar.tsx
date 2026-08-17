@@ -8,6 +8,7 @@ import { isInternalUrl, NEW_TAB_URL } from '@shared/types/tab'
 import { formatUrlForDisplay, isSecureUrl } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
+import { CleanButton } from '../cleanup/CleanButton'
 import { ShieldButton } from '../shield/ShieldButton'
 import { SleepIndicator } from '../performance/SleepIndicator'
 
@@ -23,6 +24,8 @@ export function Toolbar(): React.JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
+  /** Set when reader mode declined a page, cleared after a few seconds. */
+  const [readerNote, setReaderNote] = useState<string | null>(null)
   const tabId = activeTab?.id ?? null
   const url = activeTab?.url ?? ''
   const isNewTab = url === NEW_TAB_URL
@@ -226,6 +229,39 @@ export function Toolbar(): React.JSX.Element {
               {zoomPercent}%
             </button>
           )}
+
+          {/*
+            Reader mode. Whether a page is an article can only be known by
+            extracting it, which is far too expensive to do on every page load
+            just to decide whether to enable a button — so the button is always
+            offered and answers honestly when the page turns out not to be one.
+          */}
+          <CleanButton />
+
+          <button
+            type="button"
+            aria-label="Read this page without the clutter"
+            title={readerNote ?? 'Reader mode — just the article text'}
+            disabled={disabled || isInternalUrl(url)}
+            onClick={() => {
+              setReaderNote(null)
+              void window.browser.invoke('reader:open', undefined).then((result) => {
+                if (result.ok && !result.value.article) {
+                  setReaderNote(result.value.reason)
+                  window.setTimeout(() => setReaderNote(null), 4000)
+                }
+              })
+            }}
+            className="cursor-default rounded p-1 transition hover:bg-white/10 disabled:cursor-default disabled:opacity-30"
+          >
+            <Icon
+              name="wsReading"
+              size={14}
+              className={
+                readerNote ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-muted)]'
+              }
+            />
+          </button>
 
           <button
             type="button"

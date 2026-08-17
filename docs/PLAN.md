@@ -18,8 +18,9 @@
 > something you could hand to a stranger — the largest items are code signing and an
 > auto-update channel, neither of which is a coding task.
 >
-> Deliberately not built: the optional local ONNX embedding layer for semantic search
-> (`docs/testing/phase-5.md`), and AI page summarisation (`docs/testing/phase-7.md`).
+> Deliberately not built: AI page summarisation (`docs/testing/phase-7.md`). The optional
+> local ONNX embedding layer for semantic search is now built and opt-in
+> (`docs/testing/phase-5.md`).
 > Per-phase test scripts and known gaps live in `docs/testing/phase-N.md`.
 >
 > Two design decisions made during implementation that the plan did not anticipate:

@@ -3,6 +3,14 @@
 An honest inventory: what is missing, what it costs, and what I would build in what order.
 Written after a full pass over the codebase, not from a feature wishlist.
 
+> **This document goes stale, and stale entries here cause real damage.** It listed private
+> browsing, tab sleeping visibility and semantic search as missing after all three were built —
+> and the Settings panel repeated the claim to users, telling them a feature they had did not
+> exist. Before starting anything below, check it is actually still missing.
+>
+> Built since this was written: semantic search · Chrome/Edge import · browsing memory in the
+> omnibox · tab search · reader mode · Slash-styled error pages · inline PDF viewer · vertical tabs.
+
 ## The uncomfortable summary
 
 Slash has seven phases of engines and almost none of them are visible. Workspaces, adaptive tab
@@ -64,15 +72,15 @@ None of this exists yet, and all of it is what makes a browser feel like *yours*
 
 ## 3. The "not built yet" list
 
+*(Semantic search came off this list: MiniLM runs in a utility process, vectors live in `sqlite-vec`,
+and results are fused with the keyword index by reciprocal rank. The model ships with the app and
+never touches the network. It is opt-in and keyword search remains the default. What it does **not**
+do: read past roughly the first 8,000 characters of a long page.)*
+
 ### Private browsing — **build this next after the visibility work**
 Its absence is conspicuous; every browser has it. The Web Memory gate already has the flag and
 honours it, so this is mostly: a new window type, a non-persistent session from `SessionRegistry`,
 visual treatment, and refusing to write history. A few days, not weeks.
-
-### Semantic search
-`sqlite-vec` is installed and loads. Missing: the embedding worker. Plan is already written — MiniLM
-via transformers.js in a utility process, opt-in, with a visible model download. Keyword search
-stays the default and always works.
 
 ### Auto-update — **the real blocker for shipping to anyone**
 Chromium ships security fixes roughly monthly. A browser that cannot update itself is a knowingly
@@ -159,14 +167,14 @@ These are unglamorous and their absence is felt immediately:
 
 | # | Work | Why |
 |---|---|---|
-| 1 | New tab page, visible tab sleeping, workspace theming, memory in omnibox | Makes the browser's reason to exist visible. Highest value per hour. |
-| 2 | Onboarding + import from Chrome/Edge | Without import, nobody can switch even if they want to. |
-| 3 | Private browsing | Conspicuous absence; groundwork already laid. |
-| 4 | Tab search, reader mode, PDF, empty states | Basics whose absence reads as "unfinished". |
-| 5 | Personalisation (themes, density, vertical tabs) | Makes it feel like theirs. |
+| 1 | ~~Visible tab sleeping, memory in omnibox~~ · new tab page, workspace theming | Partly done. The new tab page is still the weakest screen. |
+| 2 | Onboarding — ~~import from Chrome/Edge~~ | Import is built; the three-screen first run is not. |
+| 3 | ~~Private browsing~~ | Built. |
+| 4 | ~~Tab search, reader mode, PDF~~ · empty states | Only empty states left. |
+| 5 | Personalisation — ~~vertical tabs~~, themes, density | Vertical tabs, accent, density and glass are all in. |
 | 6 | Extensions: load-unpacked + honest scoping | Real capability without overpromising. |
 | 7 | Auto-update + code signing + crash reporting | **Mandatory before anyone else uses it.** |
-| 8 | Semantic search, password manager, sync | Larger projects, lower urgency. |
+| 8 | Password manager, sync | Larger projects, lower urgency. |
 
 Form-state restore sits alongside #5 and needs its own decision: it means writing what you typed —
 excluding password fields — into the local database. It is off by default and the settings copy says

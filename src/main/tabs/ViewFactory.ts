@@ -45,7 +45,17 @@ export function createPageView(pageSession: Session): WebContentsView {
       // Spellchecking in text areas, with suggestions offered in the context
       // menu. Users expect red squiggles in a browser; their absence is a small
       // but constant reminder that this is not one.
-      spellcheck: true
+      spellcheck: true,
+
+      // Chromium's built-in PDF viewer. Without this a PDF link downloads
+      // instead of opening, which every other browser treats as a bug.
+      //
+      // `plugins` here does **not** mean NPAPI or Flash — those are long gone
+      // from Chromium and cannot be re-enabled. In Electron this flag gates
+      // exactly one thing: the bundled PDF renderer. It runs in its own
+      // sandboxed process like any other page, so the security preferences
+      // above still hold for it.
+      plugins: true
     }
   })
 }

@@ -1,6 +1,43 @@
+<!-- Updated after the feature build-out. -->
+
+## Verified state — 2026-08-17
+
+Measured, not assumed:
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint` | clean |
+| `npm test` | 406 passing |
+| `npm run package` | builds `release/Slash-0.1.0-x64.exe`, 153 MB |
+| Installer signature | **NotSigned** (`Get-AuthenticodeSignature`) |
+| App executable signature | **NotSigned** |
+| `electron-updater` | **not installed** — there is no update channel |
+
+Every feature below the two blockers has been verified in the **packaged** build,
+not only in dev, via the `SLASH_*` probes in `src/main/dev/spikeCapture.ts`.
+
+## The two blockers, restated plainly
+
+Neither is a coding task, and no amount of code removes them:
+
+1. **No code-signing certificate.** Every user meets SmartScreen's "unknown
+   publisher" wall. Requires purchasing an OV/EV certificate and passing identity
+   validation.
+2. **No auto-update channel.** Chromium ships security fixes roughly monthly, so
+   an un-updatable browser is a knowingly vulnerable renderer. Requires
+   `electron-updater`, a hosted release feed, **and** the certificate above —
+   unsigned updates are worse than none, because they are an unauthenticated code
+   path onto the user's machine.
+
+Until both exist, this build is suitable for the developer's own machine and for
+people who are told exactly what they are running. It is not suitable for
+distribution to strangers.
+
 # Release readiness
 
-All seven planned phases are built and verified. This document is the honest gap between that and a
+All seven planned phases are built and verified, plus the feature build-out recorded at the top of
+this file. This document is the honest gap between that and a
 browser you could hand to someone who is not you.
 
 Written down because "all the phases are done" and "ready to launch" are different claims, and it
@@ -43,16 +80,22 @@ These are deliberate and documented in their phase scripts, not oversights:
   hand-off: a notice on those hosts explaining the refusal, plus a toolbar button and Ctrl+Shift+E to
   open the current page in the default browser. Sites that use "Sign in with Google" as a federated
   login for their own account will hit the same wall.
-- **Semantic search is not built.** Keyword FTS5 search is complete and always works. `sqlite-vec` is
-  installed and verified loading in Electron, but there is no embedding worker — so paraphrase
-  queries ("making Postgres handle more traffic") will not find a page that only says "scaling". The
-  panel reports semantic search as *not installed* rather than *off*.
+- **Semantic search reads only the opening of a long page.** It is built, opt-in and verified in a
+  packaged build — a paraphrase sharing no term with the page does reach it. But a page is embedded
+  as at most ten passages, roughly the first 8,000 characters, so a fact buried in the last third of
+  a longread is findable by keyword and not by meaning. The UI states this rather than implying
+  whole-page coverage.
+- **Semantic search adds ~61 MB to the installer** (153 MB, up from ~92 MB) whether or not the user
+  ever enables it: ~38 MB of ONNX runtime and ~23 MB of model weights. The weights are bundled
+  deliberately — downloading them on first enable would have made a local search feature depend on a
+  third-party host — but the cost falls on everyone, including people who leave it switched off.
 - **AI page summarisation is not built.** It produces text rather than a browser action, so it does
   not fit the preview-and-approve model the engine is built around.
 - **Multi-window session restore is partial.** Snapshots are per-database, so restoring puts every
   tab into one window regardless of where they came from.
-- **Private browsing does not exist yet.** The Web Memory gate already has the flag and honours it;
-  there is simply no private window to set it.
+- ~~Private browsing does not exist yet.~~ **Built** — Ctrl+Shift+N, verified by
+  `SLASH_PRIVATE_PROBE`. This bullet claimed otherwise long after it shipped, and the Settings panel
+  repeated the claim to users. Check before trusting anything in this section.
 - **`beforeunload` detection is reactive.** There is no API to ask whether a page has registered a
   handler, so a page that has one but has never been asked to unload will not be caught. The
   unsaved-form-input signal is the reliable guard.
@@ -61,7 +104,7 @@ These are deliberate and documented in their phase scripts, not oversights:
 
 Worth stating too, so the list above is read in proportion:
 
-- 194 tests over the logic whose failure modes are destructive — never-hibernate guards, permission
+- 406 tests over the logic whose failure modes are destructive — never-hibernate guards, permission
   scoping and defaults, the AI action allowlist, URL resolution, query parsing, and Slash Shield's
   popup and redirect judgements.
 - The content preload reads no page content at all. It reports that a trusted gesture happened and

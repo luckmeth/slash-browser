@@ -12,6 +12,8 @@ export interface TabEventHooks {
   onMetadata: (tab: Tab) => void
   /** The renderer process died. */
   onCrashed: (tab: Tab) => void
+  /** A main-frame load failed; the tab now shows the chrome's error page. */
+  onLoadFailed: (tab: Tab) => void
 }
 
 /**
@@ -86,6 +88,9 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
       isLoading: false,
       error: { code: errorCode, description: errorDescription, url: validatedURL }
     })
+    // Take the dead view off the window so our error page is what the user
+    // sees. Chromium's own is already rendered underneath at this point.
+    hooks.onLoadFailed(tab)
     hooks.onChanged()
   })
 

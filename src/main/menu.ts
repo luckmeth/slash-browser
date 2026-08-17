@@ -143,6 +143,28 @@ export function buildApplicationMenu(ctx: AppContext): void {
           accelerator: 'CommandOrControl+F',
           click: send('open-find')
         },
+        {
+          label: 'Reader Mode',
+          accelerator: 'F9',
+          click: () => {
+            const window = ctx.focusedWindow()
+            if (!window) return
+            void ctx.reader.extract(window.tabs.activeTab?.contents ?? null).then((result) => {
+              // Silent when the page is not an article: a menu item cannot show
+              // the explanation the toolbar button can, and an empty reader
+              // would be worse than nothing happening.
+              if (result.article) window.showReader(result)
+            })
+          }
+        },
+        {
+          label: 'Search Tabs…',
+          accelerator: 'CommandOrControl+Shift+A',
+          // Straight to the window rather than through a ui:command: the surface
+          // lives in the overlay, which main owns, so routing it via the chrome
+          // renderer would be a round trip that changes nothing.
+          click: () => ctx.focusedWindow()?.showTabSearch()
+        },
         { type: 'separator' },
         {
           label: 'Zoom In',
@@ -310,19 +332,34 @@ export function buildApplicationMenu(ctx: AppContext): void {
           click: send('open-performance')
         },
         {
+          label: 'Redirect X-Ray…',
+          accelerator: 'CommandOrControl+Shift+X',
+          click: send('open-redirects')
+        },
+        {
+          label: 'Page Insight…',
+          accelerator: 'CommandOrControl+Shift+U',
+          click: send('open-insight')
+        },
+        {
+          label: 'Tab Brain…',
+          accelerator: 'CommandOrControl+Shift+G',
+          click: send('open-tabbrain')
+        },
+        {
           label: 'Search Browsing Memory…',
           accelerator: 'CommandOrControl+Shift+F',
           click: send('open-memory')
         },
         {
           label: 'Assistant…',
-          accelerator: 'CommandOrControl+Shift+A',
+          accelerator: 'CommandOrControl+Shift+Y',
           click: send('open-ai')
         },
         { label: 'Site Permissions', click: send('open-permissions') },
         {
           label: 'Restore Points…',
-          accelerator: 'CommandOrControl+Shift+R',
+          accelerator: 'CommandOrControl+Shift+K',
           click: send('open-timemachine')
         },
         { label: 'Settings', accelerator: 'CommandOrControl+,', click: send('open-settings') }

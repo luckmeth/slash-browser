@@ -8,6 +8,8 @@ import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
 import { showTabContextMenu } from '../menus/ContextMenus'
 import { buildSuggestions } from '../navigation/SuggestionEngine'
+import { analyseTabs } from '../tabs/brain/tabAnalysis'
+import { isDisabledForHost, toggleHost } from '../cleanup/cleanupRules'
 import { parseQuery } from '../memory/parseQuery'
 import { ActionExecutor } from '../ai/ActionExecutor'
 import { ContextBuilder } from '../ai/ContextBuilder'
@@ -20,6 +22,49 @@ import type { BrowserWindowController } from '../windows/BrowserWindowController
  * preview and the actual request must never be able to disagree about what is
  * sent.
  */
+/**
+ * Memory counters, including whether the semantic layer is usable *right now*.
+ *
+ * `semanticAvailable` reports what the machine can actually do rather than what
+ * the build nominally supports — a missing vector extension or a model that
+ * refuses to load is the user's reality, and the panel is not allowed to keep
+ * offering something that will not work.
+ */
+function memoryStats(ctx: AppContext): ReturnType<AppContext['memoryRepository']['stats']> {
+  const state = ctx.semantic.status().state
+  return ctx.memoryRepository.stats(
+    state !== 'unsupported',
+    state === 'ready' || state === 'indexing' || state === 'preparing'
+  )
+}
+
+/**
+ * Browsing-memory rows for the omnibox, or nothing.
+ *
+ * Three guards, each of which exists to keep this off the typing path:
+ *
+ *  - **Off unless indexing is on.** The default install never runs this at all.
+ *  - **Not for short queries.** One or two characters match half the index and
+ *    rank meaninglessly, and it is the keystroke where latency is most visible.
+ *  - **Not for addresses.** Someone typing "github.com/" wants that address, not
+ *    an essay they once read about GitHub.
+ *
+ * Failure is silent and empty: the omnibox has four other sources and none of
+ * them should be held up by this one.
+ */
+async function memorySuggestions(ctx: AppContext, query: string) {
+  const trimmed = query.trim()
+  if (trimmed.length < 4) return []
+  if (!ctx.settings.getAll().indexHistory) return []
+  if (resolveInput(trimmed, ctx.settings.getAll().searchEngineId).kind !== 'search') return []
+
+  try {
+    return await ctx.memorySearch.search(parseQuery(trimmed), 4)
+  } catch {
+    return []
+  }
+}
+
 /** Shield state for a tab, assembled from the blocker and current settings. */
 function blockingStatus(
   ctx: AppContext,
@@ -131,14 +176,15 @@ export function registerHandlers(ctx: AppContext): void {
 
   // --- omnibox suggestions --------------------------------------------------
 
-  ipc.handle('omnibox:suggest', (request, context) => {
+  ipc.handle('omnibox:suggest', async (request, context) => {
     const window = windowOf(context.sender)
     return ok(
       buildSuggestions(request.query, {
         history: ctx.history.suggest(request.query, 12),
         bookmarks: ctx.bookmarks.list(),
         openTabs: window ? window.tabs.snapshot().tabs : [],
-        engineId: ctx.settings.getAll().searchEngineId
+        engineId: ctx.settings.getAll().searchEngineId,
+        memory: await memorySuggestions(ctx, request.query)
       })
     )
   })
@@ -228,6 +274,15 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('tabs:list', (_req, context) => {
     const window = windowOf(context.sender)
     return window ? ok(window.tabs.snapshot()) : err('NOT_FOUND', 'No window for this view')
+  })
+
+  ipc.handle('tabs:listAll', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok({
+      tabs: window.tabs.allTabs().map((tab) => tab.snapshot),
+      activeTabId: window.tabs.snapshot().activeTabId
+    })
   })
 
   ipc.handle('tabs:create', (request, context) => {
@@ -623,26 +678,329 @@ export function registerHandlers(ctx: AppContext): void {
 
   // --- web memory -----------------------------------------------------------
 
-  ipc.handle('memory:search', (request) => {
+  ipc.handle('memory:search', async (request) => {
     const parsed = parseQuery(request.query)
     return ok({
-      results: ctx.memoryRepository.search(parsed, request.limit),
+      results: await ctx.memorySearch.search(parsed, request.limit),
       parsed
     })
   })
 
-  ipc.handle('memory:stats', () =>
-    ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
-  )
+  ipc.handle('memory:stats', () => ok(memoryStats(ctx)))
 
   ipc.handle('memory:forget', (request) => {
     ctx.memoryRepository.forget(request.url)
-    return ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
+    return ok(memoryStats(ctx))
   })
 
   ipc.handle('memory:clear', () => {
     ctx.memoryRepository.clearAll()
-    return ok(ctx.memoryRepository.stats(false, ctx.settings.getAll().semanticSearchEnabled))
+    return ok(memoryStats(ctx))
+  })
+
+  ipc.handle('memory:semanticStatus', () => ok(ctx.semantic.status()))
+
+  ipc.handle('memory:setSemanticEnabled', async (request) => {
+    // The setting is the source of truth, and writing it is what drives the
+    // engine — so the toggle cannot end up saying one thing while the layer does
+    // another, which is the failure mode of having both a switch and a "start".
+    ctx.settings.update({ semanticSearchEnabled: request.enabled })
+    if (request.enabled) {
+      // Deliberately not awaited: the first enable downloads a model, and the
+      // panel needs to render `preparing` with a progress bar rather than sit on
+      // a pending invoke for two minutes.
+      void ctx.semantic.enable()
+    } else {
+      await ctx.semantic.disable()
+    }
+    return ok(ctx.semantic.status())
+  })
+
+  // --- advanced download engine ---------------------------------------------
+
+  ipc.handle('downloadEngine:list', () => ok(ctx.downloadEngine.list()))
+
+  ipc.handle('downloadEngine:enqueue', (request) => {
+    // http(s) only. The engine writes whatever it fetches to disk, so a file://
+    // or data: URL here would turn a download button into an arbitrary local
+    // file copy.
+    if (!/^https?:\/\//i.test(request.url)) {
+      return err('FORBIDDEN', 'Only http and https downloads are supported')
+    }
+    return ok({
+      id: ctx.downloadEngine.enqueue(request.url, {
+        priority: request.priority,
+        startAfter: request.startAfter
+      })
+    })
+  })
+
+  ipc.handle('downloadEngine:pause', (request) => {
+    ctx.downloadEngine.pause(request.id)
+    return ok(undefined)
+  })
+  ipc.handle('downloadEngine:resume', (request) => {
+    ctx.downloadEngine.resume(request.id)
+    return ok(undefined)
+  })
+  ipc.handle('downloadEngine:cancel', (request) => {
+    ctx.downloadEngine.cancel(request.id)
+    return ok(undefined)
+  })
+  ipc.handle('downloadEngine:remove', (request) => {
+    ctx.downloadEngine.remove(request.id)
+    return ok(undefined)
+  })
+  ipc.handle('downloadEngine:setPriority', (request) => {
+    ctx.downloadEngine.setPriority(request.id, request.priority)
+    return ok(undefined)
+  })
+  ipc.handle('downloadEngine:startNow', (request) => {
+    ctx.downloadEngine.startNow(request.id)
+    return ok(undefined)
+  })
+
+  // --- diagnostics / crash reporting ----------------------------------------
+
+  ipc.handle('crashes:report', async () => ok(await ctx.crashes.report()))
+
+  ipc.handle('crashes:clear', async () => {
+    await ctx.crashes.clear()
+    return ok(await ctx.crashes.report())
+  })
+
+  ipc.handle('crashes:openFolder', async () => {
+    // Opening the folder is how a user sends a dump deliberately. Nothing is
+    // uploaded for them.
+    await shell.openPath(app.getPath('crashDumps'))
+    return ok(undefined)
+  })
+
+  // --- ai hub ---------------------------------------------------------------
+
+  ipc.handle('aiHub:status', () => ok(ctx.providers.status()))
+
+  ipc.handle('aiHub:connect', (request) => {
+    const error = ctx.providers.connect(request)
+    return ok({ error, status: ctx.providers.status() })
+  })
+
+  ipc.handle('aiHub:disconnect', (request) => {
+    ctx.providers.disconnect(request.provider)
+    return ok(ctx.providers.status())
+  })
+
+  ipc.handle('aiHub:setDefault', (request) => {
+    const error = ctx.providers.setDefault(request.provider)
+    return ok({ error, status: ctx.providers.status() })
+  })
+
+  // --- redirect x-ray -------------------------------------------------------
+
+  ipc.handle('redirects:chains', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(window.redirectRecorder.list())
+  })
+
+  ipc.handle('redirects:clear', (_req, context) => {
+    windowOf(context.sender)?.redirectRecorder.clear()
+    return ok(undefined)
+  })
+
+  ipc.handle('redirects:blockDomain', (request) => {
+    // A bare host, appended to the user's own rules. The renderer never authors
+    // filter syntax — that would be a wider surface than the feature needs.
+    const host = request.host.trim().toLowerCase().replace(/^www\./, '')
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) {
+      return err('VALIDATION', 'That does not look like a domain')
+    }
+    const existing = ctx.settings.getAll().customBlockRules
+    const next = existing.includes(host) ? existing : [...existing, host]
+    ctx.settings.update({ customBlockRules: next })
+    ctx.blocker.refreshAllowedSites()
+    return ok({ blocked: next })
+  })
+
+  // --- page insight ---------------------------------------------------------
+
+  ipc.handle('insight:analyse', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.insight.analyse(window.tabs.activeTab?.contents ?? null))
+  })
+
+  // --- cleanup mode ---------------------------------------------------------
+
+  /** Status for the tab the user is looking at. */
+  const cleanupStatus = (window: BrowserWindowController) => {
+    const tab = window.tabs.activeTab
+    const host = hostOf(tab?.snapshot.url ?? '')
+    const settings = ctx.settings.getAll()
+    return {
+      active: tab ? ctx.cleanup.resultFor(tab.id) !== null : false,
+      mode: settings.cleanupMode,
+      host,
+      disabledForHost: isDisabledForHost(host, settings.cleanupDisabledHosts),
+      lastResult: tab ? ctx.cleanup.resultFor(tab.id) : null
+    }
+  }
+
+  ipc.handle('cleanup:apply', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.activeTab
+    if (!tab) return err('NOT_FOUND', 'No tab to clean')
+
+    const settings = ctx.settings.getAll()
+    const host = hostOf(tab.snapshot.url)
+    // The per-site opt-out is honoured here rather than only hidden in the UI, so
+    // a menu accelerator cannot bypass what the user switched off.
+    if (isDisabledForHost(host, settings.cleanupDisabledHosts)) {
+      return ok({
+        applied: false,
+        mode: settings.cleanupMode,
+        hidden: 0,
+        paused: 0,
+        scrollUnlocked: false,
+        detail: `Cleanup is switched off for ${host}.`
+      })
+    }
+
+    const mode = request.mode ?? settings.cleanupMode
+    return ok(await ctx.cleanup.apply(tab.id, tab.contents, mode))
+  })
+
+  ipc.handle('cleanup:restore', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.activeTab
+    if (tab) await ctx.cleanup.restore(tab.id, tab.contents)
+    return ok(cleanupStatus(window))
+  })
+
+  ipc.handle('cleanup:status', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(cleanupStatus(window))
+  })
+
+  ipc.handle('cleanup:setDisabledForHost', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.activeTab
+    const host = hostOf(tab?.snapshot.url ?? '')
+    if (host === '') return ok(cleanupStatus(window))
+
+    const current = ctx.settings.getAll().cleanupDisabledHosts
+    const already = isDisabledForHost(host, current)
+    if (already !== request.disabled) {
+      ctx.settings.update({ cleanupDisabledHosts: toggleHost(host, current) })
+    }
+    // Switching cleanup off for a site should also put the current page back,
+    // or the user has turned it off and is still looking at a cleaned page.
+    if (request.disabled && tab) await ctx.cleanup.restore(tab.id, tab.contents)
+    return ok(cleanupStatus(window))
+  })
+
+  // --- tab brain ------------------------------------------------------------
+
+  ipc.handle('tabBrain:analyse', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(analyseTabs(window.tabs.allTabs().map((tab) => tab.snapshot), Date.now()))
+  })
+
+  ipc.handle('tabBrain:closeTabs', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    // Re-checked here rather than trusted from the renderer. The suggestions the
+    // user saw were computed a moment ago, and a tab may have been pinned or
+    // started playing audio since — in which case it is no longer closeable,
+    // whatever the list said.
+    const analysis = analyseTabs(window.tabs.allTabs().map((tab) => tab.snapshot), Date.now())
+    const closeable = new Set(analysis.closeSuggestions.map((s) => s.tabId))
+    for (const tabId of request.tabIds) {
+      if (closeable.has(tabId)) window.tabs.close(tabId)
+    }
+    return ok(analyseTabs(window.tabs.allTabs().map((tab) => tab.snapshot), Date.now()))
+  })
+
+  ipc.handle('tabBrain:groupIntoWorkspace', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    // Never isolated. An isolated workspace owns its own cookie partition, so
+    // moving tabs into one would sign them all out — a destructive surprise from
+    // an action the user thinks of as tidying.
+    const workspace = ctx.workspaces.create({
+      name: request.name,
+      icon: 'wsFolder',
+      color: 'blue',
+      isolated: false
+    })
+
+    let moved = 0
+    for (const tabId of request.tabIds) {
+      if (window.tabs.moveToWorkspace(tabId, workspace.id)) moved++
+    }
+    ctx.broadcastWorkspacesTo(window)
+    return ok({ workspaceId: workspace.id, moved })
+  })
+
+  ipc.handle('guardian:scanDownloads', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.guardian.scanDownloads(window.tabs.activeTab?.contents ?? null))
+  })
+
+  ipc.handle('guardian:scanMedia', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.guardian.scanMedia(window.tabs.activeTab?.contents ?? null))
+  })
+
+  ipc.handle('downloadEngine:clearFinished', () => {
+    ctx.downloadEngine.clearFinished()
+    return ok(undefined)
+  })
+
+  // --- reader mode ----------------------------------------------------------
+
+  ipc.handle('reader:open', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const result = await ctx.reader.extract(window.tabs.activeTab?.contents ?? null)
+    // Only opens the overlay when there is something to show. A reader view
+    // containing an apology is worse than a message where the button was.
+    if (result.article) window.showReader(result)
+    return ok(result)
+  })
+
+  ipc.handle('reader:get', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(window.pendingReader ?? { article: null, reason: 'There is nothing to read.' })
+  })
+
+  // --- import from another browser ------------------------------------------
+
+  ipc.handle('import:sources', () => ok(ctx.importer.discover()))
+
+  ipc.handle('import:run', (request) => {
+    const summary = ctx.importer.run(request.sourceId, {
+      bookmarks: request.bookmarks,
+      history: request.history
+    })
+    // Both lists changed underneath every open window; a panel still showing the
+    // pre-import state looks like the import did nothing.
+    for (const window of ctx.allWindows()) {
+      ctx.ipc.broadcast('bookmarks:changed', ctx.bookmarks.list(), window.privilegedContents())
+      ctx.ipc.broadcast('history:changed', {}, window.privilegedContents())
+    }
+    return ok(summary)
   })
 
   // --- ai action engine -----------------------------------------------------
