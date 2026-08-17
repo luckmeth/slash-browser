@@ -2000,6 +2000,84 @@ export async function runCrashCapture(
   app.quit()
 }
 
+/**
+ * Dev-only verification of update checking, against a real served feed.
+ *
+ * Run against a local HTTP server rather than a hosted one, because the point is
+ * to exercise this code: the fetch through Chromium's stack, the YAML reading,
+ * and the version comparison that decides whether an update exists at all.
+ */
+export async function runUpdateCapture(probe: {
+  setFeed: (url: string) => void
+  check: () => Promise<{
+    state: string
+    currentVersion: string
+    latestVersion: string | null
+    detail: string
+    canInstall: boolean
+  }>
+  status: () => { state: string; detail: string }
+  baseUrl: string
+}): Promise<void> {
+  // 1. No feed configured: nothing is contacted, and it says so.
+  probe.setFeed('')
+  const none = probe.status()
+  log.info(`update probe: no feed → ${none.state}`)
+  if (none.state === 'no-channel') {
+    log.info('update probe: PASS — with no feed configured, nothing is checked')
+  } else {
+    log.error('update probe: FAIL — a default endpoint is being contacted')
+  }
+
+  // 2. A feed advertising a newer version.
+  probe.setFeed(`${probe.baseUrl}/newer.yml`)
+  const newer = await probe.check()
+  log.info(`update probe: newer feed → ${newer.state}, running ${newer.currentVersion}, offered ${newer.latestVersion}`)
+  if (newer.state === 'update-available' && newer.latestVersion === '9.9.9') {
+    log.info('update probe: PASS — a newer version is found and reported')
+  } else {
+    log.error('update probe: FAIL — a newer version was not detected')
+  }
+  if (!newer.canInstall && /not.*sign|unsigned/i.test(newer.detail)) {
+    log.info('update probe: PASS — it states it cannot install, and why')
+  } else {
+    log.error('update probe: FAIL — it implies it can install an unsigned update')
+  }
+
+  // 3. A feed advertising an older version must not offer a downgrade.
+  probe.setFeed(`${probe.baseUrl}/older.yml`)
+  const older = await probe.check()
+  log.info(`update probe: older feed → ${older.state} (offered ${older.latestVersion})`)
+  if (older.state === 'up-to-date') {
+    log.info('update probe: PASS — an older feed version is not offered as an update')
+  } else {
+    log.error('update probe: FAIL — offered a downgrade')
+  }
+
+  // 4. A broken feed must report unreadable rather than crash or claim success.
+  probe.setFeed(`${probe.baseUrl}/garbage.yml`)
+  const broken = await probe.check()
+  log.info(`update probe: unreadable feed → ${broken.state}`)
+  if (broken.state === 'error') {
+    log.info('update probe: PASS — an unreadable feed is an error, not a silent pass')
+  } else {
+    log.error('update probe: FAIL — a broken feed was treated as a result')
+  }
+
+  // 5. An unreachable feed must not hang the UI.
+  probe.setFeed('http://127.0.0.1:1/latest.yml')
+  const unreachable = await probe.check()
+  log.info(`update probe: unreachable feed → ${unreachable.state}`)
+  if (unreachable.state === 'error') {
+    log.info('update probe: PASS — an unreachable feed fails cleanly')
+  } else {
+    log.error('update probe: FAIL — an unreachable feed did not settle')
+  }
+
+  probe.setFeed('')
+  app.quit()
+}
+
 /** Polls a condition until it holds or the deadline passes. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs

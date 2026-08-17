@@ -5,6 +5,7 @@ import { useBrowserStore } from '../../stores/browserStore'
 import { useSemanticStatus } from '../memory/useSemanticStatus'
 import { ImportSection } from './ImportSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
+import { UpdateSection } from './UpdateSection'
 
 export function SettingsPanel(): React.JSX.Element {
   const settings = useBrowserStore((s) => s.settings)
@@ -248,6 +249,10 @@ export function SettingsPanel(): React.JSX.Element {
         user goes to check told them the feature was missing. A stale "not built"
         is as much a lie as an overstated capability.
       */}
+      <Group title="Updates">
+        <UpdateSection feedUrl={settings.updateFeedUrl} onFeedChange={update} />
+      </Group>
+
       <Group title="Crash reports">
         <DiagnosticsSection />
       </Group>

@@ -168,6 +168,40 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_UPDATE_PROBE']) {
+      void import('./dev/spikeCapture').then(async ({ runUpdateCapture }) => {
+        const { createServer } = await import('node:http')
+        // Built with join rather than escapes: a YAML body inside a nested
+        // string literal is an escaping hazard, as this line already proved once.
+        const newline = String.fromCharCode(10)
+        const feed = (version: string, extra: string[] = []): string =>
+          [`version: ${version}`, `path: Slash-${version}-x64.exe`, ...extra, ''].join(newline)
+        const feeds: Record<string, string> = {
+          '/newer.yml': feed('9.9.9'),
+          '/older.yml': feed('0.0.1'),
+          // No version key at all, so the feed is unreadable by design.
+          '/garbage.yml': ['path: Slash.exe', 'sha512: abc==', ''].join(newline)
+        }
+        const server = createServer((request, response) => {
+          const body = feeds[request.url ?? '']
+          response.statusCode = body ? 200 : 404
+          response.end(body ?? 'not found')
+        })
+        const baseUrl = await new Promise<string>((resolve) => {
+          server.listen(0, '127.0.0.1', () => {
+            const address = server.address()
+            resolve(`http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`)
+          })
+        })
+        return runUpdateCapture({
+          baseUrl,
+          setFeed: (url) => context.settings.update({ updateFeedUrl: url }),
+          check: () => context.updates.check(),
+          status: () => context.updates.current()
+        })
+      })
+    }
+
     if (process.env['SLASH_CRASH_PROBE']) {
       void import('./dev/spikeCapture').then(({ runCrashCapture }) =>
         runCrashCapture(window, {

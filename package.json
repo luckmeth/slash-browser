@@ -24,6 +24,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@mozilla/readability": "^0.6.0",
     "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.9",
     "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {

@@ -164,6 +164,10 @@ export const INVOKE_CHANNELS = [
   'downloadEngine:clearFinished',
   'downloadEngine:startNow',
 
+  // --- updates ---
+  'updates:status',
+  'updates:check',
+
   // --- diagnostics / crash reporting ---
   'crashes:report',
   'crashes:clear',

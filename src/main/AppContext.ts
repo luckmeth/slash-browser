@@ -38,6 +38,7 @@ import { GestureTracker } from './shield/GestureTracker'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
+import { UpdateService } from './updates/UpdateService'
 import { createLogger } from './logger'
 
 const log = createLogger('app')
@@ -89,6 +90,7 @@ export class AppContext {
   readonly downloadEngine: DownloadQueue
   readonly guardian: DownloadGuardian
   readonly crashes: CrashReporting
+  readonly updates: UpdateService
   readonly ai: AiEngine
   /** The AI Hub's provider catalogue and credential store. */
   readonly providers: ProviderRegistry
@@ -157,6 +159,7 @@ export class AppContext {
       (items) => this.broadcastAll('downloadEngine:changed', items)
     )
     this.crashes = new CrashReporting(this.db)
+    this.updates = new UpdateService(() => this.settings.getAll().updateFeedUrl)
     this.ai = new AiEngine(this.settings, this.db)
     this.providers = new ProviderRegistry(this.db, this.settings)
     // Hooks are replaced in start(); until then a blocked navigation has no UI

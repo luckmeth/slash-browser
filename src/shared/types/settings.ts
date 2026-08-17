@@ -110,6 +110,16 @@ export const SettingsSchema = z.object({
   /** Extra domains to block, one per line, authored by the user. */
   customBlockRules: z.array(z.string()).default([]),
 
+  // --- updates ---------------------------------------------------------------
+  /**
+   * Release feed to check for newer versions. Empty by default.
+   *
+   * Empty means Slash contacts nothing at all — there is no default endpoint,
+   * because a browser that phones a server on first launch to ask about updates
+   * has made an outbound request the user never agreed to.
+   */
+  updateFeedUrl: z.string().default(''),
+
   // --- cleanup mode ----------------------------------------------------------
   /** Which Cleanup Mode the Clean This Page button uses. */
   cleanupMode: z.enum(['light', 'balanced', 'aggressive']).default('balanced'),

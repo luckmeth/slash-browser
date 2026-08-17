@@ -760,6 +760,11 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(undefined)
   })
 
+  // --- updates --------------------------------------------------------------
+
+  ipc.handle('updates:status', () => ok(ctx.updates.current()))
+  ipc.handle('updates:check', async () => ok(await ctx.updates.check()))
+
   // --- diagnostics / crash reporting ----------------------------------------
 
   ipc.handle('crashes:report', async () => ok(await ctx.crashes.report()))

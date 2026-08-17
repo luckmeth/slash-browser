@@ -22,6 +22,7 @@ import { PageInsightSchema } from '../types/pageInsight'
 import { RedirectChainSchema } from '../types/redirectChain'
 import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
 import { CrashReportSchema } from '../types/diagnostics'
+import { UpdateStatusSchema } from '../types/updates'
 import {
   BlockingStatusSchema,
   PopupBlockedSchema,
@@ -576,6 +577,14 @@ export const invokeContracts = {
    * so findings are not over-trusted as a model's reading of the page.
    */
   'insight:analyse': { request: z.void(), response: PageInsightSchema },
+
+  /** Update state. Reports `no-channel` when no feed is configured. */
+  'updates:status': { request: z.void(), response: UpdateStatusSchema },
+  /**
+   * Checks the configured feed. Never downloads or installs a package — this
+   * build is unsigned, so it cannot verify one came from us.
+   */
+  'updates:check': { request: z.void(), response: UpdateStatusSchema },
 
   /**
    * Local crash record. Dumps stay on the machine — there is no upload server,
