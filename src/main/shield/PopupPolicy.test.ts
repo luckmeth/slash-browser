@@ -10,6 +10,7 @@ const facts = (over: Partial<PopupFacts> = {}): PopupFacts => ({
   siteAllowsPopups: false,
   siteLocked: false,
   isCrossSite: true,
+  targetIsKnownAdHost: false,
   ...over
 })
 
@@ -72,6 +73,44 @@ describe('decidePopup', () => {
   it('allows a clicked same-site window even in strict mode', () => {
     expect(
       decidePopup(facts({ mode: 'strict', isCrossSite: false, msSinceGesture: 20 })).action
+    ).toBe('allow')
+  })
+
+  it('blocks a clicked window to an ad host, because a click is not consent to an advert', () => {
+    // The streaming-site pattern: the play button is real and so is the click,
+    // and the window it opens goes to an ad network. Without this rule every
+    // click on such a page buys one more ad tab.
+    expect(decidePopup(facts({ msSinceGesture: 20, targetIsKnownAdHost: true }))).toEqual({
+      action: 'block',
+      reason: 'known-ad-host'
+    })
+  })
+
+  it('keeps blocking ad windows however many times the page is clicked', () => {
+    // Each fresh click resets the one-window-per-gesture budget, so that rule
+    // alone never stops the third or the tenth.
+    for (const opens of [0, 1, 2]) {
+      expect(
+        decidePopup(facts({ msSinceGesture: 20, opensFromThisGesture: opens, targetIsKnownAdHost: true }))
+          .action
+      ).toBe('block')
+    }
+  })
+
+  it('does not touch a site opening its own windows, ad host or not', () => {
+    // Same-site only: an ad domain that opens a window on itself is its business.
+    expect(
+      decidePopup(facts({ msSinceGesture: 20, isCrossSite: false, targetIsKnownAdHost: true }))
+        .action
+    ).toBe('allow')
+  })
+
+  it('still honours an explicit popup exception for the site', () => {
+    // The user said "always allow popups here" — that outranks the blocklist,
+    // because it is a specific instruction about this site.
+    expect(
+      decidePopup(facts({ msSinceGesture: 20, siteAllowsPopups: true, targetIsKnownAdHost: true }))
+        .action
     ).toBe('allow')
   })
 })

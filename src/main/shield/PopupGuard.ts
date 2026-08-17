@@ -28,6 +28,14 @@ export interface PopupGuardHooks {
   onPopupBlocked: (webContentsId: number, held: HeldPopup, explanation: string) => void
   /** Open a URL the user chose to let through. */
   openInNewTab: (url: string, background: boolean) => void
+  /**
+   * Is this host on the ad/tracker blocklist?
+   *
+   * Injected rather than imported so the policy stays testable without a filter
+   * engine, and so a guard built before the lists load simply blocks nothing
+   * extra instead of throwing.
+   */
+  isKnownAdHost?: (host: string) => boolean
 }
 
 export class PopupGuard {
@@ -108,7 +116,8 @@ export class PopupGuard {
       mode: input.mode,
       siteAllowsPopups: this.isPopupAllowedFor(pageHost),
       siteLocked: input.siteLocked,
-      isCrossSite: !isSameSite(targetHost, pageHost)
+      isCrossSite: !isSameSite(targetHost, pageHost),
+      targetIsKnownAdHost: this.hooks.isKnownAdHost?.(targetHost) ?? false
     })
 
     if (verdict.action === 'allow') {

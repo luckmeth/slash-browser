@@ -282,7 +282,8 @@ export class AppContext {
       openInNewTab: (url, background) => {
         const window = this.focusedWindow()
         window?.tabs.create({ url, background })
-      }
+      },
+      isKnownAdHost: (host) => this.blocker.engine.isKnownAdHost(host)
     })
 
     // A refused navigation is recorded so the shield panel can account for it.

@@ -39,6 +39,8 @@ export interface PopupFacts {
   /** "Stay on This Site" is on for this tab. */
   readonly siteLocked: boolean
   readonly isCrossSite: boolean
+  /** The window's destination is on the ad/tracker blocklist. */
+  readonly targetIsKnownAdHost: boolean
 }
 
 export type PopupReason =
@@ -48,6 +50,7 @@ export type PopupReason =
   | 'repeated-from-one-gesture'
   | 'site-locked'
   | 'cross-site-strict'
+  | 'known-ad-host'
 
 export interface PopupVerdict {
   readonly action: 'allow' | 'block'
@@ -69,6 +72,8 @@ export function explainPopup(reason: PopupReason): string {
       return 'Stay on This Site is on for this tab.'
     case 'cross-site-strict':
       return 'Strict mode blocks windows to other sites that you did not ask for.'
+    case 'known-ad-host':
+      return 'This window goes to a known ad or tracking site, so your click was not what opened it.'
   }
 }
 
@@ -88,6 +93,15 @@ export function decidePopup(facts: PopupFacts): PopupVerdict {
   const gestured = facts.msSinceGesture !== null && facts.msSinceGesture <= GESTURE_WINDOW_MS
   if (!gestured) {
     return { action: 'block', reason: 'no-user-gesture' }
+  }
+
+  // A gesture explains *that* a window opened, not that the user wanted this
+  // destination. Sites whose whole business is the popunder monetise exactly
+  // that gap: the play button is real, the click is real, and the window goes to
+  // an ad network. A click is not consent to open an advert, so the blocklist
+  // gets a say here and not only over subresources.
+  if (facts.isCrossSite && facts.targetIsKnownAdHost) {
+    return { action: 'block', reason: 'known-ad-host' }
   }
 
   // One click, one window. The second window attributed to the same click is the

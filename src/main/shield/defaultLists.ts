@@ -98,8 +98,24 @@ export const DEFAULT_BLOCK_DOMAINS: readonly string[] = [
   'zedo.com',
   'revcontent.com',
   'mgid.com',
+  // Popunder and click-monetisation networks. These are the ones that pay
+  // streaming and file-host sites per window opened, so they are what the popup
+  // guard's `known-ad-host` rule is looking for — a click on a play button is
+  // sold as consent to open one of these.
   'propellerads.com',
   'popads.net',
+  'popcash.net',
+  'clickadu.com',
+  'hilltopads.net',
+  'hilltopads.com',
+  'adsterra.com',
+  'monetag.com',
+  'galaksion.com',
+  'adspyglass.com',
+  'onclicka.net',
+  'trafficstars.com',
+  'bidvertiser.com',
+  'adskeeper.com',
   'adcash.com',
   'exoclick.com',
   'juicyads.com',
