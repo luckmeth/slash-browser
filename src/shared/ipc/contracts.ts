@@ -21,6 +21,7 @@ import { CleanupModeSchema, CleanupResultSchema, CleanupStatusSchema } from '../
 import { PageInsightSchema } from '../types/pageInsight'
 import { RedirectChainSchema } from '../types/redirectChain'
 import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
+import { AiComparisonSchema, ComparePreviewSchema } from '../types/aiCompare'
 import { CrashReportSchema } from '../types/diagnostics'
 import { UpdateStatusSchema } from '../types/updates'
 import { PageChangeSchema, WatchStatusSchema } from '../types/watch'
@@ -644,6 +645,28 @@ export const invokeContracts = {
   'aiHub:disconnect': {
     request: z.object({ provider: AiProviderIdSchema }),
     response: AiHubStatusSchema
+  },
+  /**
+   * What would be sent, and to whom, before anything is.
+   *
+   * Asking three providers means the same text reaches three companies, each
+   * with its own retention policy — so the recipients are named and confirmed
+   * per request rather than behind a setting enabled once and forgotten.
+   */
+  'aiHub:comparePreview': {
+    request: z.object({
+      question: z.string().min(1).max(4000),
+      providers: z.array(AiProviderIdSchema).min(1).max(4)
+    }),
+    response: ComparePreviewSchema
+  },
+  /** Sends the question to each named provider. Failures are isolated per row. */
+  'aiHub:compare': {
+    request: z.object({
+      question: z.string().min(1).max(4000),
+      providers: z.array(AiProviderIdSchema).min(1).max(4)
+    }),
+    response: AiComparisonSchema
   },
   'aiHub:setDefault': {
     request: z.object({ provider: AiProviderIdSchema }),

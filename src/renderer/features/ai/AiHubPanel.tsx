@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AiHubStatus, AiProviderId, AiProviderInfo } from '@shared/types/aiHub'
 import { Icon } from '../../components/Icon'
+import { ComparePanel } from './ComparePanel'
 
 /**
  * AI Hub — connect and manage providers.
@@ -162,6 +163,13 @@ export function AiHubPanel(): React.JSX.Element {
           </li>
         ))}
       </ul>
+
+      <section className="border-t border-[var(--color-border-subtle)] pt-3">
+        <h3 className="mb-1.5 text-[10px] font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+          Compare answers
+        </h3>
+        <ComparePanel providers={status.providers} />
+      </section>
 
       <p className="border-t border-[var(--color-border-subtle)] pt-2 text-[11px] text-[var(--color-text-muted)]">
         Keys are encrypted by your operating system's credential store and never shown again, not

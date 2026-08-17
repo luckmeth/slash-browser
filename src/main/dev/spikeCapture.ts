@@ -2246,6 +2246,60 @@ export async function runMissionCapture(
   app.quit()
 }
 
+/**
+ * Dev-only verification of multi-provider comparison, against stub endpoints.
+ *
+ * **This proves the plumbing, not the answers.** Real answers need live
+ * credentials for three separate companies, so what is tested here is the part
+ * that can go wrong regardless of provider: the fan-out, and above all the
+ * isolation — one provider being down must not cost the user the others.
+ */
+export async function runCompareCapture(probe: {
+  run: (question: string) => Promise<{
+    answers: Array<{ providerName: string; state: string; text: string; error: string }>
+  }>
+}): Promise<void> {
+  const result = await probe.run('Which of these is best?')
+  log.info(`compare probe: ${result.answers.length} answer row(s)`)
+  for (const answer of result.answers) {
+    log.info(
+      `   ${answer.providerName}: ${answer.state}${answer.state === 'answered' ? ` — "${answer.text.slice(0, 40)}"` : ` — ${answer.error}`}`
+    )
+  }
+
+  const answered = result.answers.filter((answer) => answer.state === 'answered')
+  const failed = result.answers.filter((answer) => answer.state === 'failed')
+
+  if (result.answers.length === 3) {
+    log.info('compare probe: PASS — every provider produced a row')
+  } else {
+    log.error(`compare probe: FAIL — expected 3 rows, got ${result.answers.length}`)
+  }
+
+  // The load-bearing check. One dead provider must not discard the others.
+  if (answered.length === 2 && failed.length === 1) {
+    log.info('compare probe: PASS — a failing provider did not deny the working answers')
+  } else {
+    log.error(
+      `compare probe: FAIL — ${answered.length} answered and ${failed.length} failed; isolation is broken`
+    )
+  }
+
+  if (failed[0] && failed[0].error.length > 0 && !/undefined|\[object/.test(failed[0].error)) {
+    log.info('compare probe: PASS — the failure is explained in words')
+  } else {
+    log.error('compare probe: FAIL — the failure row carries no usable explanation')
+  }
+
+  if (answered.every((answer) => answer.text.length > 0)) {
+    log.info('compare probe: PASS — answers carry their text')
+  } else {
+    log.error('compare probe: FAIL — an answered row had no text')
+  }
+
+  app.quit()
+}
+
 /** Polls a condition until it holds or the deadline passes. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs

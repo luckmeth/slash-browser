@@ -31,6 +31,7 @@ import { DownloadQueue } from './downloads/engine/DownloadQueue'
 import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
 import { AiEngine } from './ai/AiEngine'
 import { ProviderRegistry } from './ai/ProviderRegistry'
+import { AiComparisonService } from './ai/AiComparison'
 import { ContentBlocker } from './shield/NetworkPolicy'
 import { PopupGuard } from './shield/PopupGuard'
 import { RedirectGuard } from './shield/RedirectGuard'
@@ -106,6 +107,7 @@ export class AppContext {
   readonly ai: AiEngine
   /** The AI Hub's provider catalogue and credential store. */
   readonly providers: ProviderRegistry
+  readonly comparison = new AiComparisonService()
   readonly blocker: ContentBlocker
   readonly popups: PopupGuard
   readonly redirects: RedirectGuard

@@ -193,6 +193,8 @@ export const INVOKE_CHANNELS = [
   'aiHub:connect',
   'aiHub:disconnect',
   'aiHub:setDefault',
+  'aiHub:comparePreview',
+  'aiHub:compare',
 
   // --- redirect x-ray ---
   'redirects:chains',

@@ -18,6 +18,15 @@ export interface LLMProvider {
   readonly model: string
   /** Returns the raw structured object; the caller validates it with zod. */
   proposePlan(request: PlanRequest): Promise<unknown>
+  /**
+   * A plain-language answer to a plain-language question.
+   *
+   * Separate from `proposePlan` because they want opposite things: a plan must be
+   * machine-checkable against a schema before anything acts on it, whereas an
+   * answer is read by a person and forcing it through a tool call would only
+   * flatten it.
+   */
+  ask(question: string, signal?: AbortSignal): Promise<string>
 }
 
 /** Network timeout. A hung request must not leave the UI waiting forever. */
@@ -41,6 +50,35 @@ export class AnthropicProvider implements LLMProvider {
     private readonly apiKey: string,
     readonly model: string
   ) {}
+
+  /** A plain-language answer, for the multi-provider comparison surface. */
+  async ask(question: string, signal?: AbortSignal): Promise<string> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', () => controller.abort())
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: this.model,
+          max_tokens: 1024,
+          messages: [{ role: 'user', content: question }]
+        })
+      })
+      if (!response.ok) throw new Error(`Anthropic returned ${response.status}`)
+      const body = (await response.json()) as { content?: { text?: string }[] }
+      return body.content?.map((part) => part.text ?? '').join('').trim() || '(empty answer)'
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
 
   async proposePlan(request: PlanRequest): Promise<unknown> {
     const controller = new AbortController()
@@ -114,6 +152,35 @@ export class OpenAICompatibleProvider implements LLMProvider {
     readonly model: string
   ) {}
 
+  /** A plain-language answer, for the multi-provider comparison surface. */
+  async ask(question: string, signal?: AbortSignal): Promise<string> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', () => controller.abort())
+    try {
+      const response = await fetch(`${this.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {})
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: this.model,
+          messages: [{ role: 'user', content: question }]
+        })
+      })
+      if (!response.ok) throw new Error(`Provider returned ${response.status}`)
+      const body = (await response.json()) as {
+        choices?: { message?: { content?: string } }[]
+      }
+      return body.choices?.[0]?.message?.content?.trim() || '(empty answer)'
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+
   async proposePlan(request: PlanRequest): Promise<unknown> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -185,6 +252,32 @@ export class GoogleProvider implements LLMProvider {
     private readonly apiKey: string,
     readonly model: string
   ) {}
+
+  /** A plain-language answer, for the multi-provider comparison surface. */
+  async ask(question: string, signal?: AbortSignal): Promise<string> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    signal?.addEventListener('abort', () => controller.abort())
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+          signal: controller.signal,
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: question }] }] })
+        }
+      )
+      if (!response.ok) throw new Error(`Google returned ${response.status}`)
+      const body = (await response.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[]
+      }
+      return body.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '(empty answer)'
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
 
   async proposePlan(request: PlanRequest): Promise<unknown> {
     const controller = new AbortController()

@@ -168,6 +168,58 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_COMPARE_PROBE']) {
+      void Promise.all([
+        import('./dev/spikeCapture'),
+        import('./ai/AiComparison'),
+        import('./ai/LLMProvider'),
+        import('node:http')
+      ]).then(async ([{ runCompareCapture }, { AiComparisonService }, providers, http]) => {
+        // Two OpenAI-compatible stubs: one answers, one refuses. Real answers
+        // would need live credentials for three companies; what is provable here
+        // is the fan-out and the isolation.
+        const serve = (handler: (res: import('node:http').ServerResponse) => void) =>
+          new Promise<string>((resolve) => {
+            const server = http.createServer((_req, res) => handler(res))
+            server.listen(0, '127.0.0.1', () => {
+              const address = server.address()
+              resolve(
+                `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}/v1`
+              )
+            })
+          })
+
+        const okUrl = await serve((res) => {
+          res.setHeader('content-type', 'application/json')
+          res.end(
+            JSON.stringify({ choices: [{ message: { content: 'The second one, for the RAM.' } }] })
+          )
+        })
+        const slowUrl = await serve((res) => {
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ choices: [{ message: { content: 'It depends on budget.' } }] }))
+        })
+        const failUrl = await serve((res) => {
+          res.statusCode = 429
+          res.end('rate limited')
+        })
+
+        const service = new AiComparisonService()
+        const targets = [
+          { id: 'local' as const, name: 'Stub A', local: true,
+            provider: new providers.OpenAICompatibleProvider(okUrl, '', 'stub-a') },
+          { id: 'openai' as const, name: 'Stub B', local: false,
+            provider: new providers.OpenAICompatibleProvider(slowUrl, '', 'stub-b') },
+          { id: 'google' as const, name: 'Stub C (down)', local: false,
+            provider: new providers.OpenAICompatibleProvider(failUrl, '', 'stub-c') }
+        ]
+
+        return runCompareCapture({
+          run: (question) => service.run(question, targets)
+        })
+      })
+    }
+
     if (process.env['SLASH_MISSION_PROBE']) {
       void import('./dev/spikeCapture').then(({ runMissionCapture }) =>
         runMissionCapture(window, {

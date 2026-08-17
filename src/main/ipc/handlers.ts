@@ -886,6 +886,39 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(ctx.providers.status())
   })
 
+  /** Resolves provider ids into live targets, skipping any not connected. */
+  const comparisonTargets = (ids: readonly string[]) => {
+    const status = ctx.providers.status()
+    return ids.flatMap((id) => {
+      const info = status.providers.find((candidate) => candidate.id === id)
+      const provider = info?.connected
+        ? ctx.providers.build(info.id)
+        : null
+      return info && provider
+        ? [{ id: info.id, name: info.name, local: info.local, provider }]
+        : []
+    })
+  }
+
+  ipc.handle('aiHub:comparePreview', (request) => {
+    const targets = comparisonTargets(request.providers)
+    return ok({
+      question: request.question,
+      recipients: targets.map((target) => ({
+        provider: target.id,
+        name: target.name,
+        local: target.local
+      })),
+      cloudCount: targets.filter((target) => !target.local).length
+    })
+  })
+
+  ipc.handle('aiHub:compare', async (request) => {
+    const targets = comparisonTargets(request.providers)
+    if (targets.length === 0) return err('NOT_FOUND', 'None of those providers are connected')
+    return ok(await ctx.comparison.run(request.question, targets))
+  })
+
   ipc.handle('aiHub:setDefault', (request) => {
     const error = ctx.providers.setDefault(request.provider)
     return ok({ error, status: ctx.providers.status() })
