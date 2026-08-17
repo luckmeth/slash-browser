@@ -431,6 +431,45 @@ const m012_crashes: Migration = {
   `
 }
 
+const m013_watched_pages: Migration = {
+  version: 13,
+  name: 'watched_pages',
+  sql: /* sql */ `
+    -- Pages the user asked to be told about when they change.
+    --
+    -- Only the *normalised* text of the last visit is kept, not a copy of the
+    -- page: the point is to answer "has this changed", which needs one previous
+    -- version and no history of them. Keeping every version would turn a change
+    -- watcher into an archive of everything the user ever watched.
+    CREATE TABLE watched_pages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      url             TEXT    NOT NULL UNIQUE,
+      title           TEXT    NOT NULL DEFAULT '',
+      added_at        INTEGER NOT NULL,
+      last_checked_at INTEGER,
+      -- Hash of the normalised text, so an unchanged page costs one comparison.
+      last_hash       TEXT    NOT NULL DEFAULT '',
+      -- The text itself, needed to say *what* changed rather than only that it did.
+      last_text       TEXT    NOT NULL DEFAULT ''
+    );
+
+    -- What changed, when. Excerpts are capped: this is a notification, not a
+    -- second copy of the page.
+    CREATE TABLE page_changes (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      page_id   INTEGER NOT NULL REFERENCES watched_pages (id) ON DELETE CASCADE,
+      at        INTEGER NOT NULL,
+      summary   TEXT    NOT NULL,
+      -- Up to a few hundred characters each, for a before/after view.
+      removed   TEXT    NOT NULL DEFAULT '',
+      added     TEXT    NOT NULL DEFAULT '',
+      -- Whether the user has seen it, so the badge can clear.
+      seen      INTEGER NOT NULL DEFAULT 0 CHECK (seen IN (0, 1))
+    );
+    CREATE INDEX idx_page_changes_page ON page_changes (page_id, at DESC);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -443,7 +482,8 @@ export const migrations: readonly Migration[] = [
   m009_closed_tabs,
   m010_semantic,
   m011_ai_providers,
-  m012_crashes
+  m012_crashes,
+  m013_watched_pages
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

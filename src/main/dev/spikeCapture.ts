@@ -2078,6 +2078,80 @@ export async function runUpdateCapture(probe: {
   app.quit()
 }
 
+/**
+ * Dev-only verification of page watching.
+ *
+ * Serves a page whose price and text change between visits, so the whole path is
+ * exercised against a real document: extraction, normalisation, the hash
+ * short-circuit, and the diff. The negative case matters most — revisiting an
+ * unchanged page must report nothing, or the feature is noise.
+ */
+export async function runWatchCapture(
+  window: BrowserWindowController,
+  probe: {
+    watch: (url: string, title: string) => void
+    checkPage: (url: string) => Promise<{ summary: string } | null>
+    changeCount: () => number
+    setVariant: (variant: 'a' | 'b') => void
+    url: string
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  // First visit establishes the baseline; nothing can be reported yet.
+  probe.setVariant('a')
+  window.tabs.navigate(activeId, probe.url)
+  await delay(4000)
+  probe.watch(probe.url, 'Watched fixture')
+  const baseline = await probe.checkPage(probe.url)
+  log.info(`watch probe: baseline → ${baseline ? 'reported a change' : 'no change (correct)'}`)
+  if (baseline === null) {
+    log.info('watch probe: PASS — the first visit sets a baseline rather than claiming a change')
+  } else {
+    log.error('watch probe: FAIL — claimed a change with nothing to compare against')
+  }
+
+  // Revisit the same content. Reporting here would make the feature noise.
+  window.tabs.navigate(activeId, `${probe.url}?again=1`)
+  await delay(3500)
+  const unchanged = await probe.checkPage(probe.url)
+  if (unchanged === null) {
+    log.info('watch probe: PASS — an unchanged page reports nothing')
+  } else {
+    log.error(`watch probe: FAIL — reported a change on unchanged content: ${unchanged.summary}`)
+  }
+
+  // Now change the price and some text.
+  probe.setVariant('b')
+  window.tabs.navigate(activeId, `${probe.url}?v=2`)
+  await delay(3500)
+  const changed = await probe.checkPage(probe.url)
+  log.info(`watch probe: after edit → ${changed ? changed.summary : 'nothing detected'}`)
+  if (changed && /£1,299\.00 → £1,499\.00/.test(changed.summary)) {
+    log.info('watch probe: PASS — the price movement was detected and quoted')
+  } else {
+    log.error('watch probe: FAIL — the price change was missed')
+  }
+  if (changed && /removed/.test(changed.summary)) {
+    log.info('watch probe: PASS — removed text is called out')
+  } else {
+    log.error('watch probe: FAIL — a removed passage was not reported')
+  }
+
+  log.info(`watch probe: ${probe.changeCount()} change(s) recorded in total`)
+  if (probe.changeCount() === 1) {
+    log.info('watch probe: PASS — exactly one change recorded across three visits')
+  } else {
+    log.error(`watch probe: FAIL — expected 1 recorded change, got ${probe.changeCount()}`)
+  }
+
+  app.quit()
+}
+
 /** Polls a condition until it holds or the deadline passes. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs

@@ -39,6 +39,7 @@ import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
 import { UpdateService } from './updates/UpdateService'
+import { PageWatchService } from './snapshots/PageWatchService'
 import { createLogger } from './logger'
 
 const log = createLogger('app')
@@ -91,6 +92,7 @@ export class AppContext {
   readonly guardian: DownloadGuardian
   readonly crashes: CrashReporting
   readonly updates: UpdateService
+  readonly watch: PageWatchService
   readonly ai: AiEngine
   /** The AI Hub's provider catalogue and credential store. */
   readonly providers: ProviderRegistry
@@ -160,6 +162,7 @@ export class AppContext {
     )
     this.crashes = new CrashReporting(this.db)
     this.updates = new UpdateService(() => this.settings.getAll().updateFeedUrl)
+    this.watch = new PageWatchService(this.db)
     this.ai = new AiEngine(this.settings, this.db)
     this.providers = new ProviderRegistry(this.db, this.settings)
     // Hooks are replaced in start(); until then a blocked navigation has no UI
@@ -408,6 +411,13 @@ export class AppContext {
         // The gate has always taken this flag; until now there was no private
         // window to pass `true` from.
         void this.memory.indexPage(contents, url, isPrivate)
+
+        // A watched page is compared when the user visits it, never by polling —
+        // a browser re-fetching a list of URLs on a timer makes requests nobody
+        // asked for and looks like a crawler in the site's logs.
+        void this.watch.checkPage(contents, url).then((change) => {
+          if (change) this.broadcastAll('watch:changed', { url, change })
+        })
 
         // A new document carries none of the injected cleanup CSS, so any tab
         // showing this page is no longer cleaned. Continuing to report it as

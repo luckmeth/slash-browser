@@ -168,6 +168,45 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_WATCH_PROBE']) {
+      void import('./dev/spikeCapture').then(async ({ runWatchCapture }) => {
+        const { createServer } = await import('node:http')
+        let variant: 'a' | 'b' = 'a'
+        const server = createServer((_request, response) => {
+          const price = variant === 'a' ? '1,299.00' : '1,499.00'
+          const body = [
+            '<html><body><main>',
+            '<h1>Laptop X1</h1>',
+            `<p>The price today is £${price} including delivery.</p>`,
+            variant === 'a'
+              ? '<p>Returns are accepted within thirty days of purchase.</p>'
+              : '<p>All sales are final and no returns are accepted at all.</p>',
+            '<p>This paragraph never changes between the two variants at all.</p>',
+            '</main></body></html>'
+          ].join('')
+          response.setHeader('content-type', 'text/html')
+          response.end(body)
+        })
+        const url = await new Promise<string>((resolve) => {
+          server.listen(0, '127.0.0.1', () => {
+            const address = server.address()
+            resolve(`http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}/`)
+          })
+        })
+        return runWatchCapture(window, {
+          url,
+          setVariant: (next) => {
+            variant = next
+          },
+          watch: (target, title) => context.watch.watch(target, title),
+          checkPage: (target) =>
+            context.watch.checkPage(window.tabs.activeTab?.contents ?? null, target),
+          changeCount: () =>
+            context.watch.list().reduce((total, page) => total + page.changes.length, 0)
+        })
+      })
+    }
+
     if (process.env['SLASH_UPDATE_PROBE']) {
       void import('./dev/spikeCapture').then(async ({ runUpdateCapture }) => {
         const { createServer } = await import('node:http')

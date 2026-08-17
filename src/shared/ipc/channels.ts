@@ -164,6 +164,12 @@ export const INVOKE_CHANNELS = [
   'downloadEngine:clearFinished',
   'downloadEngine:startNow',
 
+  // --- page watching ---
+  'watch:status',
+  'watch:toggle',
+  'watch:remove',
+  'watch:markSeen',
+
   // --- updates ---
   'updates:status',
   'updates:check',
@@ -230,6 +236,8 @@ export const EVENT_CHANNELS = [
   'downloadEngine:changed',
   /** A redirect chain finished and is worth the user's attention. */
   'redirects:chain',
+  /** A watched page changed since the last visit. */
+  'watch:changed',
   /** Menu accelerators that must be handled by the UI, not the main process. */
   'ui:command',
   /** Slash Shield held a popup; the chrome view offers it to the user. */

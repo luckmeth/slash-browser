@@ -760,6 +760,48 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(undefined)
   })
 
+  // --- page watching --------------------------------------------------------
+
+  const watchStatus = (window: BrowserWindowController | undefined) => {
+    const url = window?.tabs.activeTab?.snapshot.url ?? ''
+    return {
+      watching: url !== '' && ctx.watch.isWatching(url),
+      pages: ctx.watch.list(),
+      unseenCount: ctx.watch.unseenCount()
+    }
+  }
+
+  ipc.handle('watch:status', (_req, context) => ok(watchStatus(windowOf(context.sender))))
+
+  ipc.handle('watch:toggle', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.activeTab
+    if (!tab || !/^https?:\/\//i.test(tab.snapshot.url)) {
+      return err('UNSUPPORTED', 'Only web pages can be watched')
+    }
+
+    if (ctx.watch.isWatching(tab.snapshot.url)) {
+      ctx.watch.unwatch(tab.snapshot.url)
+    } else {
+      ctx.watch.watch(tab.snapshot.url, tab.snapshot.title)
+      // Capture the baseline immediately, so the very next visit can be compared
+      // rather than being spent establishing what the page looked like.
+      await ctx.watch.checkPage(tab.contents, tab.snapshot.url)
+    }
+    return ok(watchStatus(window))
+  })
+
+  ipc.handle('watch:remove', (request, context) => {
+    ctx.watch.unwatch(request.url)
+    return ok(watchStatus(windowOf(context.sender)))
+  })
+
+  ipc.handle('watch:markSeen', (_req, context) => {
+    ctx.watch.markAllSeen()
+    return ok(watchStatus(windowOf(context.sender)))
+  })
+
   // --- updates --------------------------------------------------------------
 
   ipc.handle('updates:status', () => ok(ctx.updates.current()))

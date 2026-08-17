@@ -8,6 +8,7 @@ import { GuardianPanel } from '../downloads/GuardianPanel'
 import { TabBrainPanel } from '../tabbrain/TabBrainPanel'
 import { PageInsightPanel } from '../insight/PageInsightPanel'
 import { RedirectXRayPanel } from '../shield/RedirectXRayPanel'
+import { WatchPanel } from '../watch/WatchPanel'
 import { AiHubPanel } from '../ai/AiHubPanel'
 import { DownloadsPanel } from './DownloadsPanel'
 import { SettingsPanel } from './SettingsPanel'
@@ -115,7 +116,17 @@ export function SidePanel(): React.JSX.Element | null {
             {panel === 'settings' && <SettingsPanel />}
             {panel === 'performance' && <PerformancePanel />}
             {panel === 'permissions' && <PermissionsPanel />}
-            {panel === 'timemachine' && <TimeMachinePanel />}
+            {panel === 'timemachine' && (
+              <>
+                {/* Watched pages above restore points: "has this changed" is the
+                    question people open the Time Machine for far more often than
+                    "put my session back". */}
+                <WatchPanel />
+                <div className="border-t border-[var(--color-border-subtle)]">
+                  <TimeMachinePanel />
+                </div>
+              </>
+            )}
             {panel === 'memory' && <MemoryPanel />}
             {panel === 'tabbrain' && <TabBrainPanel />}
             {panel === 'insight' && <PageInsightPanel />}

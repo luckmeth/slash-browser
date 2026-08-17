@@ -23,6 +23,7 @@ import { RedirectChainSchema } from '../types/redirectChain'
 import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
 import { CrashReportSchema } from '../types/diagnostics'
 import { UpdateStatusSchema } from '../types/updates'
+import { PageChangeSchema, WatchStatusSchema } from '../types/watch'
 import {
   BlockingStatusSchema,
   PopupBlockedSchema,
@@ -578,6 +579,13 @@ export const invokeContracts = {
    */
   'insight:analyse': { request: z.void(), response: PageInsightSchema },
 
+  /** Watched pages and their changes. */
+  'watch:status': { request: z.void(), response: WatchStatusSchema },
+  /** Starts or stops watching the active tab's page. */
+  'watch:toggle': { request: z.void(), response: WatchStatusSchema },
+  'watch:remove': { request: z.object({ url: z.string() }), response: WatchStatusSchema },
+  'watch:markSeen': { request: z.void(), response: WatchStatusSchema },
+
   /** Update state. Reports `no-channel` when no feed is configured. */
   'updates:status': { request: z.void(), response: UpdateStatusSchema },
   /**
@@ -771,6 +779,7 @@ export const eventContracts = {
   'permissions:changed': z.array(PermissionGrantSchema),
   'memory:semanticChanged': SemanticStatusSchema,
   'redirects:chain': RedirectChainSchema,
+  'watch:changed': z.object({ url: z.string(), change: PageChangeSchema }),
   'downloadEngine:changed': z.array(EngineDownloadSchema),
   'ui:command': UiCommandSchema,
   'shield:popupBlocked': PopupBlockedSchema,
