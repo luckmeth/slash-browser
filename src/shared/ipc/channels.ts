@@ -164,6 +164,15 @@ export const INVOKE_CHANNELS = [
   'downloadEngine:clearFinished',
   'downloadEngine:startNow',
 
+  // --- mission mode ---
+  'mission:status',
+  'mission:start',
+  'mission:complete',
+  'mission:discard',
+  'mission:setNotes',
+  'mission:saveForLater',
+  'mission:removeItem',
+
   // --- page watching ---
   'watch:status',
   'watch:toggle',
@@ -238,6 +247,8 @@ export const EVENT_CHANNELS = [
   'redirects:chain',
   /** A watched page changed since the last visit. */
   'watch:changed',
+  /** A page looks off-mission; the chrome offers to save it for later. */
+  'mission:suggestion',
   /** Menu accelerators that must be handled by the UI, not the main process. */
   'ui:command',
   /** Slash Shield held a popup; the chrome view offers it to the user. */

@@ -9,6 +9,7 @@ import { TabBrainPanel } from '../tabbrain/TabBrainPanel'
 import { PageInsightPanel } from '../insight/PageInsightPanel'
 import { RedirectXRayPanel } from '../shield/RedirectXRayPanel'
 import { WatchPanel } from '../watch/WatchPanel'
+import { MissionPanel } from '../missions/MissionPanel'
 import { AiHubPanel } from '../ai/AiHubPanel'
 import { DownloadsPanel } from './DownloadsPanel'
 import { SettingsPanel } from './SettingsPanel'
@@ -33,6 +34,7 @@ const TITLES = {
   tabbrain: 'Tab Brain',
   insight: 'Page Insight',
   redirects: 'Redirect X-Ray',
+  mission: 'Mission Mode',
   ai: 'Assistant'
 } as const
 
@@ -131,6 +133,7 @@ export function SidePanel(): React.JSX.Element | null {
             {panel === 'tabbrain' && <TabBrainPanel />}
             {panel === 'insight' && <PageInsightPanel />}
             {panel === 'redirects' && <RedirectXRayPanel />}
+            {panel === 'mission' && <MissionPanel />}
             {panel === 'ai' && (
               <>
                 {/* Providers first: the assistant below is unusable until one is

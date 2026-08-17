@@ -75,7 +75,10 @@ export function canonicalUrl(raw: string): string {
  * live under `/visa/`, and a path alone misses everything about pages served
  * from opaque ids.
  */
-export function tokenize(tab: Pick<Tab, 'title' | 'url'>): Set<string> {
+export function tokenize(
+  tab: Pick<Tab, 'title' | 'url'>,
+  options: { includeHost?: boolean } = {}
+): Set<string> {
   let path = ''
   let host = ''
   try {
@@ -88,7 +91,12 @@ export function tokenize(tab: Pick<Tab, 'title' | 'url'>): Set<string> {
 
   // The registrable-ish host label counts as a token so tabs from one site
   // cluster even when their titles share nothing.
-  const hostLabel = host.split('.').slice(0, -1).pop() ?? ''
+  //
+  // Callers judging *topic* rather than grouping should switch it off: being on
+  // the same website is weak evidence of being about the same thing — football
+  // and coral reefs are both on Wikipedia — and it is strong enough to swamp the
+  // title words when the comparison set is small.
+  const hostLabel = options.includeHost === false ? '' : (host.split('.').slice(0, -1).pop() ?? '')
 
   const words = `${tab.title} ${path} ${hostLabel}`
     .toLowerCase()

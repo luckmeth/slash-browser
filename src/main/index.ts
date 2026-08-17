@@ -168,6 +168,37 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_MISSION_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runMissionCapture }) =>
+        runMissionCapture(window, {
+          start: (goal) => {
+            context.missions.start(goal)
+          },
+          visit: (url, title) => context.missions.notePageVisited(url, title),
+          saveForLater: (url, title) => {
+            const mission = context.missions.active()
+            if (mission) context.missions.addItem(mission.id, url, title, 'saved')
+          },
+          active: () => {
+            const mission = context.missions.active()
+            return mission
+              ? {
+                  goal: mission.goal,
+                  pages: mission.pages.length,
+                  saved: mission.saved.length,
+                  notes: mission.notes
+                }
+              : null
+          },
+          setNotes: (notes) => {
+            const mission = context.missions.active()
+            if (mission) context.missions.setNotes(mission.id, notes)
+          },
+          complete: () => context.missions.complete()
+        })
+      )
+    }
+
     if (process.env['SLASH_WATCH_PROBE']) {
       void import('./dev/spikeCapture').then(async ({ runWatchCapture }) => {
         const { createServer } = await import('node:http')

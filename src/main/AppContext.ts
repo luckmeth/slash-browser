@@ -40,6 +40,7 @@ import { BrowserWindowController } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
 import { UpdateService } from './updates/UpdateService'
 import { PageWatchService } from './snapshots/PageWatchService'
+import { MissionService } from './missions/MissionService'
 import { createLogger } from './logger'
 
 const log = createLogger('app')
@@ -93,6 +94,15 @@ export class AppContext {
   readonly crashes: CrashReporting
   readonly updates: UpdateService
   readonly watch: PageWatchService
+  readonly missions: MissionService
+  /**
+   * Off-mission suggestion per tab, if any.
+   *
+   * Not persisted and scoped to the tab: a prompt about a page the user has since
+   * navigated away from is noise, and one that survived a restart would be
+   * baffling.
+   */
+  readonly missionSuggestions = new Map<string, string>()
   readonly ai: AiEngine
   /** The AI Hub's provider catalogue and credential store. */
   readonly providers: ProviderRegistry
@@ -163,6 +173,7 @@ export class AppContext {
     this.crashes = new CrashReporting(this.db)
     this.updates = new UpdateService(() => this.settings.getAll().updateFeedUrl)
     this.watch = new PageWatchService(this.db)
+    this.missions = new MissionService(this.db)
     this.ai = new AiEngine(this.settings, this.db)
     this.providers = new ProviderRegistry(this.db, this.settings)
     // Hooks are replaced in start(); until then a blocked navigation has no UI
@@ -411,6 +422,20 @@ export class AppContext {
         // The gate has always taken this flag; until now there was no private
         // window to pass `true` from.
         void this.memory.indexPage(contents, url, isPrivate)
+
+        // Mission Mode records the visit and may offer to save a digression. It
+        // never blocks: the suggestion is the entire intervention.
+        const suggestion = this.missions.notePageVisited(url, contents.getTitle())
+        for (const window of this.windows) {
+          const tab = window.tabs.allTabs().find((candidate) => candidate.contents === contents)
+          if (!tab) continue
+          if (suggestion) {
+            this.missionSuggestions.set(tab.id, suggestion)
+            this.broadcastAll('mission:suggestion', { url, suggestion })
+          } else {
+            this.missionSuggestions.delete(tab.id)
+          }
+        }
 
         // A watched page is compared when the user visits it, never by polling —
         // a browser re-fetching a list of URLs on a timer makes requests nobody

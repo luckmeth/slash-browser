@@ -760,6 +760,55 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(undefined)
   })
 
+  // --- mission mode ---------------------------------------------------------
+
+  const missionStatus = (window: BrowserWindowController | undefined) => ({
+    active: ctx.missions.active(),
+    past: ctx.missions.past(),
+    // The suggestion is pushed as it happens rather than recomputed here: it
+    // belongs to the moment of navigation, not to whenever the panel refreshes.
+    suggestion: window ? ctx.missionSuggestions.get(window.tabs.activeTab?.id ?? '') ?? null : null
+  })
+
+  ipc.handle('mission:status', (_req, context) => ok(missionStatus(windowOf(context.sender))))
+
+  ipc.handle('mission:start', (request, context) => {
+    ctx.missions.start(request.goal)
+    return ok(missionStatus(windowOf(context.sender)))
+  })
+
+  ipc.handle('mission:complete', (_req, context) => {
+    ctx.missions.complete()
+    return ok(missionStatus(windowOf(context.sender)))
+  })
+
+  ipc.handle('mission:discard', (request, context) => {
+    ctx.missions.discard(request.id)
+    return ok(missionStatus(windowOf(context.sender)))
+  })
+
+  ipc.handle('mission:setNotes', (request, context) => {
+    ctx.missions.setNotes(request.id, request.notes)
+    return ok(missionStatus(windowOf(context.sender)))
+  })
+
+  ipc.handle('mission:saveForLater', (_req, context) => {
+    const window = windowOf(context.sender)
+    const mission = ctx.missions.active()
+    const tab = window?.tabs.activeTab
+    if (!mission || !tab) return err('NOT_FOUND', 'No active mission or tab')
+
+    ctx.missions.addItem(mission.id, tab.snapshot.url, tab.snapshot.title, 'saved')
+    // The suggestion is answered, so it stops being offered for this tab.
+    ctx.missionSuggestions.delete(tab.id)
+    return ok(missionStatus(window))
+  })
+
+  ipc.handle('mission:removeItem', (request, context) => {
+    ctx.missions.removeItem(request.itemId)
+    return ok(missionStatus(windowOf(context.sender)))
+  })
+
   // --- page watching --------------------------------------------------------
 
   const watchStatus = (window: BrowserWindowController | undefined) => {

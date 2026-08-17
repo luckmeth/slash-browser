@@ -150,6 +150,9 @@ export function App(): React.JSX.Element {
         case 'open-redirects':
           togglePanel('redirects')
           break
+        case 'open-mission':
+          togglePanel('mission')
+          break
         case 'open-ai':
           togglePanel('ai')
           break

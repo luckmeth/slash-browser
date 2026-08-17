@@ -2152,6 +2152,100 @@ export async function runWatchCapture(
   app.quit()
 }
 
+/**
+ * Dev-only verification of Mission Mode against real pages.
+ *
+ * The property that matters is the negative one: an on-mission page must be
+ * absorbed in silence. A prompt that fires on pages the user obviously needs is
+ * one they will switch off within a day, taking the feature with it.
+ */
+export async function runMissionCapture(
+  window: BrowserWindowController,
+  probe: {
+    start: (goal: string) => void
+    visit: (url: string, title: string) => string | null
+    saveForLater: (url: string, title: string) => void
+    active: () => { goal: string; pages: number; saved: number; notes: string } | null
+    setNotes: (notes: string) => void
+    complete: () => void
+  }
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  probe.start('Finish my research paper on coral reef bleaching')
+  log.info(`mission probe: started "${probe.active()?.goal}"`)
+
+  // On-mission pages: absorbed silently.
+  const onMission = [
+    ['https://en.wikipedia.org/wiki/Coral_bleaching', 'Coral bleaching - Wikipedia'],
+    ['https://en.wikipedia.org/wiki/Coral_reef', 'Coral reef - Wikipedia']
+  ] as const
+  let interruptions = 0
+  for (const [url, title] of onMission) {
+    const suggestion = probe.visit(url, title)
+    if (suggestion) {
+      interruptions++
+      log.error(`mission probe: interrupted on a related page — ${title}`)
+    }
+  }
+  if (interruptions === 0) {
+    log.info('mission probe: PASS — related pages were absorbed without a prompt')
+  } else {
+    log.error(`mission probe: FAIL — prompted on ${interruptions} related page(s)`)
+  }
+
+  const afterRelated = probe.active()
+  log.info(`mission probe: mission holds ${afterRelated?.pages} page(s)`)
+  if ((afterRelated?.pages ?? 0) >= 2) {
+    log.info('mission probe: PASS — related pages were added to the mission')
+  } else {
+    log.error('mission probe: FAIL — related pages were not recorded')
+  }
+
+  // A clear digression: offered, never blocked.
+  const digression = probe.visit(
+    'https://en.wikipedia.org/wiki/Premier_League',
+    'Premier League - Wikipedia'
+  )
+  log.info(`mission probe: digression → ${digression ?? 'no suggestion'}`)
+  if (digression && /save it for later/.test(digression)) {
+    log.info('mission probe: PASS — an unrelated page is offered, not blocked')
+  } else {
+    log.error('mission probe: FAIL — the digression produced no offer')
+  }
+
+  // And the digression must not have been added to the mission's own pages,
+  // which would poison the context the relevance judgement depends on.
+  if (probe.active()?.pages === afterRelated?.pages) {
+    log.info('mission probe: PASS — the digression was not added to the mission')
+  } else {
+    log.error('mission probe: FAIL — an off-mission page joined the mission')
+  }
+
+  probe.saveForLater('https://en.wikipedia.org/wiki/Premier_League', 'Premier League - Wikipedia')
+  probe.setNotes('Bleaching correlates with sustained temperature anomalies.')
+  const saved = probe.active()
+  log.info(`mission probe: ${saved?.saved} saved for later, notes ${saved?.notes ? 'kept' : 'lost'}`)
+  if (saved?.saved === 1 && saved.notes !== '') {
+    log.info('mission probe: PASS — saving for later and notes both persist')
+  } else {
+    log.error('mission probe: FAIL — saved pages or notes were lost')
+  }
+
+  probe.complete()
+  if (probe.active() === null) {
+    log.info('mission probe: PASS — completing ends the mission')
+  } else {
+    log.error('mission probe: FAIL — the mission is still active after completing')
+  }
+
+  app.quit()
+}
+
 /** Polls a condition until it holds or the deadline passes. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs

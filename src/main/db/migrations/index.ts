@@ -470,6 +470,41 @@ const m013_watched_pages: Migration = {
   `
 }
 
+const m014_missions: Migration = {
+  version: 14,
+  name: 'missions',
+  sql: /* sql */ `
+    -- A goal the user is working towards, with the pages and notes that belong
+    -- to it. Distinct from a workspace: a workspace is a place to keep tabs, a
+    -- mission is a thing you are trying to finish, and one workspace may host
+    -- several missions over time.
+    CREATE TABLE missions (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal         TEXT    NOT NULL,
+      notes        TEXT    NOT NULL DEFAULT '',
+      -- Exactly one mission is active at a time; enforced in the service rather
+      -- than by a constraint, because "none active" is also valid.
+      active       INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+      created_at   INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+
+    -- Pages belonging to a mission. 'saved' is the for-later pile — the whole
+    -- point of the gentle suggestion is that a digression is kept rather than
+    -- blocked.
+    CREATE TABLE mission_items (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      mission_id INTEGER NOT NULL REFERENCES missions (id) ON DELETE CASCADE,
+      url        TEXT    NOT NULL,
+      title      TEXT    NOT NULL DEFAULT '',
+      kind       TEXT    NOT NULL CHECK (kind IN ('page', 'saved')),
+      added_at   INTEGER NOT NULL,
+      UNIQUE (mission_id, url, kind)
+    );
+    CREATE INDEX idx_mission_items ON mission_items (mission_id, added_at DESC);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -483,7 +518,8 @@ export const migrations: readonly Migration[] = [
   m010_semantic,
   m011_ai_providers,
   m012_crashes,
-  m013_watched_pages
+  m013_watched_pages,
+  m014_missions
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

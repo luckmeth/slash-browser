@@ -332,6 +332,11 @@ export function buildApplicationMenu(ctx: AppContext): void {
           click: send('open-performance')
         },
         {
+          label: 'Mission Mode…',
+          accelerator: 'CommandOrControl+Shift+M',
+          click: send('open-mission')
+        },
+        {
           label: 'Redirect X-Ray…',
           accelerator: 'CommandOrControl+Shift+X',
           click: send('open-redirects')

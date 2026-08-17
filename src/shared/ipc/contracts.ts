@@ -24,6 +24,7 @@ import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
 import { CrashReportSchema } from '../types/diagnostics'
 import { UpdateStatusSchema } from '../types/updates'
 import { PageChangeSchema, WatchStatusSchema } from '../types/watch'
+import { MissionStatusSchema } from '../types/mission'
 import {
   BlockingStatusSchema,
   PopupBlockedSchema,
@@ -579,6 +580,26 @@ export const invokeContracts = {
    */
   'insight:analyse': { request: z.void(), response: PageInsightSchema },
 
+  /** The active mission, past missions, and any suggestion for this page. */
+  'mission:status': { request: z.void(), response: MissionStatusSchema },
+  /** Starts a mission, ending any other. Exactly one is active at a time. */
+  'mission:start': {
+    request: z.object({ goal: z.string().min(1).max(200) }),
+    response: MissionStatusSchema
+  },
+  'mission:complete': { request: z.void(), response: MissionStatusSchema },
+  'mission:discard': { request: z.object({ id: z.number().int() }), response: MissionStatusSchema },
+  'mission:setNotes': {
+    request: z.object({ id: z.number().int(), notes: z.string().max(20000) }),
+    response: MissionStatusSchema
+  },
+  /** Puts the current page in the for-later pile rather than blocking it. */
+  'mission:saveForLater': { request: z.void(), response: MissionStatusSchema },
+  'mission:removeItem': {
+    request: z.object({ itemId: z.number().int() }),
+    response: MissionStatusSchema
+  },
+
   /** Watched pages and their changes. */
   'watch:status': { request: z.void(), response: WatchStatusSchema },
   /** Starts or stops watching the active tab's page. */
@@ -758,6 +779,7 @@ export const UiCommandSchema = z.object({
     'open-tabbrain',
     'open-insight',
     'open-redirects',
+    'open-mission',
     'open-ai',
     'bookmark-current-tab',
     'close-panel'
@@ -780,6 +802,7 @@ export const eventContracts = {
   'memory:semanticChanged': SemanticStatusSchema,
   'redirects:chain': RedirectChainSchema,
   'watch:changed': z.object({ url: z.string(), change: PageChangeSchema }),
+  'mission:suggestion': z.object({ url: z.string(), suggestion: z.string() }),
   'downloadEngine:changed': z.array(EngineDownloadSchema),
   'ui:command': UiCommandSchema,
   'shield:popupBlocked': PopupBlockedSchema,

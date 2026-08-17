@@ -17,6 +17,7 @@ export type PanelId =
   | 'tabbrain'
   | 'insight'
   | 'redirects'
+  | 'mission'
   | 'ai'
 
 interface BrowserState {
