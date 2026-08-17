@@ -259,6 +259,12 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(state)
   })
 
+  ipc.handle('overlay:getState', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window is associated with this view')
+    return ok(window.overlay.getState())
+  })
+
   ipc.handle('layout:setRightPanelWidth', (request, context) => {
     windowOf(context.sender)?.setRightPanelWidth(request.width)
     return ok(undefined)

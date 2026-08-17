@@ -169,6 +169,13 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const shieldPanelPath = process.env['SLASH_SHIELD_PANEL_CAPTURE']
+    if (shieldPanelPath) {
+      void import('./dev/spikeCapture').then(({ runShieldPanelCapture }) =>
+        runShieldPanelCapture(window, shieldPanelPath)
+      )
+    }
+
     const youtubeAdPath = process.env['SLASH_YOUTUBE_AD_CAPTURE']
     if (youtubeAdPath) {
       void import('./dev/spikeCapture').then(({ runYouTubeAdCapture }) =>

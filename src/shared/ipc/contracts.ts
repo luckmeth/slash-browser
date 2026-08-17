@@ -110,7 +110,8 @@ export const OverlayStateSchema = z.object({
     'dialog',
     'permission-prompt',
     'tab-search',
-    'reader'
+    'reader',
+    'shield'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
@@ -159,6 +160,17 @@ export const invokeContracts = {
   'omnibox:dismiss': { request: z.void(), response: z.void() },
 
   'overlay:setState': { request: OverlayStateSchema, response: OverlayStateSchema },
+  /**
+   * What the overlay is currently showing, from the controller's own record.
+   *
+   * Exists for the mount race: the surface that caused the overlay document to
+   * load was announced on `overlay:stateChanged` before the document could
+   * listen. Asking per-feature ("is a permission pending? is the omnibox
+   * open?") only ever covered the surfaces someone remembered to ask about —
+   * the first-ever surface of any other kind mounted to nothing and left an
+   * invisible modal overlay swallowing input.
+   */
+  'overlay:getState': { request: z.void(), response: OverlayStateSchema },
 
   /**
    * Reserves a strip on the right for a side panel, shrinking the page view.

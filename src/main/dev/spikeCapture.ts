@@ -2375,6 +2375,54 @@ export async function runYouTubeAdCapture(
     log.error('youtube ad probe: FAIL — the strip damaged the player response')
   }
 
+  // 2b. The fetch path. YouTube's own navigation — home to video, video to next
+  //     video — reads the player response with Response.json(), which never
+  //     calls JSON.parse. This was the hole when "ads still play" was reported:
+  //     only a directly-navigated watch page was being stripped. Constructing a
+  //     Response in the page exercises the hook without any network.
+  const viaFetch = (await contents.executeJavaScript(
+    `Promise.all([
+        new Response(JSON.stringify({
+          videoDetails: { videoId: 'probe2' },
+          adPlacements: [{ x: 1 }],
+          playerAds: [{ y: 2 }],
+          adSlots: [{ z: 3 }]
+        })).json(),
+        new Response('{"unrelated":true}').json()
+      ]).then(([after, plain]) => ({
+        adPlacements: after.adPlacements === undefined,
+        playerAds: after.playerAds === undefined,
+        adSlots: after.adSlots === undefined,
+        keptVideoDetails: after.videoDetails && after.videoDetails.videoId === 'probe2',
+        ordinaryJsonUntouched: plain.unrelated === true
+      }))`,
+    true
+  )) as Record<string, boolean>
+  log.info(`youtube ad probe: fetch-path strip ${JSON.stringify(viaFetch)}`)
+  if (viaFetch.adPlacements && viaFetch.playerAds && viaFetch.adSlots && viaFetch.keptVideoDetails) {
+    log.info('youtube ad probe: PASS — Response.json() strips the SPA player response')
+  } else {
+    log.error('youtube ad probe: FAIL — a fetched player response keeps its ad breaks')
+  }
+  if (viaFetch.ordinaryJsonUntouched) {
+    log.info('youtube ad probe: PASS — unrelated fetched JSON passes through untouched')
+  } else {
+    log.error('youtube ad probe: FAIL — the fetch hook touched unrelated JSON')
+  }
+
+  // 2c. The text path, for completeness: XHR bodies are strings the page parses
+  //     itself, so they go through JSON.parse.
+  const viaParse = (await contents.executeJavaScript(
+    `JSON.parse('{"streamingData":{},"adPlacements":[1]}').adPlacements === undefined
+       && JSON.parse('{"a":1}').a === 1`,
+    true
+  )) as boolean
+  if (viaParse) {
+    log.info('youtube ad probe: PASS — JSON.parse strips player responses and nothing else')
+  } else {
+    log.error('youtube ad probe: FAIL — the JSON.parse path is wrong')
+  }
+
   // 3. And the page must still be a working YouTube page, not a broken one.
   const playable = (await contents.executeJavaScript(
     `!!document.querySelector('video') && document.title.length > 0`,
@@ -2564,6 +2612,78 @@ export async function runPrivateCapture(
  * that stops at the repository, so it is verified here by changing a setting and
  * reading the accent colour back off the live document.
  */
+/**
+ * Opens the shield panel over a real page and captures the window.
+ *
+ * Exists because the panel shipped clipped: it rendered in the chrome document,
+ * and the native page view composited above it, so everything overlapping the
+ * page was invisible. The capture proves the overlay version actually paints
+ * over page content — something no unit test can see.
+ *
+ * Goes through `overlay:setState` from the chrome view, the same call the
+ * shield button makes, so the first-ever-surface mount race is exercised too.
+ */
+export async function runShieldPanelCapture(
+  window: BrowserWindowController,
+  outputPath: string
+): Promise<void> {
+  await waitForActiveTab(window)
+  const activeId = window.tabs.activeTab?.id
+  const chrome = window.privilegedContents()[0]
+  if (!activeId || !chrome) {
+    log.error('shield panel probe: no tab or chrome view')
+    app.quit()
+    return
+  }
+
+  // A real page with edge-to-edge content, so a clipped panel would be obvious.
+  window.tabs.navigate(activeId, 'https://en.wikipedia.org/wiki/Web_browser')
+  await delay(8000)
+
+  await chrome.executeJavaScript(
+    `window.browser.invoke('overlay:setState', { visible: true, surface: 'shield' })`
+  )
+  // The overlay document may be loading for the first time; the panel then has
+  // to ask which tab is active and fetch its blocking status.
+  await delay(4000)
+
+  const overlayContents = window.overlay.webContents
+  const panelState = overlayContents
+    ? ((await overlayContents.executeJavaScript(
+        `(() => {
+           const text = document.body.innerText;
+           return {
+             mounted: text.includes('blocked on this page') || text.includes('Blocking is off'),
+             hasStrict: text.includes('Strict mode'),
+             hasHonesty: text.includes('not a virus scanner') || text.includes('virus scanner')
+           };
+         })()`
+      )) as { mounted: boolean; hasStrict: boolean; hasHonesty: boolean })
+    : { mounted: false, hasStrict: false, hasHonesty: false }
+
+  log.info(`shield panel probe: ${JSON.stringify(panelState)}`)
+  if (panelState.mounted && panelState.hasStrict) {
+    log.info('shield panel probe: PASS — the panel mounted in the overlay over a live page')
+  } else {
+    log.error('shield panel probe: FAIL — the overlay did not show the shield panel')
+  }
+
+  await captureWindowTo(window, outputPath)
+
+  // And it must come down cleanly — a stuck modal overlay eats every click.
+  await chrome.executeJavaScript(
+    `window.browser.invoke('overlay:setState', { visible: false, surface: 'none' })`
+  )
+  await delay(600)
+  const downState = window.overlay.getState()
+  if (!downState.visible) {
+    log.info('shield panel probe: PASS — the overlay dismissed')
+  } else {
+    log.error('shield panel probe: FAIL — the overlay is stuck visible')
+  }
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

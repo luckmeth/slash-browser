@@ -55,8 +55,10 @@ export function buildYouTubeAdScript(): string {
     //
     // Intercepted with an accessor rather than edited afterwards: the player
     // reads this the moment the document parses, so anything that runs later has
-    // already lost the race.
-    var stored;
+    // already lost the race. If the page somehow got there first, the existing
+    // value is stripped rather than discarded — an accessor that swallows an
+    // already-set response would break playback outright.
+    var stored = strip(window.ytInitialPlayerResponse);
     Object.defineProperty(window, 'ytInitialPlayerResponse', {
       configurable: true,
       get: function () {
@@ -67,16 +69,30 @@ export function buildYouTubeAdScript(): string {
       }
     });
 
-    // 2. Responses fetched afterwards.
+    // 2. Responses the page parses from text itself.
     //
-    // YouTube is a single-page app: moving to the next video fetches a fresh
-    // player response over the network rather than reloading the document, so
-    // without this the fix would work once and then stop.
+    // Covers XMLHttpRequest and any code path that reads a body as text and
+    // parses it — the string always goes through JSON.parse.
     var originalParse = JSON.parse;
     JSON.parse = function () {
       var result = originalParse.apply(this, arguments);
       return strip(result);
     };
+
+    // 3. Responses fetched and read with Response.json().
+    //
+    // fetch() never calls JSON.parse — json() decodes internally — and this is
+    // exactly how YouTube's own navigation loads the next player response:
+    // home to video, video to next video, search result to video. Without this
+    // hook the strip works only on a watch page navigated to directly, which
+    // is the least common way to reach one. Same conditional strip, so every
+    // other json() call on the page passes through untouched.
+    if (typeof Response !== 'undefined' && Response.prototype && Response.prototype.json) {
+      var originalJson = Response.prototype.json;
+      Response.prototype.json = function () {
+        return originalJson.apply(this, arguments).then(strip);
+      };
+    }
   } catch (error) {
     // A failure here must leave YouTube working normally. Ads are the cost of
     // that, and a broken player is a far worse outcome.

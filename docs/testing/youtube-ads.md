@@ -47,13 +47,35 @@ there are roughly 190 of these.
 ## UPDATE — the pre-roll is now removed, by the mechanism described below
 
 The decision left open below was taken: `YouTubeAdFilter` injects one script into YouTube's own
-JavaScript context and deletes the ad-break fields. Verified with `SLASH_YOUTUBE_AD_CAPTURE`:
+JavaScript context and deletes the ad-break fields.
+
+### UPDATE 2 — the SPA hole: "ads still play"
+
+The first version worked and was still wrong. It hooked `ytInitialPlayerResponse` (the response
+embedded in a watch page's HTML) and `JSON.parse` (text a page parses itself). But YouTube is a
+single-page app, and its own navigation — home → video, search → video, video → next video —
+fetches the next player response and reads it with **`Response.json()`, which never calls
+`JSON.parse`**; it decodes internally. So the strip fired only on a watch page navigated to
+*directly*, by pasted link — the least common way to reach one — and a user browsing YouTube
+normally kept seeing every ad. Reported as "still youtube ads are playing", and that report was
+correct.
+
+The fix hooks `Response.prototype.json` with the same conditional strip (only objects carrying
+`streamingData`/`videoDetails`/`adPlacements` are touched). It also seeds the accessor with any
+value the page managed to set first, so losing the injection race degrades to "strip late" rather
+than "discard the response and break playback".
+
+Verified with `SLASH_YOUTUBE_AD_CAPTURE` against a real watch page:
 
 ```
 youtube ad probe: PASS — the script ran before the page in its own context
 youtube ad probe: strip result {"adPlacements":true,"playerAds":true,"adSlots":true,"keptVideoDetails":true}
 youtube ad probe: PASS — ad break fields are removed from the player response
 youtube ad probe: PASS — the rest of the player response is untouched
+youtube ad probe: fetch-path strip {"adPlacements":true,"playerAds":true,"adSlots":true,"keptVideoDetails":true,"ordinaryJsonUntouched":true}
+youtube ad probe: PASS — Response.json() strips the SPA player response
+youtube ad probe: PASS — unrelated fetched JSON passes through untouched
+youtube ad probe: PASS — JSON.parse strips player responses and nothing else
 youtube ad probe: PASS — the player is still present and the page loaded
 youtube ad probe: PASS — the script is inert on other sites
 ```

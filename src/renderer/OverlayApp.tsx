@@ -5,6 +5,7 @@ import { SpikeReport } from './features/diagnostics/SpikeReport'
 import { PermissionPrompt } from './features/permissions/PermissionPrompt'
 import { TabSearch } from './features/tabsearch/TabSearch'
 import { Reader } from './features/reader/Reader'
+import { ShieldPanel } from './features/shield/ShieldPanel'
 
 /**
  * Root of the overlay document.
@@ -22,18 +23,15 @@ export function OverlayApp(): React.JSX.Element | null {
   const [surface, setSurface] = useState<OverlayState['surface']>('none')
 
   useEffect(() => {
-    // Same race as the suggestion state: the surface that caused this document
-    // to load was announced before it could listen, so ask what is current.
-    // Permissions are checked first — a prompt outranks a dropdown.
-    void (async () => {
-      const pending = await window.browser.invoke('permissions:getPending', undefined)
-      if (pending.ok && pending.value) {
-        setSurface('permission-prompt')
-        return
-      }
-      const omnibox = await window.browser.invoke('omnibox:getState', undefined)
-      if (omnibox.ok && omnibox.value) setSurface('command-bar')
-    })()
+    // The surface that caused this document to load was announced before it
+    // could listen, so ask the controller what is current. This used to infer
+    // the surface from per-feature state (pending permission, omnibox open),
+    // which silently covered only those two surfaces — the first-ever showing
+    // of any other kind mounted to nothing, leaving an invisible modal overlay
+    // that swallowed every click.
+    void window.browser.invoke('overlay:getState', undefined).then((result) => {
+      if (result.ok && result.value.visible) setSurface(result.value.surface)
+    })
     return window.browser.on('overlay:stateChanged', (state) => setSurface(state.surface))
   }, [])
 
@@ -46,6 +44,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <TabSearch />
     case 'reader':
       return <Reader />
+    case 'shield':
+      return <ShieldPanel />
     case 'spike':
       return <SpikeReport />
     case 'none':
