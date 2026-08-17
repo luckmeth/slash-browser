@@ -89,6 +89,21 @@ export const SettingsSchema = z.object({
    * file for malware, and the UI must not imply that it does.
    */
   blockMaliciousSites: z.boolean().default(true),
+  /**
+   * Remove YouTube's video ad breaks.
+   *
+   * Separate from `blockAds` because it works by a different and more invasive
+   * mechanism. YouTube's ad breaks are not network requests — they arrive as a
+   * field inside the watch page itself — so the only way to remove them is to run
+   * a script in the page's own JavaScript context before its scripts read that
+   * field. Every other blocking feature here cancels requests and never touches
+   * page context.
+   *
+   * Scoped to YouTube, deletes three named fields, and switchable off. It does
+   * not affect sponsor segments the creator reads out, which are part of the
+   * video itself.
+   */
+  blockYouTubeVideoAds: z.boolean().default(true),
   /** Sites the user has turned blocking off for. */
   blockingAllowedSites: z.array(z.string()).default([]),
   /**

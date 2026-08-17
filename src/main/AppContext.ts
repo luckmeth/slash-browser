@@ -36,6 +36,7 @@ import { ContentBlocker } from './shield/NetworkPolicy'
 import { PopupGuard } from './shield/PopupGuard'
 import { RedirectGuard } from './shield/RedirectGuard'
 import { GestureTracker } from './shield/GestureTracker'
+import { YouTubeAdFilter } from './shield/YouTubeAdFilter'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
@@ -111,6 +112,13 @@ export class AppContext {
   readonly blocker: ContentBlocker
   readonly popups: PopupGuard
   readonly redirects: RedirectGuard
+  /**
+   * Removes YouTube's video ad breaks.
+   *
+   * The one feature that runs code in a page's own context. Gated on both
+   * `blockAds` and its own setting, so turning blocking off turns this off too.
+   */
+  readonly youtube: YouTubeAdFilter
   private readonly gestures = new GestureTracker()
   /**
    * Tabs with "Stay on This Site" turned on.
@@ -199,6 +207,9 @@ export class AppContext {
       { onNavigationBlocked: () => {}, onNavigationWarned: () => {} },
       this.gestures,
       (host) => this.blocker.engine.isKnownAdHost(host)
+    )
+    this.youtube = new YouTubeAdFilter(
+      () => this.settings.getAll().blockAds && this.settings.getAll().blockYouTubeVideoAds
     )
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.closedTabs = new ClosedTabRepository(this.db)
@@ -455,6 +466,7 @@ export class AppContext {
         }
       },
       enqueueDownload: (url) => this.downloadEngine.enqueue(url),
+      observeYouTube: (contents) => this.youtube.observe(contents),
       isKnownAdHost: (host) => this.blocker.engine.isKnownAdHost(host),
       onRedirectChain: (chain) => {
         // Only chains worth attention are pushed. Broadcasting every http→https

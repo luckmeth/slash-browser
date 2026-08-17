@@ -1,3 +1,4 @@
+import type { ServerResponse } from 'node:http'
 import { app, BrowserWindow } from 'electron'
 import { AppContext } from './AppContext'
 import { parseQuery as parseQueryForDev } from './memory/parseQuery'
@@ -168,6 +169,13 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const youtubeAdPath = process.env['SLASH_YOUTUBE_AD_CAPTURE']
+    if (youtubeAdPath) {
+      void import('./dev/spikeCapture').then(({ runYouTubeAdCapture }) =>
+        runYouTubeAdCapture(window, youtubeAdPath)
+      )
+    }
+
     if (process.env['SLASH_COMPARE_PROBE']) {
       void Promise.all([
         import('./dev/spikeCapture'),
@@ -178,7 +186,7 @@ if (!app.requestSingleInstanceLock()) {
         // Two OpenAI-compatible stubs: one answers, one refuses. Real answers
         // would need live credentials for three companies; what is provable here
         // is the fan-out and the isolation.
-        const serve = (handler: (res: import('node:http').ServerResponse) => void) =>
+        const serve = (handler: (res: ServerResponse) => void) =>
           new Promise<string>((resolve) => {
             const server = http.createServer((_req, res) => handler(res))
             server.listen(0, '127.0.0.1', () => {

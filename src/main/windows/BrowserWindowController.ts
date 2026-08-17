@@ -49,6 +49,8 @@ export interface WindowDeps {
   onBookmarkRequested: (url: string, title: string) => void
   /** Hands a link to the segmented download engine, from the link context menu. */
   enqueueDownload?: (url: string) => void
+  /** Installs the YouTube ad-break filter on a new page view. */
+  observeYouTube?: (contents: WebContents) => void
   /** Shield's known ad/tracking host list, for classifying redirect chains. */
   isKnownAdHost?: (host: string) => boolean
   /** A redirect chain finished and is worth reporting to the user. */
@@ -234,7 +236,10 @@ export class BrowserWindowController {
           if (!this.deps.settings.getAll().recordHistory) return
           this.deps.history.updateMetadata(url, title, faviconUrl)
         },
-        observeRedirects: (tabId, contents) => this.redirectRecorder.attachToTab(tabId, contents),
+        observeRedirects: (tabId, contents) => {
+          this.redirectRecorder.attachToTab(tabId, contents)
+          this.deps.observeYouTube?.(contents)
+        },
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),

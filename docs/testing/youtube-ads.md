@@ -44,10 +44,30 @@ A rule host may end in `.*` to cover every country domain: `google.*` matches go
 and google.co.uk. The probe caught `google.lk` slipping past a rule written for `google.com`, and
 there are roughly 190 of these.
 
-## What this does NOT fix — the pre-roll
+## UPDATE — the pre-roll is now removed, by the mechanism described below
 
-**Slash still cannot remove the video ad that plays before your video.** Blocking more endpoints will
-not change that, and any claim otherwise would be wrong.
+The decision left open below was taken: `YouTubeAdFilter` injects one script into YouTube's own
+JavaScript context and deletes the ad-break fields. Verified with `SLASH_YOUTUBE_AD_CAPTURE`:
+
+```
+youtube ad probe: PASS — the script ran before the page in its own context
+youtube ad probe: strip result {"adPlacements":true,"playerAds":true,"adSlots":true,"keptVideoDetails":true}
+youtube ad probe: PASS — ad break fields are removed from the player response
+youtube ad probe: PASS — the rest of the player response is untouched
+youtube ad probe: PASS — the player is still present and the page loaded
+youtube ad probe: PASS — the script is inert on other sites
+```
+
+**What it still does not do:** sponsor segments the creator reads out are part of the video and are
+untouched. If YouTube moves to stitching ads into the video stream server-side, this stops working
+and no client-side approach replaces it.
+
+The analysis below stands as the record of why network filtering could never have done this.
+
+## What network filtering cannot fix — the pre-roll
+
+**Request blocking alone cannot remove the video ad that plays before your video.** Blocking more
+endpoints will not change that, and any claim otherwise would be wrong.
 
 Two things make it unreachable by network filtering:
 

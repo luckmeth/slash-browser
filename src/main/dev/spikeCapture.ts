@@ -2300,6 +2300,111 @@ export async function runCompareCapture(probe: {
   app.quit()
 }
 
+/**
+ * Dev-only verification of the YouTube ad-break filter.
+ *
+ * Two things are checked, because either alone would be misleading. The
+ * mechanism is tested deterministically — a synthetic player response must come
+ * back stripped — and then a real watch page is loaded to confirm the script is
+ * installed and the player still works. Ad-break presence on a live video
+ * depends on whether that video is monetised, which is not ours to control, so
+ * the mechanism test is the one that can actually fail.
+ */
+export async function runYouTubeAdCapture(
+  window: BrowserWindowController,
+  outputPath: string
+): Promise<void> {
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  window.tabs.navigate(activeId, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ')
+  await delay(12000)
+
+  const contents = window.tabs.activeTab?.contents
+  if (!contents) {
+    log.error('youtube ad probe: FAIL — no page to inspect')
+    app.quit()
+    return
+  }
+
+  // 1. Is the accessor in place at all? Without it nothing else can work.
+  const installed = (await contents.executeJavaScript(
+    `!!Object.getOwnPropertyDescriptor(window, 'ytInitialPlayerResponse')?.set`,
+    true
+  )) as boolean
+  log.info(`youtube ad probe: interceptor installed = ${installed}`)
+  if (installed) {
+    log.info('youtube ad probe: PASS — the script ran before the page in its own context')
+  } else {
+    log.error('youtube ad probe: FAIL — the script did not reach the page context')
+  }
+
+  // 2. The mechanism itself: a response carrying ad breaks must come back without
+  //    them. Deterministic, unlike whether a given video is monetised.
+  const stripped = (await contents.executeJavaScript(
+    `(() => {
+       window.ytInitialPlayerResponse = {
+         videoDetails: { videoId: 'probe' },
+         adPlacements: [{ x: 1 }],
+         playerAds: [{ y: 2 }],
+         adSlots: [{ z: 3 }]
+       };
+       const after = window.ytInitialPlayerResponse;
+       return {
+         adPlacements: after.adPlacements === undefined,
+         playerAds: after.playerAds === undefined,
+         adSlots: after.adSlots === undefined,
+         keptVideoDetails: after.videoDetails?.videoId === 'probe'
+       };
+     })()`,
+    true
+  )) as Record<string, boolean>
+  log.info(`youtube ad probe: strip result ${JSON.stringify(stripped)}`)
+
+  if (stripped.adPlacements && stripped.playerAds && stripped.adSlots) {
+    log.info('youtube ad probe: PASS — ad break fields are removed from the player response')
+  } else {
+    log.error('youtube ad probe: FAIL — ad break fields survived')
+  }
+  if (stripped.keptVideoDetails) {
+    log.info('youtube ad probe: PASS — the rest of the player response is untouched')
+  } else {
+    log.error('youtube ad probe: FAIL — the strip damaged the player response')
+  }
+
+  // 3. And the page must still be a working YouTube page, not a broken one.
+  const playable = (await contents.executeJavaScript(
+    `!!document.querySelector('video') && document.title.length > 0`,
+    true
+  )) as boolean
+  if (playable) {
+    log.info('youtube ad probe: PASS — the player is still present and the page loaded')
+  } else {
+    log.error('youtube ad probe: FAIL — YouTube did not load properly with the filter on')
+  }
+
+  // 4. Off YouTube the script must do nothing at all.
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(4000)
+  const elsewhere = (await (window.tabs.activeTab?.contents?.executeJavaScript(
+    `!!Object.getOwnPropertyDescriptor(window, 'ytInitialPlayerResponse')?.set`,
+    true
+  ) ?? Promise.resolve(false))) as boolean
+  if (!elsewhere) {
+    log.info('youtube ad probe: PASS — the script is inert on other sites')
+  } else {
+    log.error('youtube ad probe: FAIL — the interceptor is active off YouTube')
+  }
+
+  window.tabs.navigate(activeId, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ')
+  await delay(9000)
+  await captureWindowTo(window, outputPath)
+  app.quit()
+}
+
 /** Polls a condition until it holds or the deadline passes. */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
