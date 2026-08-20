@@ -29,7 +29,8 @@ import { MissionStatusSchema } from '../types/mission'
 import {
   BlockingStatusSchema,
   PopupBlockedSchema,
-  NavigationNoticeSchema
+  NavigationNoticeSchema,
+  ShieldCountsSchema
 } from '../types/blocking'
 import {
   ActionPlanSchema,
@@ -233,6 +234,23 @@ export const invokeContracts = {
     response: TabsSnapshotSchema
   },
   'tabs:swapSplit': { request: z.void(), response: TabsSnapshotSchema },
+  /**
+   * Recently closed tabs, most recent first.
+   *
+   * Reads the persisted stack rather than the in-memory one, so it survives a
+   * restart — which is when "I closed something I needed" most often bites.
+   */
+  'tabs:recentlyClosed': {
+    request: z.void(),
+    response: z.array(
+      z.object({
+        url: z.string(),
+        title: z.string(),
+        faviconUrl: z.string().nullable(),
+        closedAt: z.number()
+      })
+    )
+  },
   'tabs:activate': { request: TabIdSchema, response: TabsSnapshotSchema },
   'tabs:reorder': {
     request: z.object({ tabId: z.string(), toIndex: z.number().int().min(0) }),
@@ -498,6 +516,14 @@ export const invokeContracts = {
     request: z.object({ tabId: z.string() }),
     response: BlockingStatusSchema
   },
+  /**
+   * Everything Slash Shield blocked since startup, across every tab.
+   *
+   * Separate from `blocking:status`, which needs a tab id — the new tab page is
+   * an internal page with no page view, so it has no tab whose status to ask
+   * for, and the figure it wants is the window's rather than one page's.
+   */
+  'blocking:sessionTotals': { request: z.void(), response: ShieldCountsSchema },
   'blocking:setSiteAllowed': {
     request: z.object({ host: z.string(), allowed: z.boolean(), tabId: z.string() }),
     response: BlockingStatusSchema

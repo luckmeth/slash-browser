@@ -6,6 +6,7 @@ import { useBrowserStore } from '../../stores/browserStore'
 import { BrandMark } from '../../components/BrandMark'
 import { Icon } from '../../components/Icon'
 import { SlashSummary } from './SlashSummary'
+import { RecentlyClosed } from './RecentlyClosed'
 
 /**
  * The start page.
@@ -89,6 +90,8 @@ export function NewTabPage(): React.JSX.Element {
         </button>
 
         <SlashSummary />
+
+        <RecentlyClosed />
 
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">

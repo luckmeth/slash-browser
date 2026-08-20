@@ -30,6 +30,16 @@ interface TabActivity {
 export class ActivityLog {
   private readonly byTab = new Map<number, TabActivity>()
   private sequence = 0
+  /**
+   * Everything blocked since the browser started, across every tab.
+   *
+   * A separate counter rather than a sum over `byTab`, because per-tab records
+   * are dropped when a tab goes and a running total that falls when you close a
+   * tab is not a total. It is deliberately session-scoped and labelled as such
+   * in the UI — an all-time figure would mean storing it, and no counter is
+   * worth a migration.
+   */
+  private session: ShieldCounts = { ...EMPTY_COUNTS }
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -46,6 +56,7 @@ export class ActivityLog {
     }
 
     activity.counts = bump(activity.counts, category)
+    this.session = bump(this.session, category)
     this.sequence += 1
     activity.entries.push({
       id: `sa-${this.sequence}`,
@@ -60,6 +71,11 @@ export class ActivityLog {
     }
 
     this.byTab.set(webContentsId, activity)
+  }
+
+  /** Blocked since startup, across every tab this window has had. */
+  sessionCounts(): ShieldCounts {
+    return { ...this.session }
   }
 
   countsFor(webContentsId: number): ShieldCounts {
@@ -82,9 +98,16 @@ export class ActivityLog {
     return this.byTab.delete(webContentsId)
   }
 
-  /** On tab close, and for the user's "clear protection history" action. */
+  /**
+   * On tab close, and for the user's "clear protection history" action.
+   *
+   * Resets the session total too. Clearing is a privacy action, and a figure
+   * that survived it would be a record of browsing the user just asked to
+   * forget.
+   */
   clearAll(): void {
     this.byTab.clear()
+    this.session = { ...EMPTY_COUNTS }
   }
 }
 

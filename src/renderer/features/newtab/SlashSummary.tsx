@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { PerformanceSnapshot } from '@shared/types/performance'
+import type { ShieldCounts } from '@shared/types/blocking'
 import type { Snapshot } from '@shared/types/snapshot'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
@@ -21,6 +22,7 @@ import { Icon } from '../../components/Icon'
 export function SlashSummary(): React.JSX.Element | null {
   const [performance, setPerformance] = useState<PerformanceSnapshot | null>(null)
   const [restorePoints, setRestorePoints] = useState<Snapshot[]>([])
+  const [blocked, setBlocked] = useState<ShieldCounts | null>(null)
   const workspaces = useBrowserStore((s) => s.workspaces)
   const activeWorkspaceId = useBrowserStore((s) => s.activeWorkspaceId)
   const tabs = useBrowserStore((s) => s.tabs)
@@ -36,12 +38,29 @@ export function SlashSummary(): React.JSX.Element | null {
     })
   }, [])
 
+  // Polled rather than pushed: the figure climbs constantly while pages load,
+  // and an event per blocked request would be thousands of IPC messages to
+  // animate a number nobody is watching that closely.
+  useEffect(() => {
+    const load = (): void => {
+      void window.browser.invoke('blocking:sessionTotals', undefined).then((result) => {
+        if (result.ok) setBlocked(result.value)
+      })
+    }
+    load()
+    const timer = setInterval(load, 4000)
+    return () => clearInterval(timer)
+  }, [])
+
   const asleep = performance?.tabs.filter((tab) => tab.state === 'HIBERNATED').length ?? 0
   const savedBytes = performance?.totalMeasuredSavingsBytes ?? 0
+  const blockedTotal = blocked
+    ? blocked.ads + blocked.trackers + blocked.popups + blocked.redirects
+    : 0
 
   return (
     <section className="animate-rise mt-10 w-full">
-      <div className="grid gap-2.5 sm:grid-cols-3">
+      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-4">
         {/*
           Tab sleeping. The one thing here that Chrome and Brave do not do, and
           the figure is measured — the working set read immediately before each
@@ -68,6 +87,22 @@ export function SlashSummary(): React.JSX.Element | null {
           detail={`${tabs.length} tab${tabs.length === 1 ? '' : 's'} in ${
             workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'this workspace'
           }`}
+        />
+
+        {/*
+          Blocked requests. Scoped to this session and labelled so — an all-time
+          figure would mean storing a running count of what the user browsed,
+          which is not a trade worth making for a statistic.
+        */}
+        <Card
+          icon="shield"
+          label="Blocked"
+          value={blockedTotal > 0 ? blockedTotal.toLocaleString() : '—'}
+          detail={
+            blockedTotal > 0
+              ? `${blocked?.trackers.toLocaleString() ?? 0} trackers, this session`
+              : 'Ads and trackers, before they load'
+          }
         />
 
         <Card

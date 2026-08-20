@@ -29,6 +29,8 @@ export const ShieldCountsSchema = z.object({
   redirects: z.number().int()
 })
 
+export type ShieldCounts = z.infer<typeof ShieldCountsSchema>
+
 export const BlockingStatusSchema = z.object({
   /** Requests cancelled on this page since it loaded. */
   blockedOnPage: z.number().int(),

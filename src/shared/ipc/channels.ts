@@ -43,6 +43,7 @@ export const INVOKE_CHANNELS = [
   'tabs:setSplitFraction',
   'tabs:setSplitOrientation',
   'tabs:swapSplit',
+  'tabs:recentlyClosed',
   'tabs:activate',
   'tabs:reorder',
   'tabs:setPinned',
@@ -122,6 +123,7 @@ export const INVOKE_CHANNELS = [
   // --- content blocking ---
   'blocking:status',
   'blocking:setSiteAllowed',
+  'blocking:sessionTotals',
   'shield:releasePopup',
   'shield:allowPopupsHere',
   'shield:setSiteLock',
