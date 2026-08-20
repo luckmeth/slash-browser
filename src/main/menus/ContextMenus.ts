@@ -211,6 +211,26 @@ export function showTabContextMenu(tabId: string, deps: ContextMenuDeps): void {
       click: () => deps.tabs.setProtected(tabId, !snap.isProtected)
     },
     separator,
+    // The specific-partner route into split view: you are already pointing at
+    // the tab you want beside the current one. Disabled rather than hidden when
+    // the window is too narrow, so the feature does not appear to come and go.
+    ...(tabId === deps.tabs.splitId
+      ? [
+          {
+            label: 'Remove from split view',
+            click: () => deps.tabs.setSplit(null)
+          }
+        ]
+      : tabId === deps.tabs.activeId
+        ? []
+        : [
+            {
+              label: 'Split view with this tab',
+              enabled: deps.tabs.snapshot().canSplit,
+              click: () => deps.tabs.setSplit(tabId)
+            }
+          ]),
+    separator,
     {
       label: 'Bookmark this tab',
       enabled: !isInternalUrl(snap.url),

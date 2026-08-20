@@ -167,6 +167,37 @@ export function buildApplicationMenu(ctx: AppContext): void {
         },
         { type: 'separator' },
         {
+          // Toggle rather than two items: the common case is "show me these two
+          // pages at once", and the tab to pair with is almost always the one
+          // next to it. Choosing a specific partner is the tab context menu's
+          // job, where you are already pointing at the tab you mean.
+          label: 'Split View',
+          accelerator: 'CommandOrControl+Shift+S',
+          click: withTabs((tabs) => {
+            if (tabs.splitId) {
+              tabs.setSplit(null)
+              return
+            }
+            const { tabs: visible, activeTabId } = tabs.snapshot()
+            const index = visible.findIndex((t) => t.id === activeTabId)
+            const partner = visible[index + 1] ?? visible[index - 1]
+            if (partner) tabs.setSplit(partner.id)
+          })
+        },
+        {
+          label: 'Swap Split Panes',
+          click: withTabs((tabs) => tabs.swapSplit())
+        },
+        {
+          label: 'Stack Split Panes',
+          click: withTabs((tabs) =>
+            tabs.setSplitOrientation(
+              tabs.snapshot().splitOrientation === 'vertical' ? 'horizontal' : 'vertical'
+            )
+          )
+        },
+        { type: 'separator' },
+        {
           label: 'Zoom In',
           accelerator: 'CommandOrControl+Plus',
           click: withTabs((tabs) => stepZoom(tabs, 1))

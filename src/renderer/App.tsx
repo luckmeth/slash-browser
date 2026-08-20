@@ -18,6 +18,7 @@ import { TabStrip } from './features/tabs/TabStrip'
 import { Toolbar } from './features/omnibox/Toolbar'
 import { NewTabPage } from './features/newtab/NewTabPage'
 import { ErrorPage } from './features/errors/ErrorPage'
+import { SplitDivider } from './features/split/SplitDivider'
 import { SidePanel } from './features/panels/SidePanel'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
 import { useWorkspaceTheme } from './features/workspaces/useWorkspaceTheme'
@@ -250,6 +251,9 @@ export function App(): React.JSX.Element {
             </main>
             <SidePanel />
           </div>
+          {/* In the gutter between the two native panes — the one strip of the
+              content area no page view covers. */}
+          <SplitDivider />
         </div>
       </div>
     </div>

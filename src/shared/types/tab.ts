@@ -1,5 +1,13 @@
 import { z } from 'zod'
 
+/** A rectangle in window content coordinates (DIP), as `View.setBounds` uses. */
+const RectSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number()
+})
+
 /**
  * Lifecycle state of a tab's underlying renderer.
  *
@@ -67,7 +75,37 @@ export type Tab = z.infer<typeof TabSchema>
 /** The complete tab-strip state. Broadcast as one coalesced snapshot. */
 export const TabsSnapshotSchema = z.object({
   tabs: z.array(TabSchema),
-  activeTabId: z.string().nullable()
+  activeTabId: z.string().nullable(),
+  /**
+   * The tab showing in the second pane, or null when split view is off.
+   *
+   * Deliberately separate from `activeTabId`: split view shows two pages but
+   * there is still exactly one *active* tab, which is what the omnibox, the
+   * find bar and every per-tab control follow.
+   */
+  splitTabId: z.string().nullable().default(null),
+  /** Where the divider sits, as a fraction of the content area. */
+  splitFraction: z.number().default(0.5),
+  splitOrientation: z.enum(['vertical', 'horizontal']).default('vertical'),
+  /** False when the window is too small to hold two usable panes. */
+  canSplit: z.boolean().default(true),
+  /**
+   * Where to draw the drag handle, in window content coordinates.
+   *
+   * Published rather than recomputed in the renderer because the panes are
+   * native views positioned by the main process: a second copy of the layout
+   * arithmetic in React would drift from the real gutter the moment either
+   * side changed, and the handle would sit next to the seam instead of on it.
+   * `content` is the hole being divided, which is what turns a pointer position
+   * back into a fraction.
+   */
+  splitGeometry: z
+    .object({
+      divider: RectSchema,
+      content: RectSchema
+    })
+    .nullable()
+    .default(null)
 })
 export type TabsSnapshot = z.infer<typeof TabsSnapshotSchema>
 

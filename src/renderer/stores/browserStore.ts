@@ -23,6 +23,17 @@ export type PanelId =
 interface BrowserState {
   tabs: Tab[]
   activeTabId: string | null
+  /**
+   * Split view, straight from the snapshot.
+   *
+   * The geometry is the main process's own pane arithmetic, not a copy of it —
+   * the panes are native views it positions, so the drag handle has to be told
+   * where the seam is rather than guessing.
+   */
+  split: Pick<
+    TabsSnapshot,
+    'splitTabId' | 'splitFraction' | 'splitOrientation' | 'canSplit' | 'splitGeometry'
+  >
   settings: Settings | null
   downloads: DownloadItem[]
   bookmarks: Bookmark[]
@@ -72,6 +83,13 @@ interface BrowserState {
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTabId: null,
+  split: {
+    splitTabId: null,
+    splitFraction: 0.5,
+    splitOrientation: 'vertical',
+    canSplit: true,
+    splitGeometry: null
+  },
   settings: null,
   downloads: [],
   bookmarks: [],
@@ -126,7 +144,18 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
   requestOmniboxFocus: () => set((state) => ({ focusOmniboxToken: state.focusOmniboxToken + 1 })),
 
-  applySnapshot: (snapshot) => set({ tabs: snapshot.tabs, activeTabId: snapshot.activeTabId }),
+  applySnapshot: (snapshot) =>
+    set({
+      tabs: snapshot.tabs,
+      activeTabId: snapshot.activeTabId,
+      split: {
+        splitTabId: snapshot.splitTabId,
+        splitFraction: snapshot.splitFraction,
+        splitOrientation: snapshot.splitOrientation,
+        canSplit: snapshot.canSplit,
+        splitGeometry: snapshot.splitGeometry
+      }
+    }),
 
   refreshHistory: async (query = '') => {
     const result = await window.browser.invoke('history:search', {

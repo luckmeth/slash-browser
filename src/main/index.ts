@@ -169,6 +169,13 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    const splitPath = process.env['SLASH_SPLIT_CAPTURE']
+    if (splitPath) {
+      void import('./dev/spikeCapture').then(({ runSplitCapture }) =>
+        runSplitCapture(window, splitPath)
+      )
+    }
+
     const shieldPanelPath = process.env['SLASH_SHIELD_PANEL_CAPTURE']
     if (shieldPanelPath) {
       void import('./dev/spikeCapture').then(({ runShieldPanelCapture }) =>

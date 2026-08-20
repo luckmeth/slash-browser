@@ -2684,6 +2684,129 @@ export async function runShieldPanelCapture(
   app.quit()
 }
 
+/**
+ * Opens two real pages side by side and photographs the window.
+ *
+ * Split view is the one feature that can typecheck perfectly and render
+ * nothing: it is two native views positioned by arithmetic, and a wrong rect
+ * puts a pane off-screen or at zero width without any error. So this asserts
+ * the *geometry* — two attached views, disjoint rects, both inside the content
+ * hole — and then captures a frame to look at.
+ */
+export async function runSplitCapture(
+  window: BrowserWindowController,
+  outputPath: string
+): Promise<void> {
+  await waitForActiveTab(window)
+  const first = window.tabs.activeTab?.id
+  if (!first) {
+    log.error('split probe: FAIL — no active tab')
+    app.quit()
+    return
+  }
+
+  window.tabs.navigate(first, 'https://en.wikipedia.org/wiki/Split_screen_(computer_graphics)')
+  window.tabs.create({ url: 'https://example.com', background: true })
+  await delay(9000)
+
+  const second = window.tabs.snapshot().tabs.find((t) => t.id !== first)
+  if (!second) {
+    log.error('split probe: FAIL — the second tab never appeared')
+    app.quit()
+    return
+  }
+
+  const ok1 = window.tabs.setSplit(second.id)
+  await delay(2500)
+  const snap = window.tabs.snapshot()
+  log.info(`split probe: accepted=${ok1} splitTabId=${snap.splitTabId ?? 'null'}`)
+
+  const geometry = snap.splitGeometry
+  if (!geometry) {
+    log.error('split probe: FAIL — no pane geometry was published')
+    app.quit()
+    return
+  }
+
+  // Both panes must actually be on the window. Reading the child list is the
+  // only way to tell an attached view from one that was merely positioned.
+  const attached = window.browserWindow.contentView.children.length
+  log.info(`split probe: content view children=${attached}`)
+
+  const bounds = window.tabs.paneBoundsForProbe()
+  log.info(`split probe: panes ${JSON.stringify(bounds)}`)
+
+  if (!bounds.primary || !bounds.secondary) {
+    log.error('split probe: FAIL — a pane is missing')
+  } else {
+    const a = bounds.primary
+    const b = bounds.secondary
+    const disjoint = a.x + a.width <= b.x || b.x + b.width <= a.x
+    const bothVisible = a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0
+    const inside =
+      a.x >= geometry.content.x &&
+      b.x + b.width <= geometry.content.x + geometry.content.width + 1
+    if (disjoint && bothVisible && inside) {
+      log.info('split probe: PASS — two panes, side by side, inside the content area')
+    } else {
+      log.error(
+        `split probe: FAIL — disjoint=${disjoint} bothVisible=${bothVisible} inside=${inside}`
+      )
+    }
+    // The gutter is where the drag handle is drawn; if it is not between the
+    // panes the handle sits on top of a page instead of in the seam.
+    const gutterOk =
+      geometry.divider.x >= a.x + a.width - 1 && geometry.divider.x + geometry.divider.width <= b.x + 1
+    if (gutterOk) {
+      log.info('split probe: PASS — the drag handle lands in the gutter between the panes')
+    } else {
+      log.error('split probe: FAIL — the handle rect is not between the panes')
+    }
+  }
+
+  await captureWindowTo(window, outputPath)
+
+  // Dragging the divider must move the seam.
+  const beforeWidth = window.tabs.paneBoundsForProbe().primary?.width ?? 0
+  window.tabs.setSplitFraction(0.7)
+  await delay(1200)
+  const afterWidth = window.tabs.paneBoundsForProbe().primary?.width ?? 0
+  log.info(`split probe: primary width ${beforeWidth} -> ${afterWidth}`)
+  if (afterWidth > beforeWidth) {
+    log.info('split probe: PASS — the divider resizes the panes')
+  } else {
+    log.error('split probe: FAIL — the divider did not move')
+  }
+  await captureWindowTo(window, outputPath.replace(/\.png$/, '-dragged.png'))
+
+  // Swapping must exchange the panes, not close the split.
+  window.tabs.swapSplit()
+  await delay(1200)
+  const swapped = window.tabs.snapshot()
+  if (swapped.activeTabId === second.id && swapped.splitTabId === first) {
+    log.info('split probe: PASS — swapping exchanges the two panes')
+  } else {
+    log.error(
+      `split probe: FAIL — after swap active=${swapped.activeTabId} split=${swapped.splitTabId}`
+    )
+  }
+
+  // Closing one pane's tab must end the split cleanly rather than leaving a
+  // view attached to a tab that no longer exists.
+  window.tabs.close(first)
+  await delay(1200)
+  const afterClose = window.tabs.snapshot()
+  const stillAttached = window.tabs.paneBoundsForProbe().secondary
+  if (afterClose.splitTabId === null && !stillAttached) {
+    log.info('split probe: PASS — closing a pane ends the split')
+  } else {
+    log.error('split probe: FAIL — a pane survived its tab being closed')
+  }
+
+  await captureWindowTo(window, outputPath.replace(/\.png$/, '-closed.png'))
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

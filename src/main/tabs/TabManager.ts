@@ -12,6 +12,12 @@ import { installNavigationGuards } from '../navigation/NavigationGuards'
 import { Tab } from './Tab'
 import { attachTabEvents } from './TabEvents'
 import { createPageView } from './ViewFactory'
+import {
+  splitRects,
+  canSplit,
+  SPLIT_GUTTER,
+  type SplitOrientation
+} from '../windows/splitLayout'
 
 const log = createLogger('tabs')
 
@@ -94,6 +100,22 @@ export class TabManager {
   private readonly activeByWorkspace = new Map<string, string>()
   private activeWorkspaceId: string = DEFAULT_WORKSPACE_ID
   private attachedView: WebContentsView | null = null
+  /**
+   * The second pane's view, when split view is on.
+   *
+   * Split view is the one case where two page views are attached at once. The
+   * "only the active tab is attached" rule exists because Chromium composites
+   * every attached view, so N attached views cost GPU work for N-1 invisible
+   * pages — here both panes are genuinely visible, so both are genuinely worth
+   * compositing. It stays capped at two for exactly that reason.
+   */
+  private attachedSecondary: WebContentsView | null = null
+  /** Per workspace: a split belongs to the tabs it was made from. */
+  private readonly splitByWorkspace = new Map<string, string>()
+  private splitFraction = 0.5
+  private splitOrientation: SplitOrientation = 'vertical'
+  /** Gutter and content rects, recomputed whenever the panes move. */
+  private splitGeometry: TabsSnapshot['splitGeometry'] = null
   private pageBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private emitScheduled = false
 
@@ -114,10 +136,20 @@ export class TabManager {
     return this.activeByWorkspace.get(this.activeWorkspaceId) ?? null
   }
 
+  /** The tab in the second pane, or null when split view is off. */
+  get splitId(): string | null {
+    return this.splitByWorkspace.get(this.activeWorkspaceId) ?? null
+  }
+
   snapshot(): TabsSnapshot {
     return {
       tabs: this.visibleTabs.map((t) => t.snapshot),
-      activeTabId: this.activeId
+      activeTabId: this.activeId,
+      splitTabId: this.splitId,
+      splitFraction: this.splitFraction,
+      splitOrientation: this.splitOrientation,
+      canSplit: canSplit(this.pageBounds, this.splitOrientation),
+      splitGeometry: this.splitGeometry
     }
   }
 
@@ -301,6 +333,12 @@ export class TabManager {
     }
 
     const siblings = this.visibleTabs
+    // Closing either pane ends the split rather than leaving one attributed to
+    // a tab that no longer exists.
+    if (this.splitByWorkspace.get(tab.snapshot.workspaceId) === id) {
+      this.splitByWorkspace.delete(tab.snapshot.workspaceId)
+      this.detachSecondary()
+    }
     this.destroyView(tab)
     this.tabs.splice(index, 1)
 
@@ -326,6 +364,15 @@ export class TabManager {
     // is what makes "reopen closed tab" and cross-workspace search work.
     if (tab.snapshot.workspaceId !== this.activeWorkspaceId) {
       this.activeWorkspaceId = tab.snapshot.workspaceId
+    }
+
+    // Clicking the tab already showing in the second pane swaps the panes
+    // rather than collapsing the split — the alternative is that selecting a
+    // visible tab makes it disappear from where it was.
+    if (id === this.splitId) {
+      const previous = this.activeId
+      if (previous && previous !== id) this.splitByWorkspace.set(this.activeWorkspaceId, previous)
+      else this.splitByWorkspace.delete(this.activeWorkspaceId)
     }
 
     this.activeByWorkspace.set(this.activeWorkspaceId, id)
@@ -727,7 +774,74 @@ export class TabManager {
 
   setPageBounds(bounds: Rectangle): void {
     this.pageBounds = bounds
-    this.attachedView?.setBounds(bounds)
+    this.layoutPanes()
+    // A window narrowed past two usable panes drops the split rather than
+    // rendering slivers. Widening again does not restore it: silently
+    // reinstating a layout the user last saw disappear is worse than leaving
+    // them to ask for it back.
+    if (this.splitId && !canSplit(bounds, this.splitOrientation)) this.setSplit(null)
+  }
+
+  /**
+   * Puts a second tab beside the active one.
+   *
+   * The second pane is *not* the active tab: keyboard focus, the omnibox and
+   * every per-tab control still follow `activeId`, so there is exactly one tab
+   * the browser considers current. Splitting is a way to see two pages, not a
+   * second cursor.
+   *
+   * Refused when the hole cannot hold two usable panes, when the tab is the
+   * active one, or when it lives in another workspace — a split across an
+   * isolation boundary would put two partitions side by side under one tab
+   * strip, which reads as one context and is not.
+   */
+  setSplit(tabId: string | null): boolean {
+    if (tabId === null) {
+      if (!this.splitByWorkspace.has(this.activeWorkspaceId)) return true
+      this.splitByWorkspace.delete(this.activeWorkspaceId)
+      this.detachSecondary()
+      this.layoutPanes()
+      this.scheduleEmit()
+      return true
+    }
+
+    const tab = this.findById(tabId)
+    if (!tab) return false
+    if (tab.snapshot.workspaceId !== this.activeWorkspaceId) return false
+    if (tabId === this.activeId) return false
+    if (!canSplit(this.pageBounds, this.splitOrientation)) return false
+
+    this.splitByWorkspace.set(this.activeWorkspaceId, tabId)
+    this.layoutPanes()
+    this.scheduleEmit()
+    return true
+  }
+
+  /** Drag the divider. Clamped by `splitRects`, so any value is safe here. */
+  setSplitFraction(fraction: number): void {
+    if (!Number.isFinite(fraction)) return
+    this.splitFraction = fraction
+    this.layoutPanes()
+    this.scheduleEmit()
+  }
+
+  setSplitOrientation(orientation: SplitOrientation): void {
+    this.splitOrientation = orientation
+    if (this.splitId && !canSplit(this.pageBounds, orientation)) {
+      this.setSplit(null)
+      return
+    }
+    this.layoutPanes()
+    this.scheduleEmit()
+  }
+
+  /** Swap which pane is the active tab. */
+  swapSplit(): void {
+    const other = this.splitId
+    const current = this.activeId
+    if (!other || !current) return
+    this.splitByWorkspace.set(this.activeWorkspaceId, current)
+    this.activate(other)
   }
 
   // --- internals ------------------------------------------------------------
@@ -811,6 +925,96 @@ export class TabManager {
     view.setVisible(true)
     this.window.contentView.addChildView(view, PAGE_VIEW_INDEX)
     this.attachedView = view
+    this.layoutPanes()
+  }
+
+  /**
+   * Positions whichever panes are attached, and attaches or drops the second
+   * one to match the split state.
+   *
+   * Single place that decides page-view geometry, so the split can never be
+   * half-applied: every entry point — activating, closing, resizing, dragging
+   * the divider, opening a side panel — ends up here.
+   */
+  private layoutPanes(): void {
+    const splitTab = this.splitId ? this.findById(this.splitId) : null
+
+    // A hibernated, internal or errored second tab has no view to show. Rather
+    // than leaving a hole where a pane should be, the split simply stops until
+    // that tab is real again.
+    const rects =
+      splitTab && splitTab.needsView && this.attachedView
+        ? splitRects(this.pageBounds, this.splitFraction, this.splitOrientation)
+        : null
+
+    if (!rects || !splitTab) {
+      this.detachSecondary()
+      this.splitGeometry = null
+      this.attachedView?.setBounds(this.pageBounds)
+      return
+    }
+
+    if (!splitTab.view) this.buildView(splitTab)
+    const secondary = splitTab.view
+    if (!secondary) {
+      this.detachSecondary()
+      this.splitGeometry = null
+      this.attachedView?.setBounds(this.pageBounds)
+      return
+    }
+
+    // The gutter between the panes, in the same coordinates the views use. The
+    // chrome document spans the whole content area, so it can place a drag
+    // handle at exactly these numbers without repeating the arithmetic.
+    this.splitGeometry = {
+      divider:
+        this.splitOrientation === 'vertical'
+          ? {
+              x: rects.primary.x + rects.primary.width,
+              y: rects.primary.y,
+              width: SPLIT_GUTTER,
+              height: rects.primary.height
+            }
+          : {
+              x: rects.primary.x,
+              y: rects.primary.y + rects.primary.height,
+              width: rects.primary.width,
+              height: SPLIT_GUTTER
+            },
+      content: this.pageBounds
+    }
+
+    this.attachedView?.setBounds(rects.primary)
+
+    if (this.attachedSecondary !== secondary) {
+      this.detachSecondary()
+      secondary.setBorderRadius(PAGE_RADIUS)
+      secondary.setVisible(true)
+      this.window.contentView.addChildView(secondary, PAGE_VIEW_INDEX)
+      this.attachedSecondary = secondary
+    }
+    secondary.setBounds(rects.secondary)
+  }
+
+  /**
+   * The bounds of the views actually on the window, read back from the views.
+   *
+   * For verification only. It deliberately asks the `WebContentsView`s rather
+   * than returning what `layoutPanes` intended, because the whole failure mode
+   * worth catching is intent and reality disagreeing — a pane positioned
+   * off-screen or at zero width raises no error anywhere.
+   */
+  paneBoundsForProbe(): { primary: Rectangle | null; secondary: Rectangle | null } {
+    return {
+      primary: this.attachedView?.getBounds() ?? null,
+      secondary: this.attachedSecondary?.getBounds() ?? null
+    }
+  }
+
+  private detachSecondary(): void {
+    if (!this.attachedSecondary) return
+    this.window.contentView.removeChildView(this.attachedSecondary)
+    this.attachedSecondary = null
   }
 
   /**
@@ -822,6 +1026,10 @@ export class TabManager {
    * between BACKGROUND and FROZEN, and it is why the ladder has both.
    */
   private detachCurrentView(): void {
+    // The second pane goes with it. A split whose first pane is the new tab
+    // page or a hibernation placeholder would leave a page floating beside a
+    // chrome-drawn screen, attributed to a tab that is not showing.
+    this.detachSecondary()
     if (!this.attachedView) return
     this.window.contentView.removeChildView(this.attachedView)
     this.attachedView = null
@@ -830,6 +1038,7 @@ export class TabManager {
   private destroyView(tab: Tab): void {
     const view = tab.view
     if (!view) return
+    if (view === this.attachedSecondary) this.detachSecondary()
     if (view === this.attachedView) this.detachCurrentView()
     tab.detachView()
     if (!view.webContents.isDestroyed()) view.webContents.close()

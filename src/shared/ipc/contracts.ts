@@ -213,6 +213,26 @@ export const invokeContracts = {
     response: TabsSnapshotSchema
   },
   'tabs:close': { request: TabIdSchema, response: TabsSnapshotSchema },
+  /**
+   * Puts a second tab beside the active one, or ends the split with null.
+   *
+   * The response carries `splitTabId` so the caller can tell a refusal from a
+   * success — the window may be too narrow for two usable panes, in which case
+   * nothing changes and the UI must not pretend otherwise.
+   */
+  'tabs:setSplit': {
+    request: z.object({ tabId: z.string().nullable() }),
+    response: TabsSnapshotSchema
+  },
+  'tabs:setSplitFraction': {
+    request: z.object({ fraction: z.number() }),
+    response: TabsSnapshotSchema
+  },
+  'tabs:setSplitOrientation': {
+    request: z.object({ orientation: z.enum(['vertical', 'horizontal']) }),
+    response: TabsSnapshotSchema
+  },
+  'tabs:swapSplit': { request: z.void(), response: TabsSnapshotSchema },
   'tabs:activate': { request: TabIdSchema, response: TabsSnapshotSchema },
   'tabs:reorder': {
     request: z.object({ tabId: z.string(), toIndex: z.number().int().min(0) }),

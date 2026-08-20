@@ -34,6 +34,7 @@ export function TabStrip({
 } = {}): React.JSX.Element {
   const tabs = useBrowserStore((s) => s.tabs)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
+  const splitTabId = useBrowserStore((s) => s.split.splitTabId)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [stripWidth, setStripWidth] = useState(0)
@@ -77,6 +78,8 @@ export function TabStrip({
           // to divide a fixed space between however many tabs there are.
           width={vertical ? 0 : tab.isPinned ? PINNED_TAB_WIDTH : tabWidth}
           isActive={tab.id === activeTabId}
+          isSplit={tab.id === splitTabId}
+          splitActive={splitTabId !== null}
           isDropTarget={dropIndex === index}
           canAcceptDrop={
             dragId !== null &&
@@ -113,6 +116,8 @@ function TabItem({
   width,
   vertical = false,
   isActive,
+  isSplit,
+  splitActive,
   isDropTarget,
   canAcceptDrop,
   onDragStart,
@@ -124,6 +129,10 @@ function TabItem({
   width: number
   vertical?: boolean
   isActive: boolean
+  /** Showing in the second pane. Lit like the active tab, since it is on screen. */
+  isSplit: boolean
+  /** Split view is on, so "which of these two is active" needs saying. */
+  splitActive: boolean
   isDropTarget: boolean
   canAcceptDrop: boolean
   onDragStart: () => void
@@ -178,9 +187,15 @@ function TabItem({
         compact ? 'justify-center' : '',
         // The active tab gets a lit pane; inactive ones stay legible rather than
         // fading into the glass, which is what happened at lower contrast.
-        isActive
+        // Both panes are visible pages, so both are lit rather than one looking
+        // backgrounded while its page is on screen.
+        isActive || isSplit
           ? 'bg-[var(--glass-high)] text-[var(--color-text-primary)] shadow-[inset_0_1px_0_var(--glass-edge-strong)]'
           : 'text-[var(--color-text-muted)] hover:bg-white/[0.10]',
+        // With two tabs lit, which one is *active* stops being obvious — and it
+        // still decides where the omnibox, find bar and shortcuts land. The
+        // marker appears only while split, so the normal strip is unchanged.
+        splitActive && isActive ? 'ring-1 ring-[var(--color-accent)] ring-inset' : '',
         isDropTarget ? 'ring-2 ring-[var(--color-accent)] ring-inset' : ''
       ].join(' ')}
     >

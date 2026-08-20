@@ -285,9 +285,12 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('tabs:listAll', (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
+    // Same split fields as the scoped snapshot: this differs only in which tabs
+    // it lists, and a caller switching between the two should not see the
+    // window's split state appear and disappear.
     return ok({
-      tabs: window.tabs.allTabs().map((tab) => tab.snapshot),
-      activeTabId: window.tabs.snapshot().activeTabId
+      ...window.tabs.snapshot(),
+      tabs: window.tabs.allTabs().map((tab) => tab.snapshot)
     })
   })
 
@@ -309,6 +312,37 @@ export function registerHandlers(ctx: AppContext): void {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
     window.tabs.activate(request.tabId)
+    return ok(window.tabs.emitNow())
+  })
+
+  // Split view. Each returns the snapshot, so a refusal (a window too narrow for
+  // two usable panes) is visible to the caller as an unchanged `splitTabId`
+  // rather than being reported as a success.
+  ipc.handle('tabs:setSplit', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.setSplit(request.tabId)
+    return ok(window.tabs.emitNow())
+  })
+
+  ipc.handle('tabs:setSplitFraction', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.setSplitFraction(request.fraction)
+    return ok(window.tabs.emitNow())
+  })
+
+  ipc.handle('tabs:setSplitOrientation', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.setSplitOrientation(request.orientation)
+    return ok(window.tabs.emitNow())
+  })
+
+  ipc.handle('tabs:swapSplit', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.swapSplit()
     return ok(window.tabs.emitNow())
   })
 
