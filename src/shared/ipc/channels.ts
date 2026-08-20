@@ -31,6 +31,7 @@ export const INVOKE_CHANNELS = [
   // --- overlay / layout ---
   'overlay:setState',
   'overlay:getState',
+  'ui:run',
   'layout:setRightPanelWidth',
   'layout:setChromeHeight',
 
@@ -149,6 +150,17 @@ export const INVOKE_CHANNELS = [
   'vault:clearAll',
   'vault:formForTab',
   'vault:fill',
+
+  // --- sponsored tiles ---
+  'sponsor:status',
+  'sponsor:impression',
+  'sponsor:click',
+  'sponsor:refresh',
+  'sponsor:clear',
+
+  // --- start page ---
+  'newtab:pickBackground',
+  'newtab:backgroundImage',
 
   // --- reader mode ---
   'reader:open',

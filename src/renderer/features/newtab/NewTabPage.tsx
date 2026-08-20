@@ -7,6 +7,8 @@ import { BrandMark } from '../../components/BrandMark'
 import { Icon } from '../../components/Icon'
 import { SlashSummary } from './SlashSummary'
 import { RecentlyClosed } from './RecentlyClosed'
+import { SponsoredTile } from './SponsoredTile'
+import { backgroundCss } from './backgrounds'
 
 /**
  * The start page.
@@ -14,15 +16,23 @@ import { RecentlyClosed } from './RecentlyClosed'
  * Rendered by the chrome document in the hole where a page view would be, which
  * is why it can read history and workspaces over the existing IPC surface
  * without registering a scheme or granting a page view any privileges.
+ *
+ * This is the screen seen most often, so it is the argument for the browser.
+ * Everything on it is either a real recorded number or something the user put
+ * there — nothing is projected, and a section with nothing to say renders
+ * nothing rather than an empty heading.
  */
 export function NewTabPage(): React.JSX.Element {
   const [topSites, setTopSites] = useState<HistoryEntry[]>([])
+  const [customBackground, setCustomBackground] = useState<string | null>(null)
   const requestOmniboxFocus = useBrowserStore((s) => s.requestOmniboxFocus)
   const workspaces = useBrowserStore((s) => s.workspaces)
   const activeWorkspaceId = useBrowserStore((s) => s.activeWorkspaceId)
   const tabs = useBrowserStore((s) => s.tabs)
+  const settings = useBrowserStore((s) => s.settings)
 
   const workspace = workspaces.find((w) => w.id === activeWorkspaceId)
+  const backgroundId = settings?.newTabBackground ?? 'aurora'
 
   useEffect(() => {
     void window.browser
@@ -38,25 +48,50 @@ export function NewTabPage(): React.JSX.Element {
       })
   }, [])
 
+  // Only asked for when it is actually going to be used. The image is read in
+  // main and returned as a data URL, so this document never holds a path.
+  useEffect(() => {
+    if (backgroundId !== 'custom') {
+      setCustomBackground(null)
+      return
+    }
+    void window.browser.invoke('newtab:backgroundImage', undefined).then((result) => {
+      setCustomBackground(result.ok ? result.value : null)
+    })
+  }, [backgroundId, settings?.newTabCustomBackground])
+
+  const background = backgroundCss(backgroundId, customBackground)
+
   return (
     <div className="glass-page relative h-full overflow-y-auto">
-      {/* Soft accent wash. Keeps a very large empty area from reading as dead
-          space, without competing with anything. */}
+      {/* Backdrop. CSS gradients rather than bundled photographs — an image set
+          worth looking at would add tens of megabytes to the installer, and
+          fetching one would make opening a tab an outbound request. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
         style={{
-          background:
-            'radial-gradient(70rem 34rem at 50% -12%, rgba(110,168,254,0.16), transparent 62%),' +
-            'radial-gradient(46rem 28rem at 88% 8%, rgba(150,110,254,0.10), transparent 60%)'
+          background,
+          backgroundSize: backgroundId === 'custom' ? 'cover' : undefined,
+          backgroundPosition: backgroundId === 'custom' ? 'center' : undefined
         }}
       />
+      {/* A scrim under the content when a photograph is behind it, so text stays
+          legible whatever the user picked. Not applied to the gradients, which
+          are already low-contrast by construction. */}
+      {backgroundId === 'custom' && customBackground && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'linear-gradient(180deg, rgba(8,10,16,0.55), rgba(8,10,16,0.75))' }}
+        />
+      )}
 
-      <div className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col items-center px-8 pt-[14vh] pb-16">
+      <div className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col items-center px-8 pt-[12vh] pb-16">
         <div className="animate-rise flex flex-col items-center">
-          <BrandMark size={54} className="text-[var(--color-text-primary)]" />
-          <h1 className="mt-4 text-[28px] leading-none font-semibold tracking-tight">
-            Slash
+          <BrandMark size={50} className="text-[var(--color-text-primary)]" />
+          <h1 className="mt-4 text-[26px] leading-none font-semibold tracking-tight">
+            {greeting()}
           </h1>
           {workspace && (
             <p className="mt-2 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -91,7 +126,7 @@ export function NewTabPage(): React.JSX.Element {
 
         <SlashSummary />
 
-        <RecentlyClosed />
+        <SponsoredTile />
 
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">
@@ -140,6 +175,8 @@ export function NewTabPage(): React.JSX.Element {
           </section>
         )}
 
+        <RecentlyClosed />
+
         <div className="flex-1" />
 
         <p className="mt-10 text-[11px] text-[var(--color-text-muted)]">
@@ -148,6 +185,20 @@ export function NewTabPage(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+/**
+ * Time-of-day greeting.
+ *
+ * Read from the machine's own clock, which is the only place it could come
+ * from — there is no location lookup and no request behind this.
+ */
+function greeting(): string {
+  const hour = new Date().getHours()
+  if (hour < 5) return 'Still up'
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
 }
 
 function Key({ children }: { children: React.ReactNode }): React.JSX.Element {

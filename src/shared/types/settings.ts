@@ -82,6 +82,53 @@ export const SettingsSchema = z.object({
    * setting that silently removed a feature would be a different thing.
    */
   hiddenToolbarButtons: z.array(z.string()).default([]),
+
+  // --- new tab page ----------------------------------------------------------
+  /**
+   * The backdrop on the start page.
+   *
+   * These are CSS gradients rather than bundled photographs: an image set large
+   * enough to look good on a 4K display would add tens of megabytes to an
+   * installer for decoration, and fetching one would make opening a new tab an
+   * outbound request. A gradient costs nothing and never phones anywhere.
+   */
+  newTabBackground: z
+    .enum(['aurora', 'dusk', 'mesh', 'ember', 'deep', 'plain', 'custom'])
+    .default('aurora'),
+  /**
+   * Absolute path to the user's own background image.
+   *
+   * Read from disk and inlined, never fetched. Only used when
+   * `newTabBackground` is 'custom', so switching away keeps the path without
+   * showing it.
+   */
+  newTabCustomBackground: z.string().default(''),
+  /**
+   * Start-page sections the user has hidden.
+   *
+   * A deny-list, like the toolbar: a section added in a later version shows up
+   * by default rather than being invisible to everyone who once customised.
+   */
+  hiddenNewTabCards: z.array(z.string()).default([]),
+
+  // --- sponsored tiles -------------------------------------------------------
+  /**
+   * Whether the start page may show a sponsored tile.
+   *
+   * Off by default, and it stays off until both this and an endpoint are set.
+   * A browser whose pitch is that it blocks advertising does not get to switch
+   * its own advertising on without being asked.
+   */
+  sponsoredTilesEnabled: z.boolean().default(false),
+  /**
+   * Where batches of sponsored creatives are fetched from.
+   *
+   * Empty by default, which makes the whole feature inert — no request is ever
+   * made until an operator configures their own endpoint. Batched and matched
+   * on-device: the request carries no identifier and no browsing data, and only
+   * aggregate counts go back. See `docs/sponsored-tiles.md` for the contract.
+   */
+  sponsorEndpoint: z.string().default(''),
   /** Compact trades padding for rows on screen. */
   uiDensity: z.enum(['comfortable', 'compact']).default('comfortable'),
   /**

@@ -3437,6 +3437,246 @@ export async function runAdblockCapture(
   app.quit()
 }
 
+/**
+ * Sponsored tiles, against a local server standing in for an operator's.
+ *
+ * The assertions that matter are the privacy ones. A tile feature that
+ * displays correctly while quietly phoning home per impression would pass every
+ * obvious test and fail the only one worth writing, so this checks what the
+ * request actually contained and what the creative was allowed to reference.
+ */
+export async function runSponsorCapture(probe: {
+  setEndpoint: (url: string) => void
+  refresh: () => Promise<void>
+  status: () => { enabled: boolean; configured: boolean; cached: number; tile: unknown }
+  impression: (id: string) => void
+  click: (id: string) => void
+  clear: () => void
+}): Promise<void> {
+  const http = await import('node:http')
+
+  const received: { url: string; headers: Record<string, unknown>; body: string }[] = []
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (chunk) => (body += String(chunk)))
+    req.on('end', () => {
+      received.push({ url: req.url ?? '', headers: { ...req.headers }, body })
+      if ((req.url ?? '').includes('/report')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"ok":true}')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          expiresAt: Date.now() + 3600_000,
+          tiles: [
+            {
+              id: 'tile-good',
+              sponsor: 'Example Co',
+              headline: 'A perfectly ordinary advert',
+              body: 'With a local image.',
+              image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+              clickUrl: 'https://example.com/offer'
+            },
+            {
+              // Must be REJECTED: a remote image is a per-impression request to
+              // the sponsor, which is a tracking pixel wearing a hat.
+              id: 'tile-remote-image',
+              sponsor: 'Tracker Co',
+              headline: 'Advert with a remote image',
+              image: 'https://tracker.example/pixel.png',
+              clickUrl: 'https://example.com/other'
+            },
+            {
+              // Must be REJECTED: click targets have to be https.
+              id: 'tile-insecure',
+              sponsor: 'Insecure Co',
+              headline: 'Advert with an http click target',
+              image: '',
+              clickUrl: 'http://example.com/insecure'
+            }
+          ]
+        })
+      )
+    })
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as { port: number }).port
+  const endpoint = `http://127.0.0.1:${port}/tiles.json`
+
+  probe.setEndpoint(endpoint)
+  await delay(400)
+  await probe.refresh()
+  await delay(800)
+
+  const status = probe.status()
+  log.info(`sponsor probe: cached=${status.cached} configured=${status.configured}`)
+
+  // Two of the three creatives must have been refused.
+  if (status.cached === 1) {
+    log.info('sponsor probe: PASS - the remote-image and http creatives were refused')
+  } else {
+    log.error(`sponsor probe: FAIL - expected 1 accepted creative, got ${status.cached}`)
+  }
+
+  if (status.tile) {
+    log.info('sponsor probe: PASS - a tile is available to show')
+  } else {
+    log.error('sponsor probe: FAIL - nothing to show')
+  }
+
+  // The fetch itself must be anonymous.
+  const fetchRequest = received.find((r) => r.url.includes('tiles.json'))
+  if (!fetchRequest) {
+    log.error('sponsor probe: FAIL - no fetch reached the server')
+  } else {
+    const cookie = fetchRequest.headers['cookie']
+    const raw = JSON.stringify(fetchRequest).toLowerCase()
+    const leaks = ['slash-', 'install', 'uuid', 'machine', 'user-id'].filter((t) =>
+      raw.includes(t)
+    )
+    log.info(`sponsor probe: fetch url=${fetchRequest.url} cookie=${String(cookie)}`)
+    if (!cookie && leaks.length === 0) {
+      log.info('sponsor probe: PASS - the fetch carried no cookie and no identifier')
+    } else {
+      log.error(`sponsor probe: FAIL - the fetch carried ${cookie ? 'a cookie' : leaks.join(',')}`)
+    }
+  }
+
+  // Counts, and what the report actually contains.
+  probe.impression('tile-good')
+  probe.impression('tile-good')
+  probe.click('tile-good')
+  await delay(300)
+
+  received.length = 0
+  probe.setEndpoint(endpoint)
+  await probe.refresh()
+  await delay(900)
+
+  const report = received.find((r) => r.url.includes('/report'))
+  if (!report) {
+    log.error('sponsor probe: FAIL - counts were never reported')
+  } else {
+    log.info(`sponsor probe: report body ${report.body.slice(0, 200)}`)
+    let parsed: { counts?: { tileId: string; impressions: number; clicks: number }[] } = {}
+    try {
+      parsed = JSON.parse(report.body)
+    } catch {
+      /* reported below */
+    }
+    const entry = parsed.counts?.find((c) => c.tileId === 'tile-good')
+    if (entry && entry.impressions === 2 && entry.clicks === 1) {
+      log.info('sponsor probe: PASS - aggregate counts reported accurately')
+    } else {
+      log.error('sponsor probe: FAIL - counts wrong or missing')
+    }
+
+    // The shape of the report is the privacy claim. Anything resembling a
+    // timestamp finer than a day, a URL, or an id would break it.
+    const keys = Object.keys(parsed.counts?.[0] ?? {}).sort().join(',')
+    if (keys === 'clicks,day,impressions,tileId') {
+      log.info('sponsor probe: PASS - the report carries counts and a day, nothing else')
+    } else {
+      log.error(`sponsor probe: FAIL - unexpected fields in the report: ${keys}`)
+    }
+  }
+
+  probe.clear()
+  server.close()
+  app.quit()
+}
+
+/**
+ * The command palette, and the cross-document path it depends on.
+ *
+ * The last check is the one worth having. The palette lives in the overlay
+ * document and side panels are state in the chrome document — two documents
+ * that share no DOM. A first draft dispatched a CustomEvent and would have
+ * looked perfect while doing nothing at all, so this asserts the panel really
+ * opened rather than that the click was accepted.
+ */
+export async function runPaletteCapture(window: BrowserWindowController): Promise<void> {
+  await waitForActiveTab(window)
+
+  window.showCommandPalette()
+  await delay(3500)
+
+  const overlay = window.overlay.webContents
+  const chrome = window.privilegedContents()[0]
+  if (!overlay || !chrome) {
+    log.error('palette probe: FAIL - no overlay or chrome view')
+    app.quit()
+    return
+  }
+
+  const mounted = (await overlay.executeJavaScript(
+    `(() => {
+       const input = document.querySelector('input[aria-label="Command palette"]');
+       return {
+         hasInput: !!input,
+         rows: document.querySelectorAll('li button').length
+       };
+     })()`
+  )) as { hasInput: boolean; rows: number }
+  log.info(`palette probe: ${JSON.stringify(mounted)}`)
+  if (mounted.hasInput && mounted.rows > 0) {
+    log.info('palette probe: PASS - the palette mounted with entries')
+  } else {
+    log.error('palette probe: FAIL - the palette did not render')
+  }
+
+  // Typing must narrow the list.
+  const filtered = (await overlay.executeJavaScript(
+    `(() => {
+       const input = document.querySelector('input[aria-label="Command palette"]');
+       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+       setter.call(input, 'settings');
+       input.dispatchEvent(new Event('input', { bubbles: true }));
+       return new Promise((resolve) =>
+         setTimeout(() => resolve(document.querySelectorAll('li button').length), 300)
+       );
+     })()`
+  )) as number
+  log.info(`palette probe: rows after typing "settings" = ${filtered}`)
+  if (filtered > 0 && filtered < mounted.rows) {
+    log.info('palette probe: PASS - typing narrows the list')
+  } else {
+    log.error('palette probe: FAIL - filtering did not work')
+  }
+
+  // THE IMPORTANT ONE: run the entry and confirm the *chrome* reacted.
+  await overlay.executeJavaScript(
+    `(() => {
+       const rows = [...document.querySelectorAll('li button')];
+       const target = rows.find((r) => /Open settings/.test(r.textContent || ''));
+       if (target) target.click();
+       return true;
+     })()`
+  )
+  await delay(1800)
+
+  const panelOpened = (await chrome.executeJavaScript(
+    `!!document.querySelector('aside[aria-label="Settings"]')`
+  )) as boolean
+
+  if (panelOpened) {
+    log.info('palette probe: PASS - a command in the overlay opened a panel in the chrome')
+  } else {
+    log.error('palette probe: FAIL - the command did not reach the chrome document')
+  }
+
+  if (!window.overlay.getState().visible) {
+    log.info('palette probe: PASS - the palette closed after running a command')
+  } else {
+    log.error('palette probe: FAIL - the palette stayed open')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

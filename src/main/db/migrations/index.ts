@@ -559,6 +559,44 @@ const m017_logins: Migration = {
   `
 }
 
+const m018_sponsored: Migration = {
+  version: 18,
+  name: 'sponsored_tiles',
+  sql: /* sql */ `
+    -- A batch of sponsored creatives, fetched ahead of time.
+    --
+    -- Fetched as a BATCH and chosen from on-device, which is the whole point:
+    -- the request that gets them carries no identifier and no browsing data, so
+    -- the sponsor learns that a copy of Slash asked for tiles and nothing about
+    -- who is running it. Per-impression fetching would leak exactly what this
+    -- browser exists to prevent leaking.
+    CREATE TABLE sponsored_tiles (
+      id          TEXT    PRIMARY KEY,
+      sponsor     TEXT    NOT NULL,
+      headline    TEXT    NOT NULL,
+      body        TEXT    NOT NULL DEFAULT '',
+      -- Inlined as a data: URL at fetch time. A remote <img> src would be a
+      -- per-impression request to the sponsor's server -- a tracking pixel by
+      -- another name -- and would defeat batching entirely.
+      image       TEXT    NOT NULL DEFAULT '',
+      click_url   TEXT    NOT NULL,
+      fetched_at  INTEGER NOT NULL,
+      expires_at  INTEGER NOT NULL
+    );
+
+    -- Aggregate counts awaiting report. No timestamps beyond the day, no page,
+    -- no session, no identifier -- deliberately not enough to reconstruct when
+    -- or where anything was seen.
+    CREATE TABLE sponsored_counts (
+      tile_id     TEXT    NOT NULL,
+      day         TEXT    NOT NULL,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      clicks      INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (tile_id, day)
+    );
+  `
+}
+
 const m014_missions: Migration = {
   version: 14,
   name: 'missions',
@@ -611,7 +649,8 @@ export const migrations: readonly Migration[] = [
   m014_missions,
   m015_tab_groups,
   m016_reading_list,
-  m017_logins
+  m017_logins,
+  m018_sponsored
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

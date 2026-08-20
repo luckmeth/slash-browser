@@ -48,6 +48,7 @@ import {
 } from '../types/permission'
 import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types/browsing'
 import { ReadingItemSchema } from '../types/readingList'
+import { SponsorStatusSchema } from '../types/sponsor'
 import { LoginFormSchema, VaultStatusSchema } from '../types/logins'
 import type { InvokeChannel, EventChannel } from './channels'
 
@@ -117,7 +118,8 @@ export const OverlayStateSchema = z.object({
     'reader',
     'shield',
     'onboarding',
-    'passwords'
+    'passwords',
+    'command-palette'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
@@ -129,6 +131,38 @@ export const HistoryQuerySchema = z.object({
   limit: z.number().int().min(1).max(500).default(100),
   offset: z.number().int().min(0).default(0)
 })
+
+/**
+ * Actions a menu accelerator triggers that only the UI can perform — focusing
+ * the omnibox, opening a panel. Routed as an event rather than handled in main
+ * because the state they act on (which input has focus, which panel is open)
+ * lives in the renderer.
+ */
+export const UiCommandSchema = z.object({
+  command: z.enum([
+    'focus-omnibox',
+    'open-history',
+    'open-bookmarks',
+    'open-downloads',
+    'open-settings',
+    'open-performance',
+    'open-find',
+    'open-permissions',
+    'open-timemachine',
+    'open-memory',
+    'open-tabbrain',
+    'open-insight',
+    'open-redirects',
+    'open-mission',
+    'open-ai',
+    'open-reading',
+    'bookmark-current-tab',
+    /** Saves the active tab to the read-later queue. */
+    'save-to-reading',
+    'close-panel'
+  ])
+})
+export type UiCommand = z.infer<typeof UiCommandSchema>
 
 // --- invoke channels --------------------------------------------------------
 
@@ -177,6 +211,15 @@ export const invokeContracts = {
    * invisible modal overlay swallowing input.
    */
   'overlay:getState': { request: z.void(), response: OverlayStateSchema },
+  /**
+   * Runs a UI command from a view that cannot reach the chrome document.
+   *
+   * The command palette lives in the **overlay**, and side panels are state in
+   * the **chrome** — two separate documents that share no DOM and no events. A
+   * `CustomEvent` dispatched in one is invisible to the other, so the palette
+   * has to ask main to broadcast, exactly as a menu accelerator does.
+   */
+  'ui:run': { request: UiCommandSchema, response: z.void() },
 
   /**
    * Reserves a strip on the right for a side panel, shrinking the page view.
@@ -660,6 +703,29 @@ export const invokeContracts = {
     response: z.object({ error: z.string().nullable() })
   },
 
+  /**
+   * Sponsored tiles on the start page.
+   *
+   * `sponsor:click` takes only an id and opens the URL from our own cached
+   * record — the renderer never names a destination, so a compromised chrome
+   * view cannot turn this into "open any URL I like".
+   */
+  'sponsor:status': { request: z.void(), response: SponsorStatusSchema },
+  'sponsor:impression': { request: z.object({ tileId: z.string() }), response: z.void() },
+  'sponsor:click': { request: z.object({ tileId: z.string() }), response: z.void() },
+  'sponsor:refresh': { request: z.void(), response: SponsorStatusSchema },
+  'sponsor:clear': { request: z.void(), response: SponsorStatusSchema },
+
+  /**
+   * The user's own start-page background.
+   *
+   * Read from disk in main and returned as a data URL. The renderer never gets
+   * a filesystem path to load, which is what keeps the start page from being a
+   * way to read arbitrary files.
+   */
+  'newtab:pickBackground': { request: z.void(), response: z.string().nullable() },
+  'newtab:backgroundImage': { request: z.void(), response: z.string().nullable() },
+
   'reader:open': { request: z.void(), response: ReaderResultSchema },
   /** Pulled by the overlay document once it has mounted. */
   'reader:get': { request: z.void(), response: ReaderResultSchema },
@@ -936,37 +1002,6 @@ export type InvokeResponse<C extends InvokeChannel> = z.infer<
 
 // --- event channels (main -> renderer) --------------------------------------
 
-/**
- * Actions a menu accelerator triggers that only the UI can perform — focusing
- * the omnibox, opening a panel. Routed as an event rather than handled in main
- * because the state they act on (which input has focus, which panel is open)
- * lives in the renderer.
- */
-export const UiCommandSchema = z.object({
-  command: z.enum([
-    'focus-omnibox',
-    'open-history',
-    'open-bookmarks',
-    'open-downloads',
-    'open-settings',
-    'open-performance',
-    'open-find',
-    'open-permissions',
-    'open-timemachine',
-    'open-memory',
-    'open-tabbrain',
-    'open-insight',
-    'open-redirects',
-    'open-mission',
-    'open-ai',
-    'open-reading',
-    'bookmark-current-tab',
-    /** Saves the active tab to the read-later queue. */
-    'save-to-reading',
-    'close-panel'
-  ])
-})
-export type UiCommand = z.infer<typeof UiCommandSchema>
 
 export const eventContracts = {
   'settings:changed': SettingsSchema,

@@ -19,6 +19,19 @@ import { Icon } from '../../components/Icon'
  * a zero — an empty statistic is worse than silence, because it invites the
  * reader to conclude the feature does not work.
  */
+/**
+ * Assumed size of a request that never happened.
+ *
+ * A blocked request is cancelled before any response arrives, so its real size
+ * is unknowable — there is no header to read. This is therefore an **estimate**
+ * and every place it is shown says so, which is the same rule that keeps
+ * freezing a tab from quoting a byte figure while hibernation may.
+ *
+ * 45 KB is a deliberately conservative figure for a typical ad or tracker
+ * payload; overstating it would make the number flattering rather than true.
+ */
+const AVERAGE_BLOCKED_BYTES = 45 * 1024
+
 export function SlashSummary(): React.JSX.Element | null {
   const [performance, setPerformance] = useState<PerformanceSnapshot | null>(null)
   const [restorePoints, setRestorePoints] = useState<Snapshot[]>([])
@@ -100,7 +113,7 @@ export function SlashSummary(): React.JSX.Element | null {
           value={blockedTotal > 0 ? blockedTotal.toLocaleString() : '—'}
           detail={
             blockedTotal > 0
-              ? `${blocked?.trackers.toLocaleString() ?? 0} trackers, this session`
+              ? `~${formatBytes(blockedTotal * AVERAGE_BLOCKED_BYTES)} not downloaded, estimated`
               : 'Ads and trackers, before they load'
           }
         />

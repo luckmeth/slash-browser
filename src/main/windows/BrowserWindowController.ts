@@ -407,6 +407,22 @@ export class BrowserWindowController {
   }
 
   /**
+   * Opens the command palette.
+   *
+   * Modal and focused: it is a text field the user just summoned and their next
+   * keystroke belongs to it. Driven from the menu like every other accelerator,
+   * because focus normally sits in a web page and a renderer keydown handler
+   * would never see Ctrl+K.
+   */
+  showCommandPalette(): void {
+    const state = this.overlay.show('command-palette', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
    * Opens the list of saved sign-ins that match this page.
    *
    * In the overlay rather than as a toolbar dropdown, for the reason the shield

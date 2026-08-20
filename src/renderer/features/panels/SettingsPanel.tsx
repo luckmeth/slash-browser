@@ -9,6 +9,8 @@ import { SearchEnginesSection } from './SearchEnginesSection'
 import { SiteZoomSection } from './SiteZoomSection'
 import { ToolbarSection } from './ToolbarSection'
 import { PasswordsSection } from './PasswordsSection'
+import { NewTabSection } from './NewTabSection'
+import { SponsorSection } from './SponsorSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
 import { UpdateSection } from './UpdateSection'
 
@@ -147,6 +149,14 @@ export function SettingsPanel(): React.JSX.Element {
 
       <Group title="Zoom">
         <SiteZoomSection />
+      </Group>
+
+      <Group title="Start page">
+        <NewTabSection />
+      </Group>
+
+      <Group title="Sponsored tiles">
+        <SponsorSection />
       </Group>
 
       <Group title="Toolbar">
@@ -345,6 +355,8 @@ const SettingsFilter = createContext('')
 const GROUP_KEYWORDS: Record<string, string> = {
   Zoom: 'zoom per-site text size magnify scale percent',
   Toolbar: 'toolbar buttons icons hide show customise customize clutter',
+  'Start page': 'new tab home background image wallpaper gradient start page appearance',
+  'Sponsored tiles': 'sponsored ads advertising sponsor revenue tile support funding',
   'Saved sign-ins': 'password passwords login logins credentials autofill fill vault account',
   'Appearance': 'theme accent colour color density glass tabs vertical strip dark light',
   'Import from another browser': 'chrome edge bookmarks history migrate transfer',

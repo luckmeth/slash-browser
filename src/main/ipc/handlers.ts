@@ -1,4 +1,5 @@
-import { app, shell } from 'electron'
+import { readFileSync } from 'node:fs'
+import { app, dialog, shell } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
@@ -267,6 +268,16 @@ export function registerHandlers(ctx: AppContext): void {
 
     ipc.broadcast('overlay:stateChanged', state, window.privilegedContents())
     return ok(state)
+  })
+
+  // Lets the overlay reach the chrome document. The two share no DOM and no
+  // events, so a surface living in one cannot open a panel owned by the other
+  // without going through main — the same route a menu accelerator takes.
+  ipc.handle('ui:run', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    ipc.broadcast('ui:command', request, window.privilegedContents())
+    return ok(undefined)
   })
 
   ipc.handle('overlay:getState', (_req, context) => {
@@ -1397,6 +1408,73 @@ export function registerHandlers(ctx: AppContext): void {
     }
     const error = await ctx.loginFiller.fill(contents, request.loginId, form)
     return ok({ error })
+  })
+
+  // --- sponsored tiles ------------------------------------------------------
+
+  ipc.handle('sponsor:status', () => ok(ctx.sponsor.status()))
+
+  ipc.handle('sponsor:impression', (request) => {
+    ctx.sponsor.recordImpression(request.tileId)
+    return ok(undefined)
+  })
+
+  // Takes an id, never a URL. The destination comes from our own cached record,
+  // so a compromised chrome view cannot turn this into "open anything I name" —
+  // the same rule the held-popup release follows.
+  ipc.handle('sponsor:click', (request, context) => {
+    const window = windowOf(context.sender)
+    const tile = ctx.sponsor.status().tile
+    ctx.sponsor.recordClick(request.tileId)
+    if (window && tile && tile.id === request.tileId) {
+      window.tabs.create({ url: tile.clickUrl, background: false })
+    }
+    return ok(undefined)
+  })
+
+  ipc.handle('sponsor:refresh', async () => {
+    await ctx.sponsor.refresh()
+    return ok(ctx.sponsor.status())
+  })
+
+  ipc.handle('sponsor:clear', () => {
+    ctx.sponsor.clear()
+    return ok(ctx.sponsor.status())
+  })
+
+  // --- start page background ------------------------------------------------
+
+  ipc.handle('newtab:pickBackground', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const chosen = await dialog.showOpenDialog(window.browserWindow, {
+      title: 'Choose a background image',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'avif'] }]
+    })
+    const file = chosen.canceled ? null : (chosen.filePaths[0] ?? null)
+    if (file) ctx.settings.update({ newTabCustomBackground: file, newTabBackground: 'custom' })
+    return ok(file)
+  })
+
+  // Read here and handed back as a data URL. The renderer never receives a
+  // filesystem path to load, which is what stops the start page becoming a way
+  // to read arbitrary files.
+  ipc.handle('newtab:backgroundImage', () => {
+    const path = ctx.settings.getAll().newTabCustomBackground
+    if (path === '') return ok(null)
+    try {
+      const bytes = readFileSync(path)
+      // A very large photograph would be inlined into the document on every new
+      // tab; past a few megabytes that is a real cost for a backdrop.
+      if (bytes.byteLength > 12 * 1024 * 1024) return ok(null)
+      const ext = path.split('.').pop()?.toLowerCase() ?? 'png'
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext
+      return ok(`data:image/${mime};base64,${bytes.toString('base64')}`)
+    } catch {
+      // A moved or deleted file falls back to the gradient rather than erroring.
+      return ok(null)
+    }
   })
 
   // --- reading list ---------------------------------------------------------

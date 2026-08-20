@@ -158,6 +158,12 @@ export function buildApplicationMenu(ctx: AppContext): void {
           }
         },
         {
+          // Ctrl+K is the near-universal binding for this, and it is free here.
+          label: 'Command Palette…',
+          accelerator: 'CommandOrControl+K',
+          click: () => ctx.focusedWindow()?.showCommandPalette()
+        },
+        {
           label: 'Search Tabs…',
           accelerator: 'CommandOrControl+Shift+A',
           // Straight to the window rather than through a ui:command: the surface

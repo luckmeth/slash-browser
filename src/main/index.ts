@@ -252,6 +252,27 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_SPONSOR_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runSponsorCapture }) =>
+        runSponsorCapture({
+          setEndpoint: (url) =>
+            context.settings.update({ sponsorEndpoint: url, sponsoredTilesEnabled: true }),
+          refresh: () => context.sponsor.refresh(),
+          status: () => context.sponsor.status(),
+          impression: (id) => context.sponsor.recordImpression(id),
+          click: (id) => context.sponsor.recordClick(id),
+          clear: () => {
+            context.sponsor.clear()
+            context.settings.update({ sponsorEndpoint: '', sponsoredTilesEnabled: false })
+          }
+        })
+      )
+    }
+
+    if (process.env['SLASH_PALETTE_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runPaletteCapture }) => runPaletteCapture(window))
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>
