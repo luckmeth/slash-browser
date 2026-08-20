@@ -66,6 +66,7 @@ export class Tab {
       canGoBack: false,
       canGoForward: false,
       isPinned: false,
+      groupId: null,
       isAudible: false,
       isMuted: false,
       isProtected: false,

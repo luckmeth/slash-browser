@@ -23,6 +23,14 @@ export const SnapshotTabSchema = z.object({
   workspaceId: z.string(),
   order: z.number().int(),
   isPinned: z.boolean(),
+  /**
+   * Which tab group this tab was in.
+   *
+   * Carried so restoring a session brings back the arrangement and not only the
+   * pages — a restored window of ungrouped tabs loses exactly the work the user
+   * put in by hand.
+   */
+  groupId: z.string().nullable().default(null),
   scrollY: z.number(),
   /** Full back/forward list, so the Back button survives a restore. */
   entries: z.array(NavigationEntrySchema),

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Tab, TabsSnapshot } from '@shared/types/tab'
+import type { TabGroup } from '@shared/types/tabGroup'
 import type { Settings } from '@shared/types/settings'
 import type { Bookmark, DownloadItem, HistoryEntry } from '@shared/types/browsing'
 import { DEFAULT_WORKSPACE_ID, type Workspace } from '@shared/types/workspace'
@@ -30,6 +31,8 @@ interface BrowserState {
    * the panes are native views it positions, so the drag handle has to be told
    * where the seam is rather than guessing.
    */
+  /** Coloured runs of tabs in the active workspace. */
+  groups: TabGroup[]
   split: Pick<
     TabsSnapshot,
     'splitTabId' | 'splitFraction' | 'splitOrientation' | 'canSplit' | 'splitGeometry'
@@ -83,6 +86,7 @@ interface BrowserState {
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTabId: null,
+  groups: [],
   split: {
     splitTabId: null,
     splitFraction: 0.5,
@@ -148,6 +152,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     set({
       tabs: snapshot.tabs,
       activeTabId: snapshot.activeTabId,
+      groups: snapshot.groups,
       split: {
         splitTabId: snapshot.splitTabId,
         splitFraction: snapshot.splitFraction,

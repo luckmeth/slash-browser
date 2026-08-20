@@ -341,6 +341,47 @@ export function registerHandlers(ctx: AppContext): void {
     )
   )
 
+  ipc.handle('tabs:createGroup', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.createGroup(request.tabIds, { name: request.name, color: request.color })
+    return ok(window.tabs.emitNow())
+  })
+
+  ipc.handle('tabs:updateGroup', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.updateGroup(request.id, {
+      name: request.name,
+      color: request.color,
+      collapsed: request.collapsed
+    })
+    return ok(window.tabs.emitNow())
+  })
+
+  // Removes the label. Every tab stays open.
+  ipc.handle('tabs:deleteGroup', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.deleteGroup(request.id)
+    return ok(window.tabs.emitNow())
+  })
+
+  // Closes the tabs. Named for what it does, because the one above is a click away.
+  ipc.handle('tabs:closeGroup', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.closeGroup(request.id)
+    return ok(window.tabs.emitNow())
+  })
+
+  ipc.handle('tabs:setTabGroup', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.tabs.setTabGroup(request.tabId, request.groupId)
+    return ok(window.tabs.emitNow())
+  })
+
   ipc.handle('tabs:setSplit', (request, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')

@@ -31,6 +31,7 @@ function tab(url: string, title: string): Tab {
     canGoBack: false,
     canGoForward: false,
     isPinned: false,
+    groupId: null,
     isAudible: false,
     isMuted: false,
     isProtected: false,

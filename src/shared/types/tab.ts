@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TabGroupSchema } from './tabGroup'
 
 /** A rectangle in window content coordinates (DIP), as `View.setBounds` uses. */
 const RectSchema = z.object({
@@ -52,6 +53,8 @@ export const TabSchema = z.object({
   canGoBack: z.boolean(),
   canGoForward: z.boolean(),
   isPinned: z.boolean(),
+  /** Which coloured run this tab belongs to, or null when it is loose. */
+  groupId: z.string().nullable().default(null),
   isAudible: z.boolean(),
   isMuted: z.boolean(),
   /** User-set "Never Sleep". The performance engine must always honour it. */
@@ -89,6 +92,8 @@ export const TabsSnapshotSchema = z.object({
   splitOrientation: z.enum(['vertical', 'horizontal']).default('vertical'),
   /** False when the window is too small to hold two usable panes. */
   canSplit: z.boolean().default(true),
+  /** Groups in the active workspace, in creation order. */
+  groups: z.array(TabGroupSchema).default([]),
   /**
    * Where to draw the drag handle, in window content coordinates.
    *

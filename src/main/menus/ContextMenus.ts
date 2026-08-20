@@ -211,6 +211,37 @@ export function showTabContextMenu(tabId: string, deps: ContextMenuDeps): void {
       click: () => deps.tabs.setProtected(tabId, !snap.isProtected)
     },
     separator,
+    {
+      // Groups are per-workspace, so only this workspace's are offered. A
+      // submenu listing a group from elsewhere would be offering to drag the tab
+      // across an isolation boundary, which reloads it signed out.
+      label: 'Add to group',
+      submenu: [
+        {
+          label: 'New group',
+          click: () => {
+            deps.tabs.createGroup([tabId], { name: '', color: 'blue' })
+          }
+        },
+        ...(deps.tabs.snapshot().groups.length > 0 ? [separator] : []),
+        ...deps.tabs.snapshot().groups.map((group) => ({
+          label: group.name || 'Untitled group',
+          type: 'checkbox' as const,
+          checked: snap.groupId === group.id,
+          click: () => deps.tabs.setTabGroup(tabId, group.id)
+        })),
+        ...(snap.groupId
+          ? [
+              separator,
+              {
+                label: 'Remove from group',
+                click: () => deps.tabs.setTabGroup(tabId, null)
+              }
+            ]
+          : [])
+      ]
+    },
+    separator,
     // The specific-partner route into split view: you are already pointing at
     // the tab you want beside the current one. Disabled rather than hidden when
     // the window is too narrow, so the feature does not appear to come and go.

@@ -92,6 +92,7 @@ export class SessionSnapshotManager {
         workspaceId: snap.workspaceId,
         order: index,
         isPinned: snap.isPinned,
+        groupId: snap.groupId,
         scrollY: 0,
         entries: readEntries(tab, includePageState),
         activeEntryIndex: readActiveIndex(tab)
@@ -125,6 +126,7 @@ export class SessionSnapshotManager {
           workspaceId: snap.workspaceId,
           order: index,
           isPinned: snap.isPinned,
+          groupId: snap.groupId,
           scrollY: await readScrollY(tab),
           entries: readEntries(tab, includePageState),
           activeEntryIndex: readActiveIndex(tab)

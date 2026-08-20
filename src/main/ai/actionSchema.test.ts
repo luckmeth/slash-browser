@@ -13,6 +13,7 @@ function tab(overrides: Partial<Tab> & { id: string; url: string }): Tab {
     canGoBack: false,
     canGoForward: false,
     isPinned: false,
+    groupId: null,
     isAudible: false,
     isMuted: false,
     isProtected: false,

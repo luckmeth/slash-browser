@@ -6,7 +6,8 @@ import {
   type TabsSnapshot,
   type Tab as TabSnapshot
 } from '@shared/types/tab'
-import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
+import { DEFAULT_WORKSPACE_ID, type WorkspaceColor } from '@shared/types/workspace'
+import type { TabGroup } from '@shared/types/tabGroup'
 import { createLogger } from '../logger'
 import { installNavigationGuards } from '../navigation/NavigationGuards'
 import { Tab } from './Tab'
@@ -77,6 +78,8 @@ export interface TabManagerHooks {
   onTabClosed?: (entry: ClosedTab & { closedAt: number }) => void
   /** The most recent persisted closed tab, consumed by reopen. */
   takeClosedTab?: () => ClosedTab | null
+  /** Groups changed — written through so an arrangement survives a crash. */
+  onGroupsChanged?: (groups: readonly TabGroup[]) => void
 }
 
 /**
@@ -116,6 +119,14 @@ export class TabManager {
   private splitOrientation: SplitOrientation = 'vertical'
   /** Gutter and content rects, recomputed whenever the panes move. */
   private splitGeometry: TabsSnapshot['splitGeometry'] = null
+  /**
+   * Coloured runs of tabs, across every workspace.
+   *
+   * Held here rather than in a separate service because grouping is an ordering
+   * concern and this class already owns tab order — a group that could not
+   * reorder the strip would not be a group.
+   */
+  private groups: TabGroup[] = []
   private pageBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private emitScheduled = false
 
@@ -147,6 +158,7 @@ export class TabManager {
       activeTabId: this.activeId,
       splitTabId: this.splitId,
       splitFraction: this.splitFraction,
+      groups: this.groups.filter((g) => g.workspaceId === this.activeWorkspaceId),
       splitOrientation: this.splitOrientation,
       canSplit: canSplit(this.pageBounds, this.splitOrientation),
       splitGeometry: this.splitGeometry
@@ -457,6 +469,7 @@ export class TabManager {
       faviconUrl: string | null
       workspaceId: string
       isPinned: boolean
+      groupId?: string | null
       scrollY: number
       entries: Array<{ url: string; title: string; pageState?: string }>
       activeEntryIndex: number
@@ -475,6 +488,10 @@ export class TabManager {
         title: snapshotTab.title,
         faviconUrl: snapshotTab.faviconUrl,
         isPinned: snapshotTab.isPinned,
+        // Membership travels with the tab, so a restored session brings back the
+        // arrangement and not only the pages. A group id naming a group that no
+        // longer exists is dropped below rather than left dangling.
+        groupId: snapshotTab.groupId ?? null,
         // No view yet, so it is genuinely hibernated rather than pretending to
         // be live and showing a blank page.
         status: 'hibernated'
@@ -494,6 +511,15 @@ export class TabManager {
       const rest = this.tabs.filter((tab) => !tab.snapshot.isPinned)
       this.tabs.length = 0
       this.tabs.push(...pinned, ...rest)
+
+      // A restored tab may name a group whose row is gone. Clearing it here
+      // keeps the strip honest: a tab tinted for a group that no longer exists
+      // would be coloured by nothing.
+      const known = new Set(this.groups.map((group) => group.id))
+      for (const tab of this.tabs) {
+        const groupId = tab.snapshot.groupId
+        if (groupId && !known.has(groupId)) tab.patch({ groupId: null })
+      }
 
       if (options.activateFirst && firstId) this.activate(firstId)
       else this.scheduleEmit()
@@ -994,6 +1020,127 @@ export class TabManager {
       this.attachedSecondary = secondary
     }
     secondary.setBounds(rects.secondary)
+  }
+
+  // --- groups ---------------------------------------------------------------
+
+  /**
+   * Loads persisted groups at startup.
+   *
+   * Membership lives on the tab, so this only restores the groups themselves.
+   * Ids belonging to no restored tab are pruned by the caller — an empty group
+   * left over from a previous session is clutter with nothing in it.
+   */
+  loadGroups(groups: readonly TabGroup[]): void {
+    this.groups = [...groups]
+    this.scheduleEmit()
+  }
+
+  groupsForProbe(): readonly TabGroup[] {
+    return this.groups
+  }
+
+  /**
+   * Makes a group from the given tabs and gathers them into a contiguous run.
+   *
+   * Tabs from other workspaces are ignored rather than dragged across: a group
+   * is presentation inside one workspace, and pulling a tab over an isolation
+   * boundary would reload it signed out — far too much to do as a side effect of
+   * naming something.
+   */
+  createGroup(tabIds: readonly string[], init: { name: string; color: WorkspaceColor }): string | null {
+    const members = tabIds
+      .map((id) => this.findById(id))
+      .filter((tab): tab is Tab => tab !== null && tab.snapshot.workspaceId === this.activeWorkspaceId)
+    if (members.length === 0) return null
+
+    const group: TabGroup = {
+      id: `tg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      workspaceId: this.activeWorkspaceId,
+      name: init.name,
+      color: init.color,
+      collapsed: false,
+      createdAt: Date.now()
+    }
+    this.groups.push(group)
+    for (const tab of members) tab.patch({ groupId: group.id })
+    this.gatherGroup(group.id)
+    this.hooks.onGroupsChanged?.(this.groups)
+    this.scheduleEmit()
+    return group.id
+  }
+
+  updateGroup(id: string, patch: { name?: string; color?: WorkspaceColor; collapsed?: boolean }): void {
+    const group = this.groups.find((g) => g.id === id)
+    if (!group) return
+    if (patch.name !== undefined) group.name = patch.name
+    if (patch.color !== undefined) group.color = patch.color
+    if (patch.collapsed !== undefined) group.collapsed = patch.collapsed
+    this.hooks.onGroupsChanged?.(this.groups)
+    this.scheduleEmit()
+  }
+
+  /**
+   * Removes the group. **Never removes its tabs** — they become loose.
+   *
+   * A group is a label over tabs that already exist, so deleting the label
+   * cannot delete the things it labelled. "Close all tabs in this group" is a
+   * separate, explicitly-worded action.
+   */
+  deleteGroup(id: string): void {
+    this.groups = this.groups.filter((g) => g.id !== id)
+    for (const tab of this.tabs) {
+      if (tab.snapshot.groupId === id) tab.patch({ groupId: null })
+    }
+    this.hooks.onGroupsChanged?.(this.groups)
+    this.scheduleEmit()
+  }
+
+  /** Moves one tab into a group, or out of every group with null. */
+  setTabGroup(tabId: string, groupId: string | null): void {
+    const tab = this.findById(tabId)
+    if (!tab) return
+    if (groupId !== null) {
+      const group = this.groups.find((g) => g.id === groupId)
+      if (!group || group.workspaceId !== tab.snapshot.workspaceId) return
+    }
+    tab.patch({ groupId })
+    if (groupId) this.gatherGroup(groupId)
+    this.hooks.onGroupsChanged?.(this.groups)
+    this.scheduleEmit()
+  }
+
+  /**
+   * Closes every tab in a group, then the group.
+   *
+   * Separate from `deleteGroup` and worded as what it does, because the two are
+   * one careless click apart and only one of them is recoverable.
+   */
+  closeGroup(id: string): void {
+    for (const tab of this.tabs.filter((t) => t.snapshot.groupId === id)) this.close(tab.id)
+    this.deleteGroup(id)
+  }
+
+  /**
+   * Pulls a group's tabs into one contiguous run.
+   *
+   * A group drawn as a coloured band around tabs scattered through the strip
+   * would be a lie about what is next to what, so membership implies adjacency.
+   * The run lands where the group's first member already was, so grouping does
+   * not also reshuffle the strip.
+   */
+  private gatherGroup(groupId: string): void {
+    const members = this.tabs.filter((t) => t.snapshot.groupId === groupId)
+    if (members.length < 2) return
+
+    const anchor = this.tabs.indexOf(members[0]!)
+    const rest = this.tabs.filter((t) => t.snapshot.groupId !== groupId)
+    // Count how many non-members precede the anchor; that is where the run goes.
+    const insertAt = rest.findIndex((t) => this.tabs.indexOf(t) > anchor)
+    const at = insertAt === -1 ? rest.length : insertAt
+
+    this.tabs.length = 0
+    this.tabs.push(...rest.slice(0, at), ...members, ...rest.slice(at))
   }
 
   /**

@@ -470,6 +470,39 @@ const m013_watched_pages: Migration = {
   `
 }
 
+const m015_tab_groups: Migration = {
+  version: 15,
+  name: 'tab_groups',
+  sql: /* sql */ `
+    -- A coloured run of tabs inside one workspace.
+    --
+    -- Distinct from a workspace, which owns a session partition and a tab list.
+    -- A group is presentation: a name and a colour over a run of tabs that are
+    -- already in this workspace. Deleting a group therefore never deletes tabs.
+    --
+    -- Persisted rather than kept in memory because a group that evaporates on
+    -- restart is worse than no grouping — the user has spent effort naming and
+    -- sorting, and losing it teaches them not to bother.
+    CREATE TABLE tab_groups (
+      id           TEXT    PRIMARY KEY,
+      workspace_id TEXT    NOT NULL,
+      name         TEXT    NOT NULL DEFAULT '',
+      -- Named colours rather than hex, so the palette stays consistent with the
+      -- workspace colours and a theme change repaints groups too.
+      color        TEXT    NOT NULL DEFAULT 'blue',
+      -- Collapsed hides the group's tabs in the strip. The tabs are untouched:
+      -- collapsing is not sleeping, and it must never be mistaken for it.
+      collapsed    INTEGER NOT NULL DEFAULT 0 CHECK (collapsed IN (0, 1)),
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX idx_tab_groups_workspace ON tab_groups (workspace_id, created_at);
+
+    -- Group membership travels with a restored tab, so reopening a session
+    -- brings back the arrangement and not just the pages.
+    ALTER TABLE snapshot_tabs ADD COLUMN group_id TEXT;
+  `
+}
+
 const m014_missions: Migration = {
   version: 14,
   name: 'missions',
@@ -519,7 +552,8 @@ export const migrations: readonly Migration[] = [
   m011_ai_providers,
   m012_crashes,
   m013_watched_pages,
-  m014_missions
+  m014_missions,
+  m015_tab_groups
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

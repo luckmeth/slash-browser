@@ -46,6 +46,11 @@ if (!app.requestSingleInstanceLock()) {
     // so reopening forty tabs does not launch forty processes at once. What this
     // genuinely restores is pages, order, pinning, scroll and back/forward
     // history — not logged-in state beyond what the cookies already carry.
+    // Groups before tabs: restored tabs carry a group id, and the check that
+    // drops ids naming groups which no longer exist needs the groups loaded to
+    // know which those are.
+    window.tabs.loadGroups(context.tabGroups.list())
+
     if (context.settings.getAll().restoreTabsOnStartup) {
       const previous = context.snapshots.latestRestorable()
       if (previous && previous.tabs.length > 0) {
@@ -185,6 +190,12 @@ if (!app.requestSingleInstanceLock()) {
           settings: () => context.settings.getAll() as unknown as Record<string, unknown>,
           update: (patch) => context.settings.update(patch)
         })
+      )
+    }
+
+    if (process.env['SLASH_TABGROUP_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runTabGroupCapture }) =>
+        runTabGroupCapture(window, { persisted: () => context.tabGroups.list().length })
       )
     }
 

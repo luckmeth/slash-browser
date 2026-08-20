@@ -16,6 +16,7 @@ import { hostOf } from '@shared/url'
 import { PermissionRepository } from './db/repositories/PermissionRepository'
 import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
+import { TabGroupRepository } from './db/repositories/TabGroupRepository'
 import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
@@ -81,6 +82,7 @@ export class AppContext {
   readonly permissions: PermissionManager
   readonly snapshotRepository: SnapshotRepository
   readonly closedTabs: ClosedTabRepository
+  readonly tabGroups: TabGroupRepository
   readonly snapshots: SessionSnapshotManager
   readonly memoryRepository: MemoryRepository
   readonly vectors: VectorStore
@@ -213,6 +215,7 @@ export class AppContext {
     )
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.closedTabs = new ClosedTabRepository(this.db)
+    this.tabGroups = new TabGroupRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
       this.settings,
@@ -431,6 +434,17 @@ export class AppContext {
       takeClosedTab: () => {
         const record = this.closedTabs.takeLatest()
         return record ? { ...record } : null
+      },
+      // Written through on every change. A group is the product of someone
+      // naming and sorting things, and losing that to a crash teaches them not
+      // to bother doing it again.
+      onGroupsChanged: (groups) => {
+        if (isPrivate) return
+        this.tabGroups.pruneExcept(groups.map((g) => g.id))
+        for (const group of groups) {
+          this.tabGroups.delete(group.id)
+          this.tabGroups.create(group)
+        }
       },
       onPageLoaded: (contents, url) => {
         // The gate has always taken this flag; until now there was no private

@@ -24,6 +24,7 @@ interface TabRow {
   workspace_id: string
   tab_order: number
   is_pinned: number
+  group_id: string | null
   scroll_y: number
   entries_json: string
   active_entry_index: number
@@ -44,9 +45,9 @@ export class SnapshotRepository {
       const insertTab = this.db.connection.prepare(
         `INSERT INTO snapshot_tabs
            (snapshot_id, url, title, favicon_url, workspace_id, tab_order,
-            is_pinned, scroll_y, entries_json, active_entry_index)
+            is_pinned, group_id, scroll_y, entries_json, active_entry_index)
          VALUES (@snapshotId, @url, @title, @favicon, @workspaceId, @order,
-                 @isPinned, @scrollY, @entries, @activeIndex)`
+                 @isPinned, @groupId, @scrollY, @entries, @activeIndex)`
       )
       for (const tab of tabs) {
         insertTab.run({
@@ -57,6 +58,7 @@ export class SnapshotRepository {
           workspaceId: tab.workspaceId,
           order: tab.order,
           isPinned: tab.isPinned ? 1 : 0,
+          groupId: tab.groupId,
           scrollY: tab.scrollY,
           entries: JSON.stringify(tab.entries),
           activeIndex: tab.activeEntryIndex
@@ -120,6 +122,7 @@ export class SnapshotRepository {
       workspaceId: row.workspace_id,
       order: row.tab_order,
       isPinned: row.is_pinned === 1,
+      groupId: row.group_id,
       scrollY: row.scroll_y,
       entries: parseEntries(row.entries_json),
       activeEntryIndex: row.active_entry_index

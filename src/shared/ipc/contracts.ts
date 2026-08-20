@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { SettingsSchema } from '../types/settings'
 import { TabsSnapshotSchema, TabSchema } from '../types/tab'
+import { TabGroupSchema } from '../types/tabGroup'
 import {
   WorkspacesSnapshotSchema,
   WORKSPACE_COLORS,
@@ -235,6 +236,38 @@ export const invokeContracts = {
     response: TabsSnapshotSchema
   },
   'tabs:swapSplit': { request: z.void(), response: TabsSnapshotSchema },
+
+  /**
+   * Tab groups — coloured runs inside one workspace.
+   *
+   * `tabs:deleteGroup` removes the label and leaves every tab open;
+   * `tabs:closeGroup` closes the tabs. They are one careless click apart and
+   * only one is recoverable, so they are separate channels with separate names
+   * rather than one call with a flag.
+   */
+  'tabs:createGroup': {
+    request: z.object({
+      tabIds: z.array(z.string()).min(1),
+      name: z.string().max(60).default(''),
+      color: TabGroupSchema.shape.color.default('blue')
+    }),
+    response: TabsSnapshotSchema
+  },
+  'tabs:updateGroup': {
+    request: z.object({
+      id: z.string(),
+      name: z.string().max(60).optional(),
+      color: TabGroupSchema.shape.color.optional(),
+      collapsed: z.boolean().optional()
+    }),
+    response: TabsSnapshotSchema
+  },
+  'tabs:deleteGroup': { request: z.object({ id: z.string() }), response: TabsSnapshotSchema },
+  'tabs:closeGroup': { request: z.object({ id: z.string() }), response: TabsSnapshotSchema },
+  'tabs:setTabGroup': {
+    request: z.object({ tabId: z.string(), groupId: z.string().nullable() }),
+    response: TabsSnapshotSchema
+  },
   /**
    * Recently closed tabs, most recent first.
    *

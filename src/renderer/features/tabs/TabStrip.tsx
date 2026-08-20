@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { Tab } from '@shared/types/tab'
 import { isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
+import { TabGroupChip } from './TabGroupChip'
 
 const MAX_TAB_WIDTH = 220
 const MIN_TAB_WIDTH = 44
@@ -35,6 +36,7 @@ export function TabStrip({
   const tabs = useBrowserStore((s) => s.tabs)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
   const splitTabId = useBrowserStore((s) => s.split.splitTabId)
+  const groups = useBrowserStore((s) => s.groups)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [stripWidth, setStripWidth] = useState(0)
@@ -69,9 +71,26 @@ export function TabStrip({
       role="tablist"
       aria-label="Tabs"
     >
-      {tabs.map((tab, index) => (
+      {tabs.map((tab, index) => {
+        const group = tab.groupId ? groups.find((g) => g.id === tab.groupId) : undefined
+        // The chip is drawn before the first tab of each run. Membership implies
+        // adjacency (TabManager gathers a group into one contiguous run), so
+        // "previous tab has a different group" is exactly "this run starts here".
+        const startsRun = group !== undefined && tabs[index - 1]?.groupId !== tab.groupId
+        // A collapsed group keeps its tabs alive and simply stops drawing them.
+        const hidden = group?.collapsed === true
+
+        return (
+          <Fragment key={tab.id}>
+            {startsRun && group && (
+              <TabGroupChip
+                group={group}
+                count={tabs.filter((t) => t.groupId === group.id).length}
+                vertical={vertical}
+              />
+            )}
+            {!hidden && (
         <TabItem
-          key={tab.id}
           tab={tab}
           vertical={vertical}
           // A vertical row is always full width; only the horizontal strip has
@@ -93,7 +112,10 @@ export function TabStrip({
           onDragOver={() => setDropIndex(index)}
           onDrop={() => void handleDrop(index)}
         />
-      ))}
+            )}
+          </Fragment>
+        )
+      })}
 
       <button
         type="button"

@@ -2916,6 +2916,124 @@ export async function runOnboardingCapture(
   app.quit()
 }
 
+/**
+ * Tab groups: gathering, the two removal verbs, and persistence.
+ *
+ * The assertion that matters most is that ungrouping leaves every tab open.
+ * "Remove the label" and "close the tabs" are one careless click apart in the
+ * UI, and only one of them is recoverable.
+ */
+export async function runTabGroupCapture(
+  window: BrowserWindowController,
+  probe: { persisted: () => number }
+): Promise<void> {
+  await waitForActiveTab(window)
+
+  window.tabs.create({ url: 'https://example.com', background: true })
+  window.tabs.create({ url: 'https://example.org', background: true })
+  window.tabs.create({ url: 'https://example.net', background: true })
+  await delay(3000)
+
+  const all = window.tabs.snapshot().tabs
+  if (all.length < 4) {
+    log.error(`tab group probe: FAIL — expected 4 tabs, got ${all.length}`)
+    app.quit()
+    return
+  }
+
+  // Deliberately non-adjacent: the first and the last. Grouping must pull them
+  // together, because a coloured band around scattered tabs would be a lie
+  // about what is next to what.
+  const first = all[0]!.id
+  const last = all[all.length - 1]!.id
+  const groupId = window.tabs.createGroup([first, last], { name: 'Research', color: 'purple' })
+  await delay(600)
+
+  if (!groupId) {
+    log.error('tab group probe: FAIL — the group was not created')
+    app.quit()
+    return
+  }
+
+  const afterGroup = window.tabs.snapshot()
+  const indices = afterGroup.tabs
+    .map((tab, index) => (tab.groupId === groupId ? index : -1))
+    .filter((index) => index >= 0)
+  const contiguous = indices.length === 2 && indices[1]! - indices[0]! === 1
+  log.info(`tab group probe: member indices ${JSON.stringify(indices)}`)
+  if (contiguous) {
+    log.info('tab group probe: PASS — grouping gathers members into one run')
+  } else {
+    log.error('tab group probe: FAIL — members are not adjacent')
+  }
+
+  if (afterGroup.groups.length === 1 && afterGroup.groups[0]!.name === 'Research') {
+    log.info('tab group probe: PASS — the group is in the snapshot with its name')
+  } else {
+    log.error('tab group probe: FAIL — the group is missing from the snapshot')
+  }
+
+  if (probe.persisted() === 1) {
+    log.info('tab group probe: PASS — the group was written to the database')
+  } else {
+    log.error(`tab group probe: FAIL — ${probe.persisted()} rows persisted, expected 1`)
+  }
+
+  // Collapsing must not touch the tabs — it is presentation, not sleeping.
+  window.tabs.updateGroup(groupId, { collapsed: true })
+  await delay(500)
+  const collapsed = window.tabs.snapshot()
+  const stillThere = collapsed.tabs.filter((tab) => tab.groupId === groupId).length
+  if (collapsed.groups[0]!.collapsed && stillThere === 2) {
+    log.info('tab group probe: PASS — collapsing hides nothing but the drawing')
+  } else {
+    log.error('tab group probe: FAIL — collapsing changed the tabs')
+  }
+
+  // THE important one: ungrouping keeps every tab.
+  const beforeUngroup = window.tabs.snapshot().tabs.length
+  window.tabs.deleteGroup(groupId)
+  await delay(600)
+  const afterUngroup = window.tabs.snapshot()
+  if (afterUngroup.tabs.length === beforeUngroup && afterUngroup.groups.length === 0) {
+    log.info('tab group probe: PASS — ungrouping removes the label and keeps every tab')
+  } else {
+    log.error(
+      `tab group probe: FAIL — tabs went from ${beforeUngroup} to ${afterUngroup.tabs.length}`
+    )
+  }
+  if (afterUngroup.tabs.every((tab) => tab.groupId === null)) {
+    log.info('tab group probe: PASS — former members are loose, not tinted by a dead group')
+  } else {
+    log.error('tab group probe: FAIL — a tab still points at the deleted group')
+  }
+  if (probe.persisted() === 0) {
+    log.info('tab group probe: PASS — the row is gone from the database too')
+  } else {
+    log.error('tab group probe: FAIL — a deleted group survived on disk')
+  }
+
+  // And the other verb really does close them.
+  const second = window.tabs.snapshot().tabs
+  const closeId = window.tabs.createGroup([second[0]!.id, second[1]!.id], {
+    name: 'Temp',
+    color: 'rose'
+  })
+  await delay(600)
+  const beforeClose = window.tabs.snapshot().tabs.length
+  if (closeId) window.tabs.closeGroup(closeId)
+  await delay(900)
+  const afterClose = window.tabs.snapshot().tabs.length
+  log.info(`tab group probe: closeGroup ${beforeClose} -> ${afterClose} tabs`)
+  if (afterClose === beforeClose - 2) {
+    log.info('tab group probe: PASS — closing a group closes exactly its tabs')
+  } else {
+    log.error('tab group probe: FAIL — closeGroup closed the wrong number of tabs')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

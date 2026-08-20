@@ -11,6 +11,7 @@ import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
 import type { OmniboxState } from '@shared/types/omnibox'
 import type { PermissionRequest } from '@shared/types/permission'
+import type { TabGroup } from '@shared/types/tabGroup'
 import type { ReaderResult } from '@shared/types/reader'
 import type { RedirectChain } from '@shared/types/redirectChain'
 import { RedirectRecorder } from '../shield/RedirectRecorder'
@@ -61,6 +62,8 @@ export interface WindowDeps {
   onTabClosed: (entry: ClosedTabEntry & { closedAt: number }) => void
   /** The most recent persisted closed tab, consumed by reopen. */
   takeClosedTab: () => ClosedTabEntry | null
+  /** Tab groups changed — persisted so an arrangement survives a restart. */
+  onGroupsChanged?: (groups: readonly TabGroup[]) => void
   /** A page finished loading; the Web Memory indexer decides what to do with it. */
   onPageLoaded: (contents: WebContents, url: string) => void
   /** Slash Shield's verdict on a `window.open` from a page in this window. */
@@ -245,6 +248,7 @@ export class BrowserWindowController {
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
         onTabClosed: (entry) => this.deps.onTabClosed(entry),
         takeClosedTab: () => this.deps.takeClosedTab(),
+        onGroupsChanged: (groups) => this.deps.onGroupsChanged?.(groups),
         shouldAllowPopup: (tab, url, webContentsId) =>
           this.deps.shouldAllowPopup(tab.id, url, tab.snapshot.url, webContentsId),
         shouldAllowNavigation: (tab, url, webContentsId) =>

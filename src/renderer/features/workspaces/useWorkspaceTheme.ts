@@ -21,7 +21,14 @@ import type { WorkspaceColor } from '@shared/types/workspace'
  */
 
 /** Accent per workspace colour, matched to the rail's existing palette. */
-const ACCENT: Record<WorkspaceColor, string> = {
+/**
+ * The palette in hex, for callers that need a colour value rather than a
+ * Tailwind class — inline styles, SVG fills, `color-mix`.
+ *
+ * Exported so tab groups tint from the same source as workspaces. A second copy
+ * would drift the first time either was adjusted.
+ */
+export const WORKSPACE_ACCENT_HEX: Record<WorkspaceColor, string> = {
   blue: '#5b9dff',
   green: '#4ade80',
   purple: '#a78bfa',
@@ -53,7 +60,7 @@ export function useWorkspaceTheme(color: WorkspaceColor | null): void {
       return
     }
 
-    root.style.setProperty('--color-accent', ACCENT[color])
+    root.style.setProperty('--color-accent', WORKSPACE_ACCENT_HEX[color])
     root.style.setProperty('--workspace-wash', WASH[color])
 
     return () => {
