@@ -160,8 +160,14 @@ export function App(): React.JSX.Element {
         case 'close-panel':
           setPanel('none')
           break
+        case 'open-reading':
+          togglePanel('reading')
+          break
         case 'bookmark-current-tab':
           void bookmarkCurrentTab()
+          break
+        case 'save-to-reading':
+          void saveCurrentTabToReadingList()
           break
       }
     })
@@ -258,6 +264,27 @@ export function App(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+/**
+ * Queues the active tab to read later.
+ *
+ * Refuses internal pages for the same reason bookmarking does: the new tab page
+ * is not a page you can come back to, and an entry pointing at one would be a
+ * dead row the user has to clear by hand.
+ *
+ * Unlike bookmarking, this is not a toggle. Saving a page already queued moves
+ * it back to unread, which is what saving it again means.
+ */
+async function saveCurrentTabToReadingList(): Promise<void> {
+  const tab = useBrowserStore.getState().activeTab()
+  if (!tab || isInternalUrl(tab.url)) return
+  await window.browser.invoke('reading:add', {
+    url: tab.url,
+    title: tab.title || tab.url,
+    faviconUrl: tab.faviconUrl
+  })
+  useBrowserStore.getState().setPanel('reading')
 }
 
 async function bookmarkCurrentTab(): Promise<void> {

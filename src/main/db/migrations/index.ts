@@ -503,6 +503,30 @@ const m015_tab_groups: Migration = {
   `
 }
 
+const m016_reading_list: Migration = {
+  version: 16,
+  name: 'reading_list',
+  sql: /* sql */ `
+    -- Pages saved to read later. Deliberately separate from bookmarks.
+    --
+    -- A bookmark is a permanent reference you expect to come back to; a reading
+    -- list entry is a queue item you expect to consume once and clear. Mixing
+    -- them means the queue silently fills the reference library with things you
+    -- never wanted to keep, which is exactly why people stop using bookmarks.
+    CREATE TABLE reading_list (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      url        TEXT    NOT NULL UNIQUE,
+      title      TEXT    NOT NULL DEFAULT '',
+      favicon_url TEXT,
+      added_at   INTEGER NOT NULL,
+      -- Null until read. Kept rather than deleted so "mark as read" is
+      -- reversible and the list can show what was finished.
+      read_at    INTEGER
+    );
+    CREATE INDEX idx_reading_list_added ON reading_list (read_at, added_at DESC);
+  `
+}
+
 const m014_missions: Migration = {
   version: 14,
   name: 'missions',
@@ -553,7 +577,8 @@ export const migrations: readonly Migration[] = [
   m012_crashes,
   m013_watched_pages,
   m014_missions,
-  m015_tab_groups
+  m015_tab_groups,
+  m016_reading_list
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

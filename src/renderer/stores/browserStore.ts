@@ -9,6 +9,7 @@ export type PanelId =
   | 'none'
   | 'history'
   | 'bookmarks'
+  | 'reading'
   | 'downloads'
   | 'settings'
   | 'performance'

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { HistoryPanel } from './HistoryPanel'
+import { ReadingListPanel } from './ReadingListPanel'
 import { BookmarksPanel } from './BookmarksPanel'
 import { DownloadsCenter } from '../downloads/DownloadsCenter'
 import { GuardianPanel } from '../downloads/GuardianPanel'
@@ -25,6 +26,7 @@ export const SIDE_PANEL_WIDTH = 380
 const TITLES = {
   history: 'History',
   bookmarks: 'Bookmarks',
+  reading: 'Reading list',
   downloads: 'Downloads',
   settings: 'Settings',
   performance: 'Performance',
@@ -99,6 +101,7 @@ export function SidePanel(): React.JSX.Element | null {
           <>
             {panel === 'history' && <HistoryPanel />}
             {panel === 'bookmarks' && <BookmarksPanel />}
+            {panel === 'reading' && <ReadingListPanel />}
             {panel === 'downloads' && (
               <>
                 {/* Electron-initiated downloads above, engine-managed below.

@@ -199,6 +199,19 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_READING_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runReadingListCapture }) =>
+        runReadingListCapture({
+          schemaVersion: () => context.db.status().schemaVersion,
+          list: () => context.readingList.list(),
+          add: (item) => context.readingList.add(item),
+          setRead: (id, read) => context.readingList.setRead(id, read),
+          clearRead: () => context.readingList.clearRead(),
+          remove: (id) => context.readingList.remove(id)
+        })
+      )
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>

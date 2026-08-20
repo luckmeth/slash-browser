@@ -353,6 +353,15 @@ export function buildApplicationMenu(ctx: AppContext): void {
           click: send('bookmark-current-tab')
         },
         { type: 'separator' },
+        {
+          // Ctrl+D bookmarks, Ctrl+Shift+D queues. Adjacent keys for adjacent
+          // ideas, and the labels say which is the permanent one.
+          label: 'Save to Reading List',
+          accelerator: 'CommandOrControl+Shift+D',
+          click: send('save-to-reading')
+        },
+        { label: 'Reading List', click: send('open-reading') },
+        { type: 'separator' },
         { label: 'History', accelerator: 'CommandOrControl+H', click: send('open-history') },
         { label: 'Bookmarks', accelerator: 'CommandOrControl+Shift+O', click: send('open-bookmarks') },
         { label: 'Downloads', accelerator: 'CommandOrControl+J', click: send('open-downloads') },

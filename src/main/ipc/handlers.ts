@@ -1337,6 +1337,26 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(blockingStatus(ctx, window, request.tabId))
   })
 
+  // --- reading list ---------------------------------------------------------
+
+  ipc.handle('reading:list', () => ok(ctx.readingList.list()))
+  ipc.handle('reading:add', (request) => {
+    ctx.readingList.add(request)
+    return ok(ctx.readingList.list())
+  })
+  ipc.handle('reading:remove', (request) => {
+    ctx.readingList.remove(request.id)
+    return ok(ctx.readingList.list())
+  })
+  ipc.handle('reading:setRead', (request) => {
+    ctx.readingList.setRead(request.id, request.read)
+    return ok(ctx.readingList.list())
+  })
+  ipc.handle('reading:clearRead', () => {
+    ctx.readingList.clearRead()
+    return ok(ctx.readingList.list())
+  })
+
   ipc.handle('blocking:sessionTotals', () => ok(ctx.blocker.activity.sessionCounts()))
 
   ipc.handle('blocking:setSiteAllowed', (request, context) => {

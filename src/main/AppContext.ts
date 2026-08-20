@@ -17,6 +17,7 @@ import { PermissionRepository } from './db/repositories/PermissionRepository'
 import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
 import { TabGroupRepository } from './db/repositories/TabGroupRepository'
+import { ReadingListRepository } from './db/repositories/ReadingListRepository'
 import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
@@ -83,6 +84,7 @@ export class AppContext {
   readonly snapshotRepository: SnapshotRepository
   readonly closedTabs: ClosedTabRepository
   readonly tabGroups: TabGroupRepository
+  readonly readingList: ReadingListRepository
   readonly snapshots: SessionSnapshotManager
   readonly memoryRepository: MemoryRepository
   readonly vectors: VectorStore
@@ -216,6 +218,7 @@ export class AppContext {
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.closedTabs = new ClosedTabRepository(this.db)
     this.tabGroups = new TabGroupRepository(this.db)
+    this.readingList = new ReadingListRepository(this.db)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
       this.settings,

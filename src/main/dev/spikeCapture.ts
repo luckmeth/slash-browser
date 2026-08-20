@@ -3034,6 +3034,86 @@ export async function runTabGroupCapture(
   app.quit()
 }
 
+/**
+ * Reading list round trip, and proof the two new migrations applied.
+ *
+ * Migrations are the risk here: a failed one takes the database, and therefore
+ * the browser, down with it. So this checks the schema version advanced before
+ * exercising anything built on top of it.
+ */
+export async function runReadingListCapture(probe: {
+  schemaVersion: () => number
+  list: () => { id: number; url: string; readAt: number | null }[]
+  add: (item: { url: string; title: string; faviconUrl: string | null }) => void
+  setRead: (id: number, read: boolean) => void
+  clearRead: () => void
+  remove: (id: number) => void
+}): Promise<void> {
+  await delay(500)
+
+  const version = probe.schemaVersion()
+  log.info(`reading list probe: schema version ${version}`)
+  if (version >= 16) {
+    log.info('reading list probe: PASS — migrations 015 and 016 applied')
+  } else {
+    log.error('reading list probe: FAIL — the schema did not reach version 16')
+  }
+
+  // Start from a known state so a re-run does not accumulate.
+  for (const row of probe.list()) probe.remove(row.id)
+
+  probe.add({ url: 'https://example.com/article', title: 'An article', faviconUrl: null })
+  probe.add({ url: 'https://example.org/other', title: 'Another', faviconUrl: null })
+  let items = probe.list()
+  if (items.length === 2) {
+    log.info('reading list probe: PASS — two pages saved')
+  } else {
+    log.error(`reading list probe: FAIL — expected 2 items, got ${items.length}`)
+  }
+
+  // Saving the same URL again must not duplicate it.
+  probe.add({ url: 'https://example.com/article', title: 'An article', faviconUrl: null })
+  items = probe.list()
+  if (items.length === 2) {
+    log.info('reading list probe: PASS — re-saving a page does not duplicate it')
+  } else {
+    log.error(`reading list probe: FAIL — re-saving produced ${items.length} items`)
+  }
+
+  // Marking read keeps the row, so it is reversible.
+  const first = items[0]!
+  probe.setRead(first.id, true)
+  const afterRead = probe.list()
+  const marked = afterRead.find((row) => row.id === first.id)
+  if (afterRead.length === 2 && marked && marked.readAt !== null) {
+    log.info('reading list probe: PASS — marking read keeps the row, so it can be undone')
+  } else {
+    log.error('reading list probe: FAIL — marking read deleted or missed the row')
+  }
+
+  // Re-saving a read page returns it to unread: saving it again is a statement
+  // that you still mean to read it.
+  probe.add({ url: marked!.url, title: 'An article', faviconUrl: null })
+  const requeued = probe.list().find((row) => row.url === marked!.url)
+  if (requeued && requeued.readAt === null) {
+    log.info('reading list probe: PASS — re-saving a read page requeues it')
+  } else {
+    log.error('reading list probe: FAIL — a re-saved page stayed marked read')
+  }
+
+  probe.setRead(requeued!.id, true)
+  probe.clearRead()
+  const afterClear = probe.list()
+  if (afterClear.length === 1 && afterClear.every((row) => row.readAt === null)) {
+    log.info('reading list probe: PASS — clearing removes only the read items')
+  } else {
+    log.error(`reading list probe: FAIL — ${afterClear.length} left after clearing read items`)
+  }
+
+  for (const row of probe.list()) probe.remove(row.id)
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

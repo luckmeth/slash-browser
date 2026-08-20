@@ -47,6 +47,7 @@ import {
   PermissionRequestSchema
 } from '../types/permission'
 import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types/browsing'
+import { ReadingItemSchema } from '../types/readingList'
 import type { InvokeChannel, EventChannel } from './channels'
 
 export {
@@ -597,6 +598,32 @@ export const invokeContracts = {
    * Returns the result as well as showing it, so the toolbar can say "this is
    * not an article" in place rather than opening an empty reader.
    */
+  /**
+   * Reading list — a queue, not a reference library.
+   *
+   * Separate from bookmarks on purpose: a bookmark is something you intend to
+   * keep, a reading-list entry something you intend to clear. Every mutation
+   * returns the whole list, so the panel never has to guess at the new order.
+   */
+  'reading:list': { request: z.void(), response: z.array(ReadingItemSchema) },
+  'reading:add': {
+    request: z.object({
+      url: z.string(),
+      title: z.string().default(''),
+      faviconUrl: z.string().nullable().default(null)
+    }),
+    response: z.array(ReadingItemSchema)
+  },
+  'reading:remove': {
+    request: z.object({ id: z.number().int() }),
+    response: z.array(ReadingItemSchema)
+  },
+  'reading:setRead': {
+    request: z.object({ id: z.number().int(), read: z.boolean() }),
+    response: z.array(ReadingItemSchema)
+  },
+  'reading:clearRead': { request: z.void(), response: z.array(ReadingItemSchema) },
+
   'reader:open': { request: z.void(), response: ReaderResultSchema },
   /** Pulled by the overlay document once it has mounted. */
   'reader:get': { request: z.void(), response: ReaderResultSchema },
@@ -896,7 +923,10 @@ export const UiCommandSchema = z.object({
     'open-redirects',
     'open-mission',
     'open-ai',
+    'open-reading',
     'bookmark-current-tab',
+    /** Saves the active tab to the read-later queue. */
+    'save-to-reading',
     'close-panel'
   ])
 })

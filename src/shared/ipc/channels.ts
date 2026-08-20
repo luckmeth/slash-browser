@@ -135,6 +135,13 @@ export const INVOKE_CHANNELS = [
   'shield:setMode',
   'shield:clearActivity',
 
+  // --- reading list ---
+  'reading:list',
+  'reading:add',
+  'reading:remove',
+  'reading:setRead',
+  'reading:clearRead',
+
   // --- reader mode ---
   'reader:open',
   'reader:get',
