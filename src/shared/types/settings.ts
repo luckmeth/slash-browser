@@ -14,6 +14,16 @@ export const SettingsSchema = z.object({
   // --- Phase 1: core browser -------------------------------------------------
   searchEngineId: z.enum(['duckduckgo', 'google', 'bing', 'startpage']).default('google'),
   homepage: z.string().default('app://newtab'),
+  /**
+   * Whether the first-run walkthrough has been seen.
+   *
+   * A setting rather than a marker file so it lives with everything else the
+   * profile knows, and so wiping the profile genuinely resets first-run. It is
+   * set when the walkthrough is dismissed *by any route* — finishing it and
+   * skipping it both count, because a walkthrough that reappears after being
+   * declined is not an introduction, it is a nag.
+   */
+  onboardingCompleted: z.boolean().default(false),
   theme: z.enum(['system', 'light', 'dark']).default('system'),
 
   // --- personalisation -------------------------------------------------------

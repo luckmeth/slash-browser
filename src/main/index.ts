@@ -57,6 +57,16 @@ if (!app.requestSingleInstanceLock()) {
       }
     }
 
+    // First run. After the session restore above, so the walkthrough opens over
+    // whatever the user is actually going to see rather than a blank window.
+    // Deferred a beat so the chrome has painted first — a modal appearing before
+    // the thing it is introducing reads as a launch error.
+    if (!context.settings.getAll().onboardingCompleted) {
+      setTimeout(() => {
+        if (!window.browserWindow.isDestroyed()) window.showOnboarding()
+      }, 900)
+    }
+
     const spikePath = process.env['ADAPTIVE_SPIKE_CAPTURE']
     if (spikePath) {
       void import('./dev/spikeCapture').then(({ runSpikeCapture }) =>
@@ -165,6 +175,15 @@ if (!app.requestSingleInstanceLock()) {
             context.memoryRepository.clearAll()
             context.settings.update({ excludedOrigins: [] })
           }
+        })
+      )
+    }
+
+    if (process.env['SLASH_ONBOARDING_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runOnboardingCapture }) =>
+        runOnboardingCapture(window, {
+          settings: () => context.settings.getAll() as unknown as Record<string, unknown>,
+          update: (patch) => context.settings.update(patch)
         })
       )
     }

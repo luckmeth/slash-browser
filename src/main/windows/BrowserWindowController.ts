@@ -397,6 +397,22 @@ export class BrowserWindowController {
   }
 
   /**
+   * Opens the first-run walkthrough.
+   *
+   * Modal, and in the overlay rather than the chrome: a restored session puts a
+   * real page view in the content hole, and a native view composites above the
+   * DOM. Not focused, so it cannot steal a keystroke from someone who started
+   * typing an address before it appeared.
+   */
+  showOnboarding(): void {
+    const state = this.overlay.show('onboarding', this.fullBounds(), {
+      modal: true,
+      takeFocus: false
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
    * Opens tab search over the page.
    *
    * Modal and focused: it is a picker the user just asked for, and it has a text

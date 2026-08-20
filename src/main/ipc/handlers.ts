@@ -239,6 +239,14 @@ export function registerHandlers(ctx: AppContext): void {
     const window = windowOf(context.sender)
     if (!window) return ok(undefined)
     window.omniboxState = null
+
+    // Only tear the overlay down if it is still *ours*. The omnibox dismisses
+    // on blur, and opening any modal surface blurs it — so an unconditional
+    // hide here closed whatever had just replaced the dropdown. It took the
+    // first-run walkthrough down within a second of it appearing, and would do
+    // the same to a permission prompt or the reader.
+    if (window.overlay.getState().surface !== 'command-bar') return ok(undefined)
+
     const hidden = window.overlay.hide()
     ipc.broadcast('overlay:stateChanged', hidden, window.privilegedContents())
     return ok(undefined)

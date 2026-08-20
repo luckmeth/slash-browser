@@ -6,6 +6,7 @@ import { PermissionPrompt } from './features/permissions/PermissionPrompt'
 import { TabSearch } from './features/tabsearch/TabSearch'
 import { Reader } from './features/reader/Reader'
 import { ShieldPanel } from './features/shield/ShieldPanel'
+import { Onboarding } from './features/onboarding/Onboarding'
 
 /**
  * Root of the overlay document.
@@ -46,6 +47,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <Reader />
     case 'shield':
       return <ShieldPanel />
+    case 'onboarding':
+      return <Onboarding />
     case 'spike':
       return <SpikeReport />
     case 'none':

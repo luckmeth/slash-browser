@@ -2807,6 +2807,115 @@ export async function runSplitCapture(
   app.quit()
 }
 
+/**
+ * Runs the first-run walkthrough and checks it introduces without enabling.
+ *
+ * The interesting assertion is the last one. An onboarding flow is the easiest
+ * place in a product to smuggle in a default-on opt-in — the user is clicking
+ * Next through screens they have not read — so this records every
+ * privacy-relevant setting before and after and fails if any of them moved.
+ */
+export async function runOnboardingCapture(
+  window: BrowserWindowController,
+  probe: {
+    settings: () => Record<string, unknown>
+    update: (patch: Record<string, unknown>) => void
+  }
+): Promise<void> {
+  await waitForActiveTab(window)
+
+  const WATCHED = [
+    'indexHistory',
+    'indexPageContent',
+    'semanticSearchEnabled',
+    // 'none' means the AI layer is off. An earlier version of this list watched
+    // an 'aiEnabled' key that does not exist, so the assertion passed by
+    // checking undefined against undefined — the exact failure this probe is
+    // supposed to catch, in the probe itself.
+    'aiProvider',
+    'aiMayReadPageContent'
+  ] as const
+  const before = Object.fromEntries(WATCHED.map((key) => [key, probe.settings()[key]]))
+
+  probe.update({ onboardingCompleted: false })
+  window.showOnboarding()
+  log.info(`onboarding probe: state right after show ${JSON.stringify(window.overlay.getState())}`)
+  await delay(5000)
+  log.info(`onboarding probe: state before reading ${JSON.stringify(window.overlay.getState())}`)
+
+  const overlay = window.overlay.webContents
+  if (overlay) {
+    const doc = (await overlay.executeJavaScript(
+      `({ ready: document.readyState, url: location.href, bodyLength: document.body.innerText.length })`
+    )) as Record<string, unknown>
+    log.info(`onboarding probe: overlay document ${JSON.stringify(doc)}`)
+  }
+  if (!overlay) {
+    log.error('onboarding probe: FAIL — no overlay document')
+    app.quit()
+    return
+  }
+
+  const mounted = (await overlay.executeJavaScript(
+    `(() => {
+       const text = document.body.innerText;
+       return {
+         welcome: text.includes('Welcome to Slash'),
+         privacyClaim: text.includes('Nothing leaves this device'),
+         hasSkip: text.includes('Skip')
+       };
+     })()`
+  )) as Record<string, boolean>
+  log.info(`onboarding probe: ${JSON.stringify(mounted)}`)
+  if (mounted.welcome && mounted.hasSkip) {
+    log.info('onboarding probe: PASS — the walkthrough mounted, with a skip on the first screen')
+  } else {
+    log.error('onboarding probe: FAIL — the walkthrough did not render')
+  }
+
+  // Step through every screen, clicking Next as a user would.
+  for (let i = 0; i < 4; i += 1) {
+    await overlay.executeJavaScript(
+      `(() => {
+         const buttons = [...document.querySelectorAll('button')];
+         const next = buttons.find((b) => /Next|Start browsing/.test(b.textContent || ''));
+         if (next) next.click();
+         return true;
+       })()`
+    )
+    await delay(900)
+  }
+
+  await delay(1200)
+  const settingsAfter = probe.settings()
+  if (settingsAfter['onboardingCompleted'] === true) {
+    log.info('onboarding probe: PASS — finishing records that it was seen')
+  } else {
+    log.error('onboarding probe: FAIL — it would reappear on the next launch')
+  }
+
+  if (!window.overlay.getState().visible) {
+    log.info('onboarding probe: PASS — the overlay closed')
+  } else {
+    log.error('onboarding probe: FAIL — the overlay is stuck open')
+  }
+
+  const moved = WATCHED.filter((key) => settingsAfter[key] !== before[key])
+  log.info(`onboarding probe: before ${JSON.stringify(before)}`)
+  log.info(
+    `onboarding probe: after ${JSON.stringify(
+      Object.fromEntries(WATCHED.map((key) => [key, settingsAfter[key]]))
+    )}`
+  )
+  if (moved.length === 0) {
+    log.info('onboarding probe: PASS — no privacy setting was changed by clicking through')
+  } else {
+    log.error(`onboarding probe: FAIL — the walkthrough enabled: ${moved.join(', ')}`)
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

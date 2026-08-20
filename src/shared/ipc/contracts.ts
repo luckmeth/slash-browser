@@ -112,7 +112,8 @@ export const OverlayStateSchema = z.object({
     'permission-prompt',
     'tab-search',
     'reader',
-    'shield'
+    'shield',
+    'onboarding'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
