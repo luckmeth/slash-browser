@@ -21,6 +21,7 @@
     "package": "npm run build && electron-builder --win --publish never"
   },
   "dependencies": {
+    "@ghostery/adblocker": "^2.18.2",
     "@huggingface/transformers": "^4.2.0",
     "@mozilla/readability": "^0.6.0",
     "better-sqlite3": "^13.0.3",

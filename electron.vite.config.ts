@@ -41,7 +41,13 @@ export default defineConfig({
            * Emitted next to index.js, so `join(__dirname, 'embeddingWorker.js')`
            * resolves identically in dev and inside the asar.
            */
-          embeddingWorker: resolve(__dirname, 'src/main/memory/embedding/worker.ts')
+          embeddingWorker: resolve(__dirname, 'src/main/memory/embedding/worker.ts'),
+          /**
+           * The filter compiler, for the same reason as the embedding worker.
+           * Parsing 4.3 MB of EasyList takes ~900ms; deserialising the result
+           * takes 7ms. The expensive half must never run on the main thread.
+           */
+          filterCompiler: resolve(__dirname, 'src/main/shield/adblock/compiler.ts')
         }
       }
     }

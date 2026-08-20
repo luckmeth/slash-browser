@@ -57,6 +57,10 @@ files:
 extraResources:
   - from: resources/models
     to: models
+  # Filter lists, beside app.asar rather than inside it — the compiler reads
+  # them with plain fs, and a native file open cannot see through the archive.
+  - from: resources/filters
+    to: filters
 
 asar: true
 asarUnpack:

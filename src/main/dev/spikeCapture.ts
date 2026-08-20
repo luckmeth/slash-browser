@@ -3317,6 +3317,126 @@ export async function runZoomCapture(
   app.quit()
 }
 
+/**
+ * The filter engine, cosmetic filtering, and the popunder defuser.
+ *
+ * The defuser check is the one that matters. It reproduces the reported bug
+ * exactly — a click handler that opens a popup and then touches the returned
+ * window — on a page we control, rather than by visiting the streaming site.
+ * Before the fix that handler dies on `null` and the "player" never starts;
+ * that is why strict mode stopped the adverts *and* the video.
+ */
+export async function runAdblockCapture(
+  window: BrowserWindowController,
+  probe: {
+    ready: () => boolean
+    matches: (url: string, source: string, type: string) => boolean
+    cosmetics: (url: string, hostname: string, domain: string) => string
+  }
+): Promise<void> {
+  await waitForActiveTab(window)
+
+  // The engine loads asynchronously by design; give it a moment on first run.
+  for (let i = 0; i < 40 && !probe.ready(); i += 1) await delay(500)
+
+  if (!probe.ready()) {
+    log.error('adblock probe: FAIL - the filter engine never became ready')
+    app.quit()
+    return
+  }
+  log.info('adblock probe: PASS - the filter engine loaded')
+
+  // 1. Real rules, in both directions. Blocking everything is not a success.
+  const page = 'https://news.example.com/article'
+  const blocked = [
+    ['https://securepubads.g.doubleclick.net/tag/js/gpt.js', 'script'],
+    ['https://www.google-analytics.com/analytics.js', 'script']
+  ] as const
+  const allowed = [
+    ['https://news.example.com/app.js', 'script'],
+    ['https://code.jquery.com/jquery.min.js', 'script'],
+    ['https://fonts.gstatic.com/s/roboto.woff2', 'font']
+  ] as const
+
+  const blockedOk = blocked.every(([url, type]) => probe.matches(url, page, type))
+  const allowedOk = allowed.every(([url, type]) => !probe.matches(url, page, type))
+  log.info(`adblock probe: blocked=${blockedOk} allowedUntouched=${allowedOk}`)
+  if (blockedOk) log.info('adblock probe: PASS - known ad and tracker hosts match')
+  else log.error('adblock probe: FAIL - a known ad host was not matched')
+  if (allowedOk) log.info('adblock probe: PASS - site scripts, a CDN and fonts are untouched')
+  else log.error('adblock probe: FAIL - the engine is blocking innocent requests')
+
+  // 2. Cosmetic rules resolve to real CSS.
+  const styles = probe.cosmetics('https://www.youtube.com/watch?v=x', 'www.youtube.com', 'youtube.com')
+  if (styles.length > 0 && styles.includes('display')) {
+    log.info(`adblock probe: PASS - cosmetic rules produced ${styles.length} chars of CSS`)
+  } else {
+    log.error('adblock probe: FAIL - no cosmetic rules came back')
+  }
+
+  // 3. THE REPORTED BUG. A real http page, so the defuser is installed.
+  const activeId = window.tabs.activeTab?.id
+  if (!activeId) {
+    log.error('adblock probe: FAIL - no active tab')
+    app.quit()
+    return
+  }
+  window.tabs.navigate(activeId, 'https://example.com')
+  await delay(6000)
+
+  const contents = window.tabs.activeTab?.contents
+  if (!contents) {
+    log.error('adblock probe: FAIL - no page to test on')
+    app.quit()
+    return
+  }
+
+  const installed = (await contents.executeJavaScript(
+    `window.open.toString().indexOf('native code') !== -1`,
+    true
+  )) as boolean
+  log.info(`adblock probe: window.open looks native = ${installed}`)
+
+  // Exactly the popunder shape: open, then touch what came back, then do the
+  // thing the user actually clicked for. No user gesture, so the popup guard
+  // refuses it -- which is the case that used to throw.
+  const result = (await contents.executeJavaScript(
+    `(() => {
+       var played = false;
+       var threw = null;
+       try {
+         var w = window.open('https://ads.example.com/popunder');
+         w.blur();
+         w.focus();
+         played = true;
+       } catch (e) {
+         threw = String(e && e.message || e);
+       }
+       return { played: played, threw: threw };
+     })()`,
+    true
+  )) as { played: boolean; threw: string | null }
+
+  log.info(`adblock probe: popunder pattern ${JSON.stringify(result)}`)
+  if (result.played && result.threw === null) {
+    log.info('adblock probe: PASS - the click survives a refused popup (video would play)')
+  } else {
+    log.error(`adblock probe: FAIL - the handler still dies: ${result.threw ?? 'no throw, no run'}`)
+  }
+
+  // And the popup must still not have opened. Fixing the crash must not have
+  // quietly turned the blocker off.
+  const tabCount = window.tabs.allTabs().length
+  await delay(1200)
+  if (window.tabs.allTabs().length === tabCount) {
+    log.info('adblock probe: PASS - no window opened; it was defused, not allowed')
+  } else {
+    log.error('adblock probe: FAIL - a popup actually opened')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

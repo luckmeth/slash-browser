@@ -40,7 +40,10 @@ import { ContentBlocker } from './shield/NetworkPolicy'
 import { PopupGuard } from './shield/PopupGuard'
 import { RedirectGuard } from './shield/RedirectGuard'
 import { GestureTracker } from './shield/GestureTracker'
-import { YouTubeAdFilter } from './shield/YouTubeAdFilter'
+import { ScriptletInjector } from './shield/inject/ScriptletInjector'
+import { CosmeticFilter } from './shield/adblock/CosmeticFilter'
+import { buildYouTubeAdScript } from './shield/youtubeAdScript'
+import { buildPopupDefuserScript } from './shield/inject/popupDefuserScript'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
@@ -129,12 +132,14 @@ export class AppContext {
   readonly popups: PopupGuard
   readonly redirects: RedirectGuard
   /**
-   * Removes YouTube's video ad breaks.
+   * Scripts that run in a page's own JavaScript context.
    *
-   * The one feature that runs code in a page's own context. Gated on both
-   * `blockAds` and its own setting, so turning blocking off turns this off too.
+   * Owns the one debugger client per tab, shared by the YouTube ad-break strip
+   * and the `window.open` defuser, and yields it to DevTools on demand.
    */
-  readonly youtube: YouTubeAdFilter
+  readonly injector: ScriptletInjector
+  /** Hides the empty slots that blocked ads leave behind. */
+  readonly cosmetics: CosmeticFilter
   private readonly gestures = new GestureTracker()
   /**
    * Tabs with "Stay on This Site" turned on.
@@ -224,9 +229,27 @@ export class AppContext {
       this.gestures,
       (host) => this.blocker.engine.isKnownAdHost(host)
     )
-    this.youtube = new YouTubeAdFilter(
-      () => this.settings.getAll().blockAds && this.settings.getAll().blockYouTubeVideoAds
+    // One injector, not one per feature: only a single debugger client may
+    // attach to a WebContents, so two scripts each attaching their own would
+    // mean the second silently never ran.
+    this.cosmetics = new CosmeticFilter(
+      this.blocker.adblock,
+      () => this.settings.getAll().blockAds
     )
+    this.injector = new ScriptletInjector()
+    this.injector.register({
+      id: 'youtube-ads',
+      enabled: () =>
+        this.settings.getAll().blockAds && this.settings.getAll().blockYouTubeVideoAds,
+      source: buildYouTubeAdScript
+    })
+    this.injector.register({
+      id: 'popup-defuser',
+      // Tied to popup blocking, because that is what creates the null this
+      // repairs. With popups allowed through there is nothing to defuse.
+      enabled: () => this.settings.getAll().blockPopups,
+      source: buildPopupDefuserScript
+    })
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.closedTabs = new ClosedTabRepository(this.db)
     this.tabGroups = new TabGroupRepository(this.db)
@@ -426,6 +449,12 @@ export class AppContext {
       this.crashes.record('renderer', details.reason, details.exitCode ?? null)
     })
 
+    // Deliberately not awaited. Compiling the lists takes ~900ms in a utility
+    // process on first run; deserialising the cache takes ~7ms after that.
+    // Either way the browser opens and browses immediately, with the domain
+    // lists covering the gap until this is ready.
+    void this.blocker.adblock.load()
+
     this.started = true
     log.info('context started')
   }
@@ -540,7 +569,10 @@ export class AppContext {
         }
       },
       enqueueDownload: (url) => this.downloadEngine.enqueue(url),
-      observeYouTube: (contents) => this.youtube.observe(contents),
+      observeYouTube: (contents) => {
+        this.injector.observe(contents)
+        this.cosmetics.observe(contents)
+      },
       isKnownAdHost: (host) => this.blocker.engine.isKnownAdHost(host),
       onRedirectChain: (chain) => {
         // Only chains worth attention are pushed. Broadcasting every http→https

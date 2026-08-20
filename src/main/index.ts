@@ -241,6 +241,17 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_ADBLOCK_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runAdblockCapture }) =>
+        runAdblockCapture(window, {
+          ready: () => context.blocker.adblock.ready,
+          matches: (url, source, type) => context.blocker.adblock.matches(url, source, type),
+          cosmetics: (url, hostname, domain) =>
+            context.blocker.adblock.cosmeticStylesFor(url, hostname, domain)
+        })
+      )
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>

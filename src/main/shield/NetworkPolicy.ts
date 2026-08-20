@@ -2,6 +2,7 @@ import type { Session } from 'electron'
 import { hostOf } from '@shared/url'
 import type { SettingsStore } from '../settings/SettingsStore'
 import { createLogger } from '../logger'
+import { AdblockEngine } from './adblock/AdblockEngine'
 import { FilterEngine } from './FilterEngine'
 import { ActivityLog } from './ActivityLog'
 import {
@@ -44,6 +45,14 @@ export interface ContentBlockerHooks {
  */
 export class ContentBlocker {
   readonly engine = new FilterEngine()
+  /**
+   * Full filter-list blocking, alongside the domain engine above.
+   *
+   * Not a replacement: `engine` still owns the malicious list, per-site
+   * exemptions and the host+path rules that reach first-party ad endpoints.
+   * This one brings EasyList syntax, request types and cosmetic rules.
+   */
+  readonly adblock = new AdblockEngine()
   /** Per-tab record of what was blocked, and the source of the dashboard counts. */
   readonly activity: ActivityLog
 
@@ -175,6 +184,31 @@ export class ContentBlocker {
       if (hostOf(details.url) !== pageHost) this.diagnostics.thirdParty += 1
       if (this.engine.isSiteAllowed(pageHost)) {
         callback({ cancel: false })
+        return
+      }
+
+      // The filter-list engine gets the first say, because it can express
+      // things the domain lists structurally cannot: request types, first-party
+      // exceptions, and the tens of thousands of rules in EasyList. It is only
+      // consulted once the per-site exemption above has already passed, so
+      // turning the shield off for a site still turns all of it off.
+      //
+      // It reports a match, not a reason. The domain lists are asked for the
+      // label so the panel keeps saying "ad" or "tracker" rather than inventing
+      // a third word; an unrecognised host counts as an ad, which is what the
+      // large majority of list rules are for.
+      if (this.adblock.matches(details.url, pageUrl, details.resourceType)) {
+        this.onDecision?.(details.url, true)
+        if (details.webContentsId !== undefined) {
+          this.activity.record(
+            details.webContentsId,
+            this.engine.categoryOf(requestHost) ?? 'ad',
+            requestHost,
+            pageHost
+          )
+          this.hooks.onCountsChanged()
+        }
+        callback({ cancel: true })
         return
       }
 
