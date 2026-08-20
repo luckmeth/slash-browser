@@ -64,6 +64,10 @@ export interface WindowDeps {
   takeClosedTab: () => ClosedTabEntry | null
   /** Tab groups changed — persisted so an arrangement survives a restart. */
   onGroupsChanged?: (groups: readonly TabGroup[]) => void
+  /** Remembered zoom for a URL's host, or null at the default. */
+  siteZoomFor?: (url: string) => number | null
+  /** The user changed zoom on this host; remember it for next time. */
+  onSiteZoomChanged?: (url: string, level: number) => void
   /** A page finished loading; the Web Memory indexer decides what to do with it. */
   onPageLoaded: (contents: WebContents, url: string) => void
   /** Slash Shield's verdict on a `window.open` from a page in this window. */
@@ -249,6 +253,8 @@ export class BrowserWindowController {
         onTabClosed: (entry) => this.deps.onTabClosed(entry),
         takeClosedTab: () => this.deps.takeClosedTab(),
         onGroupsChanged: (groups) => this.deps.onGroupsChanged?.(groups),
+        siteZoomFor: (url) => this.deps.siteZoomFor?.(url) ?? null,
+        onSiteZoomChanged: (url, level) => this.deps.onSiteZoomChanged?.(url, level),
         shouldAllowPopup: (tab, url, webContentsId) =>
           this.deps.shouldAllowPopup(tab.id, url, tab.snapshot.url, webContentsId),
         shouldAllowNavigation: (tab, url, webContentsId) =>
@@ -398,6 +404,21 @@ export class BrowserWindowController {
     })
     this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
     this.deps.ipc.broadcast('permissions:prompt', request, this.privilegedContents())
+  }
+
+  /**
+   * Opens the list of saved sign-ins that match this page.
+   *
+   * In the overlay rather than as a toolbar dropdown, for the reason the shield
+   * panel learned the hard way: a native page view composites above the chrome
+   * document, so a dropdown extending over the page is simply not drawn.
+   */
+  showPasswordFill(): void {
+    const state = this.overlay.show('passwords', this.fullBounds(), {
+      modal: true,
+      takeFocus: false
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
   }
 
   /**

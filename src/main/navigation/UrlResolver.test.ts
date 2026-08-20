@@ -125,3 +125,64 @@ describe('formatUrlForDisplay', () => {
     expect(formatUrlForDisplay('not a url')).toBe('not a url')
   })
 })
+
+describe('custom search engines with keyword prefixes', () => {
+  const engines = [
+    { id: 'gh', name: 'GitHub', keyword: 'gh', url: 'https://github.com/search?q=%s' },
+    { id: 'w', name: 'Wikipedia', keyword: 'w', url: 'https://en.wikipedia.org/w/index.php?search=%s' },
+    // Deliberately missing a placeholder, which is the commonest way to get
+    // this wrong when adding an engine by hand.
+    { id: 'noph', name: 'No placeholder', keyword: 'np', url: 'https://example.com/find' }
+  ]
+  const resolveWith = (input: string) => resolveInput(input, 'google', engines)
+
+  it('sends the rest of the line to the named engine', () => {
+    const result = resolveWith('gh react hooks')
+    expect(result.kind).toBe('search')
+    expect(result.url).toBe('https://github.com/search?q=react%20hooks')
+  })
+
+  it('keeps the query free of the keyword itself', () => {
+    const result = resolveWith('gh react hooks')
+    expect(result.kind === 'search' && result.query).toBe('react hooks')
+  })
+
+  it('does not hijack a domain that starts with a keyword', () => {
+    // The whole reason a trailing space is required. Without it a keyword of
+    // "gh" would swallow github.com and the user could never reach the site.
+    expect(resolveWith('github.com').kind).toBe('url')
+    expect(resolveWith('gh.example.com').kind).toBe('url')
+    expect(resolveWith('w3.org').kind).toBe('url')
+  })
+
+  it('treats a bare keyword as ordinary input, not an empty search', () => {
+    // "w" alone is far more likely to be the start of something than a request
+    // to search Wikipedia for nothing.
+    expect(resolveWith('gh').url).toContain('google.com')
+    expect(resolveWith('gh   ').url).toContain('google.com')
+  })
+
+  it('appends the query when the engine URL has no placeholder', () => {
+    expect(resolveWith('np widgets').url).toBe('https://example.com/find?q=widgets')
+  })
+
+  it('matches the keyword case-insensitively', () => {
+    expect(resolveWith('GH react').url).toBe('https://github.com/search?q=react')
+  })
+
+  it('falls back to the default engine when no keyword matches', () => {
+    expect(resolveWith('zz something').url).toContain('google.com')
+  })
+
+  it('leaves ordinary resolution alone when no engines are configured', () => {
+    expect(resolveInput('gh react', 'google').url).toContain('google.com')
+    expect(resolveInput('example.com', 'google').kind).toBe('url')
+  })
+
+  it('never lets a keyword turn a blocked scheme into a navigation', () => {
+    // A keyword search of a javascript: URL is still a search, not a navigation.
+    const result = resolveWith('gh javascript:alert(1)')
+    expect(result.kind).toBe('search')
+    expect(result.url.startsWith('https://github.com/')).toBe(true)
+  })
+})

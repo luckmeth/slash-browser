@@ -22,12 +22,29 @@ const log = createLogger('content')
  */
 const CONTENT_STATE_CHANNEL = 'content:state'
 
+/**
+ * Main → page-preload commands.
+ *
+ * The only command is "focus one of the login fields you already found", which
+ * carries no secret and no description of the page. Filling then happens
+ * through `webContents.insertText`, so the password travels the browser's own
+ * input pipeline rather than an IPC payload or a string of injected script.
+ */
+export const CONTENT_COMMAND_CHANNEL = 'content:command'
+
 const ContentStateSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('unsaved-input'), hasUnsavedInput: z.boolean() }),
   // Carries no data at all. The fact of the message is the signal, and the time
   // is taken here rather than from the page — a renderer does not get to claim
   // when it was clicked.
-  z.object({ kind: z.literal('user-gesture') })
+  z.object({ kind: z.literal('user-gesture') }),
+  // Whether this page has a sign-in form. Booleans only — the preload reports
+  // that fields exist, never what is in them.
+  z.object({
+    kind: z.literal('login-form'),
+    hasPasswordField: z.boolean(),
+    hasUsernameField: z.boolean()
+  })
 ])
 
 export type ResolveTabBySender = (webContentsId: number) => Tab | null
@@ -35,6 +52,11 @@ export type ResolveTabBySender = (webContentsId: number) => Tab | null
 export interface ContentSignalHooks {
   /** A trusted click or keypress happened in this tab. */
   onUserGesture?: (webContentsId: number) => void
+  /** This page has (or no longer has) a sign-in form. */
+  onLoginForm?: (
+    webContentsId: number,
+    form: { hasPasswordField: boolean; hasUsernameField: boolean }
+  ) => void
 }
 
 export function installContentSignalListener(
@@ -55,6 +77,14 @@ export function installContentSignalListener(
 
     if (parsed.data.kind === 'user-gesture') {
       hooks.onUserGesture?.(event.sender.id)
+      return
+    }
+
+    if (parsed.data.kind === 'login-form') {
+      hooks.onLoginForm?.(event.sender.id, {
+        hasPasswordField: parsed.data.hasPasswordField,
+        hasUsernameField: parsed.data.hasUsernameField
+      })
       return
     }
 

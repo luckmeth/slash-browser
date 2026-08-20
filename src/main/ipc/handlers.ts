@@ -11,6 +11,7 @@ import { buildSuggestions } from '../navigation/SuggestionEngine'
 import { analyseTabs } from '../tabs/brain/tabAnalysis'
 import { isDisabledForHost, toggleHost } from '../cleanup/cleanupRules'
 import { parseQuery } from '../memory/parseQuery'
+import { normaliseHost } from '../passwords/PasswordVault'
 import { ActionExecutor } from '../ai/ActionExecutor'
 import { ContextBuilder } from '../ai/ContextBuilder'
 import type { BrowserWindowController } from '../windows/BrowserWindowController'
@@ -184,6 +185,7 @@ export function registerHandlers(ctx: AppContext): void {
         bookmarks: ctx.bookmarks.list(),
         openTabs: window ? window.tabs.snapshot().tabs : [],
         engineId: ctx.settings.getAll().searchEngineId,
+        customEngines: ctx.settings.getAll().customSearchEngines,
         memory: await memorySuggestions(ctx, request.query)
       })
     )
@@ -554,7 +556,12 @@ export function registerHandlers(ctx: AppContext): void {
 
     // URL-vs-search is decided here, in one tested place, rather than in the
     // renderer where it would be duplicated per entry point.
-    const resolved = resolveInput(request.input, ctx.settings.getAll().searchEngineId)
+    const settings = ctx.settings.getAll()
+    const resolved = resolveInput(
+      request.input,
+      settings.searchEngineId,
+      settings.customSearchEngines
+    )
     window.tabs.navigate(request.tabId, resolved.url)
     return ok({ url: resolved.url })
   })
@@ -1335,6 +1342,61 @@ export function registerHandlers(ctx: AppContext): void {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
     return ok(blockingStatus(ctx, window, request.tabId))
+  })
+
+  // --- saved sign-ins -------------------------------------------------------
+  //
+  // No handler here returns a password. The vault decrypts only inside the main
+  // process and the value reaches the page through Chromium's input pipeline;
+  // `VaultStatus` has no field one could travel in.
+
+  ipc.handle('vault:status', () => ok(ctx.vault.status()))
+
+  ipc.handle('vault:save', (request) => {
+    const error = ctx.vault.save(request)
+    return ok({ error, status: ctx.vault.status() })
+  })
+
+  ipc.handle('vault:remove', (request) => {
+    ctx.vault.remove(request.id)
+    return ok(ctx.vault.status())
+  })
+
+  ipc.handle('vault:clearAll', () => {
+    ctx.vault.clearAll()
+    return ok(ctx.vault.status())
+  })
+
+  ipc.handle('vault:formForTab', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.findById(request.tabId)
+    const contentsId = tab?.contents?.id ?? null
+    const form =
+      contentsId !== null
+        ? (ctx.loginForms.get(contentsId) ?? { hasPasswordField: false, hasUsernameField: false })
+        : { hasPasswordField: false, hasUsernameField: false }
+
+    const host = tab ? normaliseHost(tab.snapshot.url) : ''
+    return ok({ form, host, matches: host === '' ? [] : ctx.vault.forHost(host) })
+  })
+
+  ipc.handle('vault:fill', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.findById(request.tabId)
+    const contents = tab?.contents
+    if (!contents) return ok({ error: 'That tab is gone.' })
+
+    // The form description comes from our own record of what the preload
+    // reported, never from the caller — a renderer does not get to claim a page
+    // has a sign-in field in order to have one typed somewhere.
+    const form = ctx.loginForms.get(contents.id) ?? {
+      hasPasswordField: false,
+      hasUsernameField: false
+    }
+    const error = await ctx.loginFiller.fill(contents, request.loginId, form)
+    return ok({ error })
   })
 
   // --- reading list ---------------------------------------------------------

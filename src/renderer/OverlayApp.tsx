@@ -7,6 +7,7 @@ import { TabSearch } from './features/tabsearch/TabSearch'
 import { Reader } from './features/reader/Reader'
 import { ShieldPanel } from './features/shield/ShieldPanel'
 import { Onboarding } from './features/onboarding/Onboarding'
+import { PasswordFillPanel } from './features/passwords/PasswordFillPanel'
 
 /**
  * Root of the overlay document.
@@ -49,6 +50,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <ShieldPanel />
     case 'onboarding':
       return <Onboarding />
+    case 'passwords':
+      return <PasswordFillPanel />
     case 'spike':
       return <SpikeReport />
     case 'none':

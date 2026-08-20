@@ -80,6 +80,10 @@ export interface TabManagerHooks {
   takeClosedTab?: () => ClosedTab | null
   /** Groups changed — written through so an arrangement survives a crash. */
   onGroupsChanged?: (groups: readonly TabGroup[]) => void
+  /** The remembered zoom for a URL's host, or null at the default. */
+  siteZoomFor?: (url: string) => number | null
+  /** The user changed zoom on this host; remember it for next time. */
+  onSiteZoomChanged?: (url: string, level: number) => void
 }
 
 /**
@@ -557,11 +561,16 @@ export class TabManager {
    * site-settings concern rather than something to fake here.
    */
   setZoomLevel(id: string, level: number): number {
-    const contents = this.findById(id)?.contents
-    if (!contents) return 0
+    const tab = this.findById(id)
+    const contents = tab?.contents
+    if (!tab || !contents) return 0
     // Chromium's range; beyond it the page becomes unusable.
     const clamped = Math.max(-5, Math.min(5, level))
     contents.setZoomLevel(clamped)
+    // Remembered per host, so a site that needs enlarging is enlarged the next
+    // time you visit it — including after a restart, which Chromium's own
+    // per-origin zoom does not survive.
+    this.hooks.onSiteZoomChanged?.(tab.snapshot.url, clamped)
     this.scheduleEmit()
     return clamped
   }
@@ -894,6 +903,7 @@ export class TabManager {
 
     attachTabEvents(view.webContents, tab, {
       onChanged: () => this.scheduleEmit(),
+      siteZoomFor: (url) => this.hooks.siteZoomFor?.(url) ?? null,
       onNavigated: (t, url) => this.hooks.onNavigated(url, t.snapshot.title, t.snapshot.faviconUrl),
       onPageLoaded: (t, url) => this.hooks.onPageLoaded(t, url),
       onMetadata: (t) =>

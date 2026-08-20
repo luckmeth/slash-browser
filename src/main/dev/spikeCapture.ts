@@ -3114,6 +3114,209 @@ export async function runReadingListCapture(probe: {
   app.quit()
 }
 
+/**
+ * The password vault, checked where it actually matters.
+ *
+ * Two of these assertions are the whole point of the design and the rest is
+ * plumbing: the secret must not appear in the database file's bytes, and it
+ * must not appear anywhere in what the renderer is sent. Everything else about
+ * a password manager can work perfectly while it quietly fails those two.
+ */
+export async function runVaultCapture(
+  window: BrowserWindowController,
+  probe: {
+    available: () => boolean
+    save: (input: { host: string; username: string; password: string }) => string | null
+    status: () => unknown
+    passwordFor: (id: number) => string | null
+    list: () => { id: number; host: string; username: string }[]
+    remove: (id: number) => void
+    dbPath: () => string
+    /** The real filling path, so this exercises what the handler exercises. */
+    fill: (tabId: string, loginId: number) => Promise<string | null>
+  }
+): Promise<void> {
+  await waitForActiveTab(window)
+
+  // A distinctive value, so finding it in a byte stream is unambiguous.
+  const SECRET = 'Zx9-probe-secret-Qw7!vault'
+  const HOST = 'vault-probe.example'
+
+  if (!probe.available()) {
+    log.error('vault probe: SKIP — this system reports no secure credential store')
+    app.quit()
+    return
+  }
+  log.info('vault probe: PASS — a secure credential store is available')
+
+  for (const row of probe.list()) {
+    if (row.host === HOST) probe.remove(row.id)
+  }
+
+  const error = probe.save({ host: HOST, username: 'someone@example.com', password: SECRET })
+  if (error === null) {
+    log.info('vault probe: PASS — the sign-in was saved')
+  } else {
+    log.error(`vault probe: FAIL — saving refused: ${error}`)
+    app.quit()
+    return
+  }
+
+  const saved = probe.list().find((row) => row.host === HOST)
+  if (!saved) {
+    log.error('vault probe: FAIL — the saved sign-in is not in the list')
+    app.quit()
+    return
+  }
+
+  // 1. THE IMPORTANT ONE. Read the database file as raw bytes and look for the
+  //    password. A vault that "encrypts" but leaves the plaintext somewhere in
+  //    the file is worse than none, because the user believes it is safe.
+  //    Every SQLite file the database uses is checked, WAL included — a value
+  //    can sit in the write-ahead log long after the main file looks clean.
+  const { readFileSync, existsSync } = await import('node:fs')
+  const base = probe.dbPath()
+  const files = [base, `${base}-wal`, `${base}-shm`].filter((file) => existsSync(file))
+  let foundIn: string | null = null
+  for (const file of files) {
+    const bytes = readFileSync(file)
+    if (bytes.includes(Buffer.from(SECRET, 'utf8'))) foundIn = file
+    // Also check UTF-16, in case a path stored it as wide characters.
+    if (!foundIn && bytes.includes(Buffer.from(SECRET, 'utf16le'))) foundIn = `${file} (utf16)`
+  }
+  log.info(`vault probe: scanned ${files.length} database file(s) for the plaintext`)
+  if (foundIn === null) {
+    log.info('vault probe: PASS — the password does not appear in the database bytes')
+  } else {
+    log.error(`vault probe: FAIL — the plaintext password is readable in ${foundIn}`)
+  }
+
+  // 2. THE OTHER IMPORTANT ONE. Everything the renderer can ask for, serialised
+  //    exactly as it would cross IPC, must not contain the secret anywhere.
+  const serialised = JSON.stringify(probe.status())
+  if (!serialised.includes(SECRET)) {
+    log.info('vault probe: PASS — no password in what the renderer is sent')
+  } else {
+    log.error('vault probe: FAIL — a password is present in the IPC payload')
+  }
+  // And the shape itself should have no field for one, so a future handler
+  // cannot start leaking without changing the type.
+  if (!serialised.includes('password')) {
+    log.info('vault probe: PASS — the payload has no password-shaped field at all')
+  } else {
+    log.error(`vault probe: FAIL — the payload mentions a password field: ${serialised.slice(0, 200)}`)
+  }
+
+  // 3. Round trip: the main process can still get it back.
+  const decrypted = probe.passwordFor(saved.id)
+  if (decrypted === SECRET) {
+    log.info('vault probe: PASS — the main process decrypts the original value')
+  } else {
+    log.error('vault probe: FAIL — the value did not round trip')
+  }
+
+  // 4. Filling a real form. A local page, so the probe never types a secret
+  //    into anything on the network.
+  const activeId = window.tabs.activeTab?.id
+  if (activeId) {
+    const page =
+      'data:text/html,' +
+      encodeURIComponent(
+        `<form><input id="u" type="text" name="user"><input id="p" type="password" name="pass"></form>`
+      )
+    window.tabs.navigate(activeId, page)
+    await delay(3500)
+
+    const contents = window.tabs.activeTab?.contents
+    if (contents) {
+      const fillError = await probe.fill(activeId, saved.id)
+      await delay(900)
+      const filled = (await contents.executeJavaScript(
+        `({ user: document.getElementById('u').value, hasPass: document.getElementById('p').value.length > 0 })`
+      )) as { user: string; hasPass: boolean }
+      log.info(`vault probe: fill result ${JSON.stringify({ ...filled, fillError })}`)
+      if (filled.user === 'someone@example.com' && filled.hasPass) {
+        log.info('vault probe: PASS — both fields were typed into the page')
+      } else {
+        log.error('vault probe: FAIL — the form was not filled')
+      }
+    }
+  }
+
+  for (const row of probe.list()) {
+    if (row.host === HOST) probe.remove(row.id)
+  }
+  app.quit()
+}
+
+/**
+ * Per-site zoom: remembered, reapplied, and *not* carried to the next site.
+ *
+ * The third check is the one that would otherwise go unnoticed. Chromium keeps
+ * zoom on the WebContents, so without an explicit reset a tab zoomed for one
+ * host stays zoomed when it navigates to a host with no preference — which
+ * reads as the browser randomly enlarging unrelated pages.
+ */
+export async function runZoomCapture(
+  window: BrowserWindowController,
+  probe: { siteZoom: () => Record<string, number> }
+): Promise<void> {
+  await waitForActiveTab(window)
+  const tabId = window.tabs.activeTab?.id
+  if (!tabId) {
+    log.error('zoom probe: FAIL - no active tab')
+    app.quit()
+    return
+  }
+
+  window.tabs.navigate(tabId, 'https://example.com')
+  await delay(6000)
+
+  window.tabs.setZoomLevel(tabId, 2)
+  await delay(800)
+  const saved = probe.siteZoom()
+  log.info(`zoom probe: stored ${JSON.stringify(saved)}`)
+  if (saved['example.com'] === 2) {
+    log.info('zoom probe: PASS - the level was remembered for the host')
+  } else {
+    log.error('zoom probe: FAIL - nothing was stored for example.com')
+  }
+
+  // Away to a host with no preference: the level must return to 100%.
+  window.tabs.navigate(tabId, 'https://example.org')
+  await delay(6000)
+  const awayLevel = window.tabs.getZoomLevel(tabId)
+  log.info(`zoom probe: level on an unzoomed host = ${awayLevel}`)
+  if (awayLevel === 0) {
+    log.info('zoom probe: PASS - zoom does not leak to the next site')
+  } else {
+    log.error('zoom probe: FAIL - the previous site zoom carried over')
+  }
+
+  // Back again: it must return without being asked.
+  window.tabs.navigate(tabId, 'https://example.com')
+  await delay(6000)
+  const backLevel = window.tabs.getZoomLevel(tabId)
+  log.info(`zoom probe: level on return = ${backLevel}`)
+  if (backLevel === 2) {
+    log.info('zoom probe: PASS - returning to the site restores its zoom')
+  } else {
+    log.error('zoom probe: FAIL - the remembered level was not reapplied')
+  }
+
+  // Resetting to 100% must drop the entry rather than storing a zero, or the
+  // map grows an entry for every site ever visited.
+  window.tabs.setZoomLevel(tabId, 0)
+  await delay(800)
+  if (probe.siteZoom()['example.com'] === undefined) {
+    log.info('zoom probe: PASS - resetting to 100% forgets the site')
+  } else {
+    log.error('zoom probe: FAIL - a default level was stored')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

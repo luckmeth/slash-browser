@@ -10,6 +10,7 @@ import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { CleanButton } from '../cleanup/CleanButton'
 import { ShieldButton } from '../shield/ShieldButton'
+import { PasswordFillButton } from '../passwords/PasswordFillButton'
 import { SleepIndicator } from '../performance/SleepIndicator'
 
 export function Toolbar(): React.JSX.Element {
@@ -17,6 +18,13 @@ export function Toolbar(): React.JSX.Element {
   const bookmarks = useBrowserStore((s) => s.bookmarks)
   const panel = useBrowserStore((s) => s.panel)
   const togglePanel = useBrowserStore((s) => s.togglePanel)
+  // The `?? []` MUST stay outside the selector. Zustand compares what a
+  // selector returns with Object.is, so a selector that builds a fresh array
+  // every call never compares equal — it re-renders, re-selects, and loops
+  // forever. That is React error #185, and it hung the whole chrome renderer.
+  const hiddenButtons = useBrowserStore((s) => s.settings?.hiddenToolbarButtons)
+  /** A deny-list, so a button added later shows up rather than being invisible. */
+  const shown = (id: string): boolean => !(hiddenButtons ?? []).includes(id)
   const focusToken = useBrowserStore((s) => s.focusOmniboxToken)
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -287,37 +295,61 @@ export function Toolbar(): React.JSX.Element {
 
       <ShieldButton />
 
-      <NavButton
-        icon="external"
-        label="Open this page in your default browser"
-        disabled={disabled || isNewTab}
-        onClick={() => tabId && void window.browser.invoke('shell:openTabExternally', { tabId })}
-      />
+      {/* Only present when the page actually has a sign-in form. */}
+      <PasswordFillButton />
 
-      <NavButton
-        icon="bookmarks"
-        label="Bookmarks (Ctrl+Shift+O)"
-        active={panel === 'bookmarks'}
-        onClick={() => togglePanel('bookmarks')}
-      />
-      <NavButton
-        icon="clock"
-        label="History (Ctrl+H)"
-        active={panel === 'history'}
-        onClick={() => togglePanel('history')}
-      />
-      <NavButton
-        icon="download"
-        label="Downloads (Ctrl+J)"
-        active={panel === 'downloads'}
-        onClick={() => togglePanel('downloads')}
-      />
-      <NavButton
-        icon="activity"
-        label="Performance (Ctrl+Shift+P)"
-        active={panel === 'performance'}
-        onClick={() => togglePanel('performance')}
-      />
+      {/* Hideable buttons. Each keeps its keyboard shortcut and menu entry when
+          hidden — this is about clutter, not capability. Settings is never
+          hideable: it is the only route back to un-hiding the rest. */}
+      {shown('external') && (
+        <NavButton
+          icon="external"
+          label="Open this page in your default browser"
+          disabled={disabled || isNewTab}
+          onClick={() => tabId && void window.browser.invoke('shell:openTabExternally', { tabId })}
+        />
+      )}
+
+      {shown('reading') && (
+        <NavButton
+          icon="star"
+          label="Reading list"
+          active={panel === 'reading'}
+          onClick={() => togglePanel('reading')}
+        />
+      )}
+      {shown('bookmarks') && (
+        <NavButton
+          icon="bookmarks"
+          label="Bookmarks (Ctrl+Shift+O)"
+          active={panel === 'bookmarks'}
+          onClick={() => togglePanel('bookmarks')}
+        />
+      )}
+      {shown('history') && (
+        <NavButton
+          icon="clock"
+          label="History (Ctrl+H)"
+          active={panel === 'history'}
+          onClick={() => togglePanel('history')}
+        />
+      )}
+      {shown('downloads') && (
+        <NavButton
+          icon="download"
+          label="Downloads (Ctrl+J)"
+          active={panel === 'downloads'}
+          onClick={() => togglePanel('downloads')}
+        />
+      )}
+      {shown('performance') && (
+        <NavButton
+          icon="activity"
+          label="Performance (Ctrl+Shift+P)"
+          active={panel === 'performance'}
+          onClick={() => togglePanel('performance')}
+        />
+      )}
       <NavButton
         icon="settings"
         label="Settings (Ctrl+,)"

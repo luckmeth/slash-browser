@@ -48,6 +48,7 @@ import {
 } from '../types/permission'
 import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types/browsing'
 import { ReadingItemSchema } from '../types/readingList'
+import { LoginFormSchema, VaultStatusSchema } from '../types/logins'
 import type { InvokeChannel, EventChannel } from './channels'
 
 export {
@@ -115,7 +116,8 @@ export const OverlayStateSchema = z.object({
     'tab-search',
     'reader',
     'shield',
-    'onboarding'
+    'onboarding',
+    'passwords'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
@@ -623,6 +625,40 @@ export const invokeContracts = {
     response: z.array(ReadingItemSchema)
   },
   'reading:clearRead': { request: z.void(), response: z.array(ReadingItemSchema) },
+
+  /**
+   * Saved sign-ins.
+   *
+   * Note what is absent: there is no channel that returns a password. The vault
+   * decrypts only inside the main process, and the value goes into the page
+   * through Chromium's input pipeline. `VaultStatus` has no field a password
+   * could travel in, so a future handler cannot leak one by accident.
+   */
+  'vault:status': { request: z.void(), response: VaultStatusSchema },
+  'vault:save': {
+    request: z.object({
+      host: z.string(),
+      username: z.string().default(''),
+      password: z.string()
+    }),
+    /** The failure reason, or null on success. */
+    response: z.object({ error: z.string().nullable(), status: VaultStatusSchema })
+  },
+  'vault:remove': { request: z.object({ id: z.number().int() }), response: VaultStatusSchema },
+  'vault:clearAll': { request: z.void(), response: VaultStatusSchema },
+  /** What Slash can offer to fill on this tab right now. */
+  'vault:formForTab': {
+    request: TabIdSchema,
+    response: z.object({
+      form: LoginFormSchema,
+      host: z.string(),
+      matches: VaultStatusSchema.shape.logins
+    })
+  },
+  'vault:fill': {
+    request: z.object({ tabId: z.string(), loginId: z.number().int() }),
+    response: z.object({ error: z.string().nullable() })
+  },
 
   'reader:open': { request: z.void(), response: ReaderResultSchema },
   /** Pulled by the overlay document once it has mounted. */

@@ -527,6 +527,38 @@ const m016_reading_list: Migration = {
   `
 }
 
+const m017_logins: Migration = {
+  version: 17,
+  name: 'saved_logins',
+  sql: /* sql */ `
+    -- Saved sign-ins.
+    --
+    -- The password is stored ONLY as a ciphertext blob produced by Electron's
+    -- safeStorage, which on Windows is DPAPI keyed to the user's account. There
+    -- is deliberately no plaintext column and no "encrypted" flag: a schema that
+    -- can represent an unencrypted password is a schema where one eventually
+    -- gets written. If the platform has no secure store, Slash refuses to save
+    -- rather than falling back to something readable next to the history file.
+    --
+    -- The username is NOT encrypted. It is needed to show you which account an
+    -- entry is for before anything is unlocked, and it is the half that is
+    -- usually printed on the site's own screen anyway.
+    CREATE TABLE saved_logins (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      -- Host rather than full URL: a login belongs to a site, not to the page
+      -- that happened to show the form.
+      host         TEXT    NOT NULL,
+      username     TEXT    NOT NULL DEFAULT '',
+      password_enc BLOB    NOT NULL,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      last_used_at INTEGER,
+      UNIQUE (host, username)
+    );
+    CREATE INDEX idx_saved_logins_host ON saved_logins (host);
+  `
+}
+
 const m014_missions: Migration = {
   version: 14,
   name: 'missions',
@@ -578,7 +610,8 @@ export const migrations: readonly Migration[] = [
   m013_watched_pages,
   m014_missions,
   m015_tab_groups,
-  m016_reading_list
+  m016_reading_list,
+  m017_logins
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

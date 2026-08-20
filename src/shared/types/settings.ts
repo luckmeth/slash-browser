@@ -15,6 +15,27 @@ export const SettingsSchema = z.object({
   searchEngineId: z.enum(['duckduckgo', 'google', 'bing', 'startpage']).default('google'),
   homepage: z.string().default('app://newtab'),
   /**
+   * User-defined search engines, triggered by typing their keyword first.
+   *
+   * "gh react hooks" searches GitHub without changing the default engine. The
+   * keyword must be followed by a space to count, so a site whose name happens
+   * to match a keyword — `gh.example.com` — still resolves as an address. A URL
+   * without %s is treated as having the query appended, since that is the
+   * commonest mistake and silently searching the wrong place is worse than
+   * being forgiving.
+   */
+  customSearchEngines: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string().max(60),
+        /** Lower-cased, no whitespace — enforced where it is saved. */
+        keyword: z.string().min(1).max(20),
+        url: z.string()
+      })
+    )
+    .default([]),
+  /**
    * Whether the first-run walkthrough has been seen.
    *
    * A setting rather than a marker file so it lives with everything else the
@@ -37,6 +58,30 @@ export const SettingsSchema = z.object({
   accentColor: z
     .enum(['default', 'blue', 'green', 'purple', 'amber', 'rose', 'teal'])
     .default('default'),
+  /**
+   * Zoom level per site, keyed by host.
+   *
+   * Chromium keeps zoom per *origin* inside a session, but that state does not
+   * survive a restart and is not visible to us — so a site you had to zoom in on
+   * every visit had to be zoomed in on again after every launch. Stored as a
+   * level (Chromium's own scale, 0 = 100%) rather than a percentage, so it can
+   * be handed straight back to `setZoomLevel` without a lossy conversion.
+   *
+   * Only non-default levels are kept: resetting a site to 100% removes its
+   * entry rather than storing a zero, so the map does not grow with every site
+   * ever visited.
+   */
+  siteZoom: z.record(z.string(), z.number()).default({}),
+  /**
+   * Toolbar buttons the user has hidden.
+   *
+   * A deny-list rather than an ordered allow-list, so a button added in a later
+   * version appears by default instead of being invisible to everyone who ever
+   * customised their toolbar. Every hidden button still has its keyboard
+   * shortcut and its menu entry — hiding is about clutter, not capability, and a
+   * setting that silently removed a feature would be a different thing.
+   */
+  hiddenToolbarButtons: z.array(z.string()).default([]),
   /** Compact trades padding for rows on screen. */
   uiDensity: z.enum(['comfortable', 'compact']).default('comfortable'),
   /**

@@ -34,11 +34,28 @@ const HOST_WITH_PORT = /^([a-z0-9.-]+)(:\d{1,5})(\/.*)?$/i
  * tested once. It is pure and has no Electron import, which is what allows the
  * unit tests to cover it directly.
  */
-export function resolveInput(rawInput: string, engineId: SearchEngineId): ResolvedInput {
+export interface CustomSearchEngine {
+  readonly id: string
+  readonly name: string
+  readonly keyword: string
+  readonly url: string
+}
+
+export function resolveInput(
+  rawInput: string,
+  engineId: SearchEngineId,
+  customEngines: readonly CustomSearchEngine[] = []
+): ResolvedInput {
   const input = rawInput.trim()
 
   if (input === '') return { kind: 'internal', url: NEW_TAB_URL }
   if (isInternalUrl(input)) return { kind: 'internal', url: input }
+
+  // A keyword search wins over every other reading of the text, because the
+  // user has explicitly named where the query should go. Checked before the
+  // address rules so "gh some/path" searches rather than resolving as a host.
+  const keyworded = matchKeyword(input, customEngines)
+  if (keyworded) return keyworded
 
   // Anything with whitespace inside is prose, not an address.
   const hasWhitespace = /\s/.test(input)
@@ -79,6 +96,39 @@ export function resolveInput(rawInput: string, engineId: SearchEngineId): Resolv
   }
 
   return search(input, engineId)
+}
+
+/**
+ * Matches "<keyword> query" against the user's own engines.
+ *
+ * The trailing space is what makes this safe: without it a keyword of "gh"
+ * would swallow `github.com`, and a keyword of "a" would swallow almost
+ * everything. A keyword alone with nothing after it is *not* a match either —
+ * it is far more likely to be the start of a domain than an empty search.
+ */
+function matchKeyword(
+  input: string,
+  engines: readonly CustomSearchEngine[]
+): ResolvedInput | null {
+  const separator = input.search(/\s/)
+  if (separator <= 0) return null
+
+  const candidate = input.slice(0, separator).toLowerCase()
+  const rest = input.slice(separator + 1).trim()
+  if (rest === '') return null
+
+  const engine = engines.find((e) => e.keyword.toLowerCase() === candidate)
+  if (!engine) return null
+
+  const encoded = encodeURIComponent(rest)
+  // A URL without a placeholder gets the query appended: it is the commonest
+  // way to get this wrong, and searching the wrong place silently would be a
+  // worse answer than being forgiving about it.
+  const url = engine.url.includes('%s')
+    ? engine.url.replace('%s', encoded)
+    : `${engine.url}${engine.url.includes('?') ? '&' : '?'}q=${encoded}`
+
+  return { kind: 'search', query: rest, url }
 }
 
 function search(query: string, engineId: SearchEngineId): ResolvedInput {

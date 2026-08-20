@@ -212,6 +212,35 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_VAULT_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runVaultCapture }) =>
+        runVaultCapture(window, {
+          available: () => context.vault.available,
+          save: (input) => context.vault.save(input),
+          status: () => context.vault.status(),
+          passwordFor: (id) => context.vault.passwordFor(id),
+          list: () => context.vault.list(),
+          remove: (id) => context.vault.remove(id),
+          dbPath: () => context.db.status().path,
+          fill: async (tabId, loginId) => {
+            const contents = window.tabs.findById(tabId)?.contents
+            if (!contents) return 'no tab'
+            const form = context.loginForms.get(contents.id) ?? {
+              hasPasswordField: false,
+              hasUsernameField: false
+            }
+            return context.loginFiller.fill(contents, loginId, form)
+          }
+        })
+      )
+    }
+
+    if (process.env['SLASH_ZOOM_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runZoomCapture }) =>
+        runZoomCapture(window, { siteZoom: () => context.settings.getAll().siteZoom })
+      )
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>

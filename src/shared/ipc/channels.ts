@@ -142,6 +142,14 @@ export const INVOKE_CHANNELS = [
   'reading:setRead',
   'reading:clearRead',
 
+  // --- saved sign-ins ---
+  'vault:status',
+  'vault:save',
+  'vault:remove',
+  'vault:clearAll',
+  'vault:formForTab',
+  'vault:fill',
+
   // --- reader mode ---
   'reader:open',
   'reader:get',

@@ -14,6 +14,14 @@ export interface TabEventHooks {
   onCrashed: (tab: Tab) => void
   /** A main-frame load failed; the tab now shows the chrome's error page. */
   onLoadFailed: (tab: Tab) => void
+  /**
+   * The remembered zoom for a host, or null if it is at the default.
+   *
+   * Chromium keeps zoom per origin within a session, but that does not survive a
+   * restart — so a site you have to enlarge every visit had to be enlarged again
+   * after every launch.
+   */
+  siteZoomFor?: (url: string) => number | null
 }
 
 /**
@@ -50,6 +58,21 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
 
   contents.on('did-navigate', (_event, url) => {
     tab.patch({ url, error: null })
+
+    // Applied on navigation rather than on load, so the page is laid out at the
+    // right zoom from its first paint instead of visibly reflowing.
+    const remembered = hooks.siteZoomFor?.(url) ?? null
+    const current = contents.getZoomLevel()
+    if (remembered !== null && remembered !== current) {
+      contents.setZoomLevel(remembered)
+      tab.patch({ zoomLevel: remembered })
+    } else if (remembered === null && current !== 0) {
+      // Leaving a zoomed site for one with no preference must return to 100%:
+      // Chromium would otherwise carry the level across in the same tab.
+      contents.setZoomLevel(0)
+      tab.patch({ zoomLevel: 0 })
+    }
+
     syncNavigationState()
     hooks.onNavigated(tab, url)
     hooks.onChanged()

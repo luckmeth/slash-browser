@@ -5,13 +5,15 @@ import { hostOf } from '@shared/url'
 import type { HistoryEntry, Bookmark } from '@shared/types/browsing'
 import type { MemoryResult } from '@shared/types/memory'
 import type { Tab } from '@shared/types/tab'
-import { resolveInput } from './UrlResolver'
+import { resolveInput, type CustomSearchEngine } from './UrlResolver'
 
 export interface SuggestionSources {
   history: HistoryEntry[]
   bookmarks: Bookmark[]
   openTabs: Tab[]
   engineId: SearchEngineId
+  /** The user's own keyword-triggered engines, if any. */
+  customEngines?: readonly CustomSearchEngine[]
   /**
    * Pages from browsing memory, best first. Empty when indexing is off, which
    * is the default — so the omnibox behaves exactly as before for anyone who
@@ -35,7 +37,7 @@ export function buildSuggestions(rawQuery: string, sources: SuggestionSources): 
   if (query === '') return []
 
   const lower = query.toLowerCase()
-  const resolved = resolveInput(query, sources.engineId)
+  const resolved = resolveInput(query, sources.engineId, sources.customEngines ?? [])
   // Same rule as UrlResolver: fall back to the configured default rather than
   // to a hardcoded engine, so the row never offers to search somewhere the user
   // did not pick.

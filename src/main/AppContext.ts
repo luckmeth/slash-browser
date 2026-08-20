@@ -18,6 +18,8 @@ import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
 import { TabGroupRepository } from './db/repositories/TabGroupRepository'
 import { ReadingListRepository } from './db/repositories/ReadingListRepository'
+import { PasswordVault } from './passwords/PasswordVault'
+import { LoginFiller } from './passwords/LoginFiller'
 import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
@@ -85,6 +87,16 @@ export class AppContext {
   readonly closedTabs: ClosedTabRepository
   readonly tabGroups: TabGroupRepository
   readonly readingList: ReadingListRepository
+  readonly vault: PasswordVault
+  readonly loginFiller: LoginFiller
+  /**
+   * Whether each live page has a sign-in form, keyed by webContents id.
+   *
+   * Not persisted and not per-tab-id: it describes the *document* currently
+   * loaded, and a navigation replaces it. Booleans only — the preload reports
+   * that fields exist, never what is in them.
+   */
+  readonly loginForms = new Map<number, { hasPasswordField: boolean; hasUsernameField: boolean }>()
   readonly snapshots: SessionSnapshotManager
   readonly memoryRepository: MemoryRepository
   readonly vectors: VectorStore
@@ -219,6 +231,8 @@ export class AppContext {
     this.closedTabs = new ClosedTabRepository(this.db)
     this.tabGroups = new TabGroupRepository(this.db)
     this.readingList = new ReadingListRepository(this.db)
+    this.vault = new PasswordVault(this.db)
+    this.loginFiller = new LoginFiller(this.vault)
     this.snapshots = new SessionSnapshotManager(
       this.snapshotRepository,
       this.settings,
@@ -268,7 +282,16 @@ export class AppContext {
         }
         return null
       },
-      { onUserGesture: (webContentsId) => this.popups.noteGesture(webContentsId) }
+      {
+        onUserGesture: (webContentsId) => this.popups.noteGesture(webContentsId),
+        // Records what the *current document* offers. A navigation replaces the
+        // entry, and a destroyed tab drops it, so the offer to fill can never
+        // outlive the form it was about.
+        onLoginForm: (webContentsId, form) => {
+          if (form.hasPasswordField) this.loginForms.set(webContentsId, form)
+          else this.loginForms.delete(webContentsId)
+        }
+      }
     )
 
     // A blocked popup has to reach the user. Silently dropping one is
@@ -425,7 +448,23 @@ export class AppContext {
       workspaces: this.workspaces,
       settings: this.settings,
       downloads: this.downloads,
-      onTabDiscarded: (tabId) => this.permissions.cancelForTab(tabId),
+      onTabDiscarded: (tabId) => {
+        this.permissions.cancelForTab(tabId)
+        // Drop sign-in-form records for pages that no longer exist. Reads are
+        // keyed by the current webContents id so a stale entry could never be
+        // used, but a map that only ever grows is still a leak.
+        const live = new Set(
+          this.windows.flatMap((w) =>
+            w.tabs
+              .allTabs()
+              .map((t) => t.contents?.id)
+              .filter((id): id is number => id !== undefined)
+          )
+        )
+        for (const id of this.loginForms.keys()) {
+          if (!live.has(id)) this.loginForms.delete(id)
+        }
+      },
       // Written through on close rather than flushed at quit: a crash is one of
       // the times you most want a tab back, and a shutdown flush never runs.
       // A private tab's address must not survive it. Reopen-closed-tab is
@@ -441,6 +480,23 @@ export class AppContext {
       // Written through on every change. A group is the product of someone
       // naming and sorting things, and losing that to a crash teaches them not
       // to bother doing it again.
+      // Per-site zoom. Only non-default levels are stored: resetting a site to
+      // 100% drops its entry rather than saving a zero, so the map does not grow
+      // an entry for every site ever visited.
+      siteZoomFor: (url) => {
+        const host = hostOf(url)
+        if (!host) return null
+        const level = this.settings.getAll().siteZoom[host]
+        return typeof level === 'number' && level !== 0 ? level : null
+      },
+      onSiteZoomChanged: (url, level) => {
+        const host = hostOf(url)
+        if (!host || isPrivate) return
+        const siteZoom = { ...this.settings.getAll().siteZoom }
+        if (level === 0) delete siteZoom[host]
+        else siteZoom[host] = level
+        this.settings.update({ siteZoom })
+      },
       onGroupsChanged: (groups) => {
         if (isPrivate) return
         this.tabGroups.pruneExcept(groups.map((g) => g.id))

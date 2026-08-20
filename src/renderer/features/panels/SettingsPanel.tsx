@@ -1,15 +1,21 @@
+import { createContext, useContext, useState } from 'react'
 import type { Settings } from '@shared/types/settings'
 import { SEARCH_ENGINES } from '@shared/constants'
 import { SEMANTIC_MODEL_MB } from '@shared/types/semantic'
 import { useBrowserStore } from '../../stores/browserStore'
 import { useSemanticStatus } from '../memory/useSemanticStatus'
 import { ImportSection } from './ImportSection'
+import { SearchEnginesSection } from './SearchEnginesSection'
+import { SiteZoomSection } from './SiteZoomSection'
+import { ToolbarSection } from './ToolbarSection'
+import { PasswordsSection } from './PasswordsSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
 import { UpdateSection } from './UpdateSection'
 
 export function SettingsPanel(): React.JSX.Element {
   const settings = useBrowserStore((s) => s.settings)
   const { status: semantic, setEnabled: setSemanticEnabled } = useSemanticStatus()
+  const [filter, setFilter] = useState('')
 
   if (!settings) return <p className="p-4 text-sm text-[var(--color-text-muted)]">Loading…</p>
 
@@ -18,7 +24,18 @@ export function SettingsPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="space-y-6 p-4">
+    <SettingsFilter.Provider value={filter}>
+      <div className="space-y-6 p-4">
+        {/* Settings had grown to one long scroll, which docs/ROADMAP.md lists as
+            a real problem: everything is here and nothing is findable. */}
+        <input
+          type="search"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Search settings"
+          aria-label="Search settings"
+          className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+        />
       <Group title="Appearance">
         <Field label="Accent colour">
           {/* Swatches rather than a dropdown: the thing being chosen is a
@@ -122,6 +139,22 @@ export function SettingsPanel(): React.JSX.Element {
             ))}
           </select>
         </Field>
+
+        <Field label="Your own engines">
+          <SearchEnginesSection />
+        </Field>
+      </Group>
+
+      <Group title="Zoom">
+        <SiteZoomSection />
+      </Group>
+
+      <Group title="Toolbar">
+        <ToolbarSection />
+      </Group>
+
+      <Group title="Saved sign-ins">
+        <PasswordsSection />
       </Group>
 
       <Group title="Content blocking">
@@ -266,7 +299,16 @@ export function SettingsPanel(): React.JSX.Element {
           an unauthenticated way onto your machine, which is worse than none.
         </p>
       </Group>
-    </div>
+
+        {/* Nothing matched: say so, rather than leaving an empty panel that
+            looks like the settings failed to load. */}
+        {filter.trim() !== '' && !Object.keys(GROUP_KEYWORDS).some((t) => groupMatches(t, filter)) && (
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Nothing matches &ldquo;{filter.trim()}&rdquo;.
+          </p>
+        )}
+      </div>
+    </SettingsFilter.Provider>
   )
 }
 
@@ -281,7 +323,58 @@ const ACCENT_SWATCHES: readonly [string, string][] = [
   ['teal', '#2dd4bf']
 ]
 
-function Group({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+/**
+ * The current filter text, read by every Group.
+ *
+ * A context rather than a prop threaded through eleven call sites: the filter is
+ * ambient to the whole panel, and passing it by hand would mean a new group
+ * silently opting out of search by forgetting an argument.
+ */
+const SettingsFilter = createContext('')
+
+/**
+ * Extra words each group matches on, beyond its heading.
+ *
+ * Matching only headings would mean searching "zoom" or "cookies" found
+ * nothing, because those words live in the controls rather than the titles.
+ * Listed here rather than scraped from rendered children, which would depend on
+ * how deeply a control happens to be nested — and kept in one table so the
+ * groups and the "nothing matched" message can never disagree about what
+ * matches.
+ */
+const GROUP_KEYWORDS: Record<string, string> = {
+  Zoom: 'zoom per-site text size magnify scale percent',
+  Toolbar: 'toolbar buttons icons hide show customise customize clutter',
+  'Saved sign-ins': 'password passwords login logins credentials autofill fill vault account',
+  'Appearance': 'theme accent colour color density glass tabs vertical strip dark light',
+  'Import from another browser': 'chrome edge bookmarks history migrate transfer',
+  'Search': 'engine google duckduckgo bing startpage keyword shortcut custom default',
+  'Content blocking': 'ads trackers shield popups youtube malicious',
+  'Browsing memory': 'index semantic embedding history pages search',
+  'Restore points': 'session snapshot restore tabs startup',
+  'Privacy': 'cookies clear data private excluded origins',
+  'Downloads': 'folder location ask save',
+  'Updates': 'version upgrade release',
+  'Crash reports': 'diagnostics minidump',
+  'Not built yet': 'roadmap missing planned',
+}
+
+function groupMatches(title: string, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (q === '') return true
+  return `${title} ${GROUP_KEYWORDS[title] ?? ''}`.toLowerCase().includes(q)
+}
+
+function Group({
+  title,
+  children
+}: {
+  title: string
+  children: React.ReactNode
+}): React.JSX.Element | null {
+  const query = useContext(SettingsFilter)
+  if (!groupMatches(title, query)) return null
+
   return (
     <section>
       <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
