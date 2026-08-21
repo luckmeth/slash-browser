@@ -1497,6 +1497,30 @@ export function registerHandlers(ctx: AppContext): void {
     return ok({ error })
   })
 
+  // --- unpacked extensions --------------------------------------------------
+
+  ipc.handle('extensions:status', () => ok(ctx.extensions.getStatus()))
+
+  ipc.handle('extensions:add', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const chosen = await dialog.showOpenDialog(window.browserWindow, {
+      title: 'Choose an unpacked extension folder',
+      // A folder, because that is the only thing Electron can load. A .crx from
+      // the Web Store cannot be installed at all, which the panel says plainly.
+      properties: ['openDirectory'],
+      buttonLabel: 'Load extension'
+    })
+    const folder = chosen.canceled ? null : (chosen.filePaths[0] ?? null)
+    if (!folder) return ok({ error: null })
+    return ok({ error: await ctx.extensions.add(folder) })
+  })
+
+  ipc.handle('extensions:remove', async (request) => {
+    await ctx.extensions.remove(request.id)
+    return ok(ctx.extensions.getStatus())
+  })
+
   // --- sponsored tiles ------------------------------------------------------
 
   ipc.handle('sponsor:status', () => ok(ctx.sponsor.status()))

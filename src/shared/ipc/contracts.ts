@@ -50,6 +50,7 @@ import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types
 import { ReadingItemSchema } from '../types/readingList'
 import { SponsorStatusSchema } from '../types/sponsor'
 import { LoginFormSchema, VaultStatusSchema } from '../types/logins'
+import { ExtensionsStatusSchema } from '../types/extensions'
 import type { InvokeChannel, EventChannel } from './channels'
 
 export {
@@ -747,6 +748,15 @@ export const invokeContracts = {
    */
   'newtab:pickBackground': { request: z.void(), response: z.string().nullable() },
   'newtab:backgroundImage': { request: z.void(), response: z.string().nullable() },
+
+  /**
+   * Unpacked extensions. There is no install-from-store channel because
+   * Electron has no install flow to expose.
+   */
+  'extensions:status': { request: z.void(), response: ExtensionsStatusSchema },
+  /** Opens a folder picker; returns the failure reason, or null. */
+  'extensions:add': { request: z.void(), response: z.object({ error: z.string().nullable() }) },
+  'extensions:remove': { request: z.object({ id: z.string() }), response: ExtensionsStatusSchema },
 
   'reader:open': { request: z.void(), response: ReaderResultSchema },
   /** Pulled by the overlay document once it has mounted. */

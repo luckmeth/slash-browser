@@ -11,6 +11,7 @@ import { ToolbarSection } from './ToolbarSection'
 import { PasswordsSection } from './PasswordsSection'
 import { NewTabSection } from './NewTabSection'
 import { SponsorSection } from './SponsorSection'
+import { ExtensionsSection } from './ExtensionsSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
 import { UpdateSection } from './UpdateSection'
 
@@ -170,6 +171,10 @@ export function SettingsPanel(): React.JSX.Element {
 
       <Group title="Sponsored tiles">
         <SponsorSection />
+      </Group>
+
+      <Group title="Extensions">
+        <ExtensionsSection />
       </Group>
 
       <Group title="Toolbar">
@@ -378,6 +383,7 @@ const SettingsFilter = createContext('')
 const GROUP_KEYWORDS: Record<string, string> = {
   Zoom: 'zoom per-site text size magnify scale percent',
   Toolbar: 'toolbar buttons icons hide show customise customize clutter',
+  Extensions: 'extension extensions addon add-on plugin unpacked crx chrome web store',
   'Start page': 'new tab home background image wallpaper gradient start page appearance',
   'Sponsored tiles': 'sponsored ads advertising sponsor revenue tile support funding',
   'Saved sign-ins': 'password passwords login logins credentials autofill fill vault account',

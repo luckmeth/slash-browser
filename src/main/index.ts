@@ -347,6 +347,17 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_EXTENSION_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runExtensionCapture }) =>
+        runExtensionCapture({
+          add: (path) => context.extensions.add(path),
+          status: () => context.extensions.getStatus(),
+          remove: (id) => context.extensions.remove(id),
+          ids: () => context.extensions.getStatus().extensions.map((e) => e.id)
+        })
+      )
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>

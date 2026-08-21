@@ -164,6 +164,11 @@ export const INVOKE_CHANNELS = [
   'newtab:pickBackground',
   'newtab:backgroundImage',
 
+  // --- unpacked extensions ---
+  'extensions:status',
+  'extensions:add',
+  'extensions:remove',
+
   // --- reader mode ---
   'reader:open',
   'reader:get',

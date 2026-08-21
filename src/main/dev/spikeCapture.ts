@@ -3946,6 +3946,88 @@ export async function runFullscreenCapture(window: BrowserWindowController): Pro
   app.quit()
 }
 
+/**
+ * Unpacked extension loading, against a real extension built on the spot.
+ *
+ * Two things are worth proving and neither can be assumed: that Electron in
+ * this app actually loads a folder, and that the gap analysis reaches the UI
+ * with the right verdict. A fixture is written to a temp directory so the probe
+ * does not depend on the machine having an extension lying around.
+ */
+export async function runExtensionCapture(probe: {
+  add: (path: string) => Promise<string | null>
+  status: () => { extensions: { name: string; gaps: { capability: string }[]; error: string | null }[] }
+  remove: (id: string) => Promise<void>
+  ids: () => string[]
+}): Promise<void> {
+  const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+
+  // A content-script extension that asks for one unsupported capability, so
+  // both halves of the report can be checked at once.
+  const dir = mkdtempSync(join(tmpdir(), 'slash-ext-'))
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'manifest.json'),
+    JSON.stringify({
+      manifest_version: 3,
+      name: 'Slash Probe Extension',
+      version: '1.0.0',
+      permissions: ['storage', 'nativeMessaging'],
+      content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'] }]
+    })
+  )
+  writeFileSync(join(dir, 'content.js'), 'globalThis.__slashProbeExtension = true;')
+
+  const error = await probe.add(dir)
+  await delay(600)
+
+  if (error === null) {
+    log.info('extension probe: PASS - the folder loaded')
+  } else {
+    log.error(`extension probe: FAIL - ${error}`)
+  }
+
+  const loaded = probe.status().extensions.find((e) => e.name === 'Slash Probe Extension')
+  if (loaded && loaded.error === null) {
+    log.info('extension probe: PASS - it appears in the list without an error')
+  } else {
+    log.error('extension probe: FAIL - it is missing or failed to load')
+  }
+
+  // The honesty check: the manifest asked for nativeMessaging, which Electron
+  // cannot provide, and the interface must say so rather than implying it works.
+  const flagged = loaded?.gaps.some((gap) => gap.capability === 'nativeMessaging') ?? false
+  if (flagged) {
+    log.info('extension probe: PASS - the unsupported capability is reported to the user')
+  } else {
+    log.error('extension probe: FAIL - an unsupported capability was not reported')
+  }
+
+  // A folder that is not an extension must be refused with a reason.
+  const bad = mkdtempSync(join(tmpdir(), 'slash-notext-'))
+  const badError = await probe.add(bad)
+  if (badError !== null) {
+    log.info(`extension probe: PASS - a folder with no manifest is refused (${badError.slice(0, 40)}…)`)
+  } else {
+    log.error('extension probe: FAIL - a folder with no manifest was accepted')
+  }
+
+  // And removing must clear both the record and the remembered path.
+  const before = probe.ids().length
+  for (const id of probe.ids()) await probe.remove(id)
+  const after = probe.ids().length
+  log.info(`extension probe: remembered paths ${before} -> ${after}`)
+  if (after === 0) {
+    log.info('extension probe: PASS - removing forgets the folder')
+  } else {
+    log.error('extension probe: FAIL - a removed extension is still remembered')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

@@ -18,6 +18,7 @@ import { PermissionManager } from './permissions/PermissionManager'
 import { SnapshotRepository } from './db/repositories/SnapshotRepository'
 import { TabGroupRepository } from './db/repositories/TabGroupRepository'
 import { ReadingListRepository } from './db/repositories/ReadingListRepository'
+import { ExtensionManager } from './extensions/ExtensionManager'
 import { SponsorService } from './sponsor/SponsorService'
 import { PasswordVault } from './passwords/PasswordVault'
 import { LoginFiller } from './passwords/LoginFiller'
@@ -91,6 +92,7 @@ export class AppContext {
   readonly closedTabs: ClosedTabRepository
   readonly tabGroups: TabGroupRepository
   readonly readingList: ReadingListRepository
+  readonly extensions: ExtensionManager
   readonly sponsor: SponsorService
   readonly vault: PasswordVault
   readonly loginFiller: LoginFiller
@@ -256,6 +258,7 @@ export class AppContext {
     this.closedTabs = new ClosedTabRepository(this.db)
     this.tabGroups = new TabGroupRepository(this.db)
     this.readingList = new ReadingListRepository(this.db)
+    this.extensions = new ExtensionManager(this.settings)
     this.sponsor = new SponsorService(this.db, this.settings)
     this.vault = new PasswordVault(this.db)
     this.loginFiller = new LoginFiller(this.vault)
@@ -457,6 +460,11 @@ export class AppContext {
     // Either way the browser opens and browses immediately, with the domain
     // lists covering the gap until this is ready.
     void this.blocker.adblock.load()
+
+    // Extensions are re-loaded on every boot: Electron discards them at exit,
+    // so the remembered folder paths are the only durable reference. Not
+    // awaited — a folder that has since been deleted must not delay startup.
+    void this.extensions.attach(this.sessions.getDefault())
 
     // Inert unless the user switched tiles on *and* an operator configured an
     // endpoint. With either missing this makes no request at all.

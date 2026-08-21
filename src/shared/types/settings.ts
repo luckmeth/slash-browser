@@ -230,6 +230,14 @@ export const SettingsSchema = z.object({
    * relevant if another tool needs it.
    */
   allowPageScripts: z.boolean().default(true),
+  /**
+   * Folders of unpacked extensions to load on every launch.
+   *
+   * Paths, not ids: Electron discards loaded extensions when the app exits, so
+   * the folder is the only durable reference. There is no Chrome Web Store
+   * install flow — Electron has none — so these are folders the user chose.
+   */
+  extensionPaths: z.array(z.string()).default([]),
   blockYouTubeVideoAds: z.boolean().default(true),
   /** Sites the user has turned blocking off for. */
   blockingAllowedSites: z.array(z.string()).default([]),
