@@ -1,165 +1,83 @@
 # What Slash still needs
 
-An honest inventory: what is missing, what it costs, and what I would build in what order.
-Written after a full pass over the codebase, not from a feature wishlist.
+**Verified against the codebase on 2026-08-22**, not from memory. Every "built" claim below was
+checked by finding the code; every "missing" claim by failing to.
 
-> **This document goes stale, and stale entries here cause real damage.** It listed private
-> browsing, tab sleeping visibility and semantic search as missing after all three were built —
-> and the Settings panel repeated the claim to users, telling them a feature they had did not
-> exist. Before starting anything below, check it is actually still missing.
+> **This file has gone stale twice and caused real damage both times.** It once listed private
+> browsing, tab sleeping and semantic search as missing after all three were built — and the Settings
+> panel repeated the claim to users. The most recent QA pass found it still advertising the password
+> manager, reading list, tab groups, tab search, reader mode and the PDF viewer as missing, all of
+> which exist, plus two claims that were simply wrong ("no empty states"; "the tab strip does not
+> scroll or shrink").
 >
-> Built since this was written: semantic search · Chrome/Edge import · browsing memory in the
-> omnibox · tab search · reader mode · Slash-styled error pages · inline PDF viewer · vertical tabs.
+> `CLAUDE.md` tells you to read this before starting feature work, which is exactly why a stale entry
+> here is worse than no file at all. **Check the code before believing a line of it**, and update it
+> when you finish something.
 
-## The uncomfortable summary
+## Built
 
-Slash has seven phases of engines and almost none of them are visible. Workspaces, adaptive tab
-sleeping, browsing memory, time machine, permission intelligence — all built, all behind a panel you
-have to know to open. **A user opening Slash for the first time sees a competent Chromium browser
-with a nice glass theme and no reason to switch.** That is the actual problem, and it is a UI
-problem, not an engine problem.
+Confirmed present. Roughly in the order they arrived:
 
-The engines are the hard part and they are done. What is missing is the part that makes anyone care.
+Workspaces · adaptive tab sleeping · browsing memory · session time travel · permission
+intelligence · Slash Shield (filter lists, cosmetic filtering, popup and redirect guards) ·
+private browsing · Chrome/Edge import · semantic search · omnibox browsing memory · tab search ·
+reader mode · Slash error pages · inline PDF · vertical tabs · crash reporting · update *checking* ·
+page watching · Mission Mode · AI Hub and multi-provider comparison · segmented download engine ·
+Download Guardian · Cleanup Mode · Page Insight · Redirect X-Ray · Tab Brain
 
----
+Added most recently:
 
-## 1. Make the specialness visible (highest value, lowest risk)
+- **Split view** — two panes, one active tab, capped at two deliberately.
+- **Tab groups** — coloured runs, persisted, collapse ≠ sleep.
+- **Reading list** — a queue, separate from bookmarks.
+- **Password vault + autofill** — DPAPI-encrypted; no channel returns a password.
+- **Start page** — backdrops, honest stats, recently closed, sponsored slot.
+- **First-run onboarding** — four screens, and it cannot switch anything on.
+- **Command palette** (Ctrl+K) and **shortcut sheet** (Ctrl+/, generated from the live menu).
+- **Per-site zoom · custom search engines by keyword · a custom engine as the *default* ·
+  configurable toolbar · settings search.**
 
-### New tab page as a real home
-Currently: logo, search box, frequently-visited grid. It says nothing Slash-specific.
-
-Should carry: your workspaces with tab counts · "pick up where you left off" (the last few restore
-points, one click each) · recently closed tabs · a search box that searches **where you have been**,
-not the web · what Slash Shield blocked today · how much memory tab sleeping has saved you.
-
-This is the screen seen most often. It should be the argument for the browser.
-
-### Tab sleeping, visible
-The single thing Slash does that Chrome and Brave do not, and it happens silently. A toolbar readout
-— "6 asleep · 1.2 GB freed" — with measured numbers, plus a dimmed/moon treatment on sleeping tabs in
-the strip. Hover to see why a tab is or is not eligible.
-
-Honest bit: only hibernation frees measurable memory; freezing is an estimate and must stay labelled.
-
-### Browsing memory in the omnibox
-Typing should surface pages you actually visited, ranked, with **why it matched** — matched terms,
-when you saw it, which workspace. "That article about Postgres indexes, last Tuesday" is a real
-thing people want and no mainstream browser does it well.
-
-### Workspace theming
-Per-workspace accent colour applied to the whole window chrome, so switching context is felt rather
-than read. Cheap to build, disproportionate effect.
+Also already present, contrary to older versions of this file: **empty states** in History,
+Bookmarks and Downloads, and a tab strip that **shrinks** tabs to fit (and, since the last QA pass,
+scrolls once shrinking bottoms out).
 
 ---
 
-## 2. Personalisation
+## Genuinely missing
 
-None of this exists yet, and all of it is what makes a browser feel like *yours*:
+### Blocking, in order of what it costs you
 
-- **Themes** — accent colour, light/dark/system, glass intensity slider (some people hate acrylic),
-  a solid-background option for Windows 10 and low-end GPUs.
-- **Custom new tab background** — local image or gradient. No network fetch.
-- **Density** — compact / comfortable tab strip and UI scale.
-- **Tab strip position** — top or vertical-left. Vertical tabs are a genuine differentiator and the
-  view-stack architecture already supports insetting the page for it.
-- **Configurable toolbar** — reorder and hide buttons; not everyone wants a downloads icon.
-- **Custom search engines** — add your own with a keyword prefix.
-- **Custom keyboard shortcuts** — the menu already owns every accelerator, so this is a settings
-  surface over an existing map, not new plumbing.
-- **Per-site zoom and per-site settings** memory.
+1. **Installing updates.** `UpdateService` checks a feed and deliberately refuses to install,
+   because an unsigned auto-installer is an unauthenticated code path onto the user's machine. Needs
+   a code-signing certificate — a purchase, not a coding task. See `docs/LAUNCH.md`.
+2. **Sync.** No account, no cross-device anything. A deliberate fit with local-first, and the thing
+   users will ask for first.
+3. **Accessibility pass.** No screen reader has ever been tried against this; keyboard navigation is
+   partial. Untested rather than known-bad.
 
----
+### Smaller gaps
 
-## 3. The "not built yet" list
-
-*(Semantic search came off this list: MiniLM runs in a utility process, vectors live in `sqlite-vec`,
-and results are fused with the keyword index by reciprocal rank. The model ships with the app and
-never touches the network. It is opt-in and keyword search remains the default. What it does **not**
-do: read past roughly the first 8,000 characters of a long page.)*
-
-### Private browsing — **build this next after the visibility work**
-Its absence is conspicuous; every browser has it. The Web Memory gate already has the flag and
-honours it, so this is mostly: a new window type, a non-persistent session from `SessionRegistry`,
-visual treatment, and refusing to write history. A few days, not weeks.
-
-### Auto-update — **the real blocker for shipping to anyone**
-Chromium ships security fixes roughly monthly. A browser that cannot update itself is a knowingly
-vulnerable renderer with no path to a patch. Needs `electron-updater`, a release feed, and a signing
-certificate. This outranks every feature on this page if Slash is ever handed to another person.
-
-### Crash reporting
-You would currently never learn what broke on someone else's machine.
-
----
-
-## 4. Extensions — read this before promising anything
-
-**Electron cannot install Chrome Web Store extensions.** This is the honest constraint and it is a
-hard one.
-
-What Electron actually supports, via `session.extensions.loadExtension()`:
-
-- **Unpacked extensions only** — a folder, not a `.crx`. No Web Store install flow.
-- **A subset of the extension APIs.** Devtools extensions and simple content-script extensions work.
-  `chrome.tabs`, `chrome.storage`, parts of `chrome.runtime` work. Much else does not.
-- **No `webRequest` blocking API and no full `declarativeNetRequest`** — so uBlock Origin, the
-  extension most people would want, **does not work**. This is also why Slash Shield exists as a
-  built-in rather than as "just install an ad blocker".
-- **Not persisted across restarts** — extensions must be re-loaded on every launch, so we would keep
-  our own registry of installed paths.
-- **No auto-update**, no permission-prompt infrastructure, no store UI.
-
-What is realistically buildable:
-
-1. **"Load unpacked extension" in Settings** — pick a folder, we persist the path and reload it each
-   launch. Honest, small, works today. Useful for anyone doing development, and for the handful of
-   extensions that do function.
-2. **A curated built-in catalogue** — a short list of known-compatible extensions we test, install by
-   download-and-unpack. This looks like a store without pretending to be one.
-3. **A Slash-native plugin API** — our own extension surface over the IPC contracts we already have
-   (a plugin could add omnibox commands, a side panel, AI actions). More work, but it fits the
-   architecture, is properly sandboxed, and does not inherit Chromium's extension baggage.
-
-**What I will not do:** imply Chrome Web Store compatibility, or ship an "Extensions" store page that
-mostly shows things that will not run. That is the same honesty rule as the virus-scanner wording.
-
----
-
-## 5. Missing browser basics people will notice
-
-These are unglamorous and their absence is felt immediately:
-
-- **Password manager** — or at minimum, integration with the OS one. Currently nothing.
-- **Autofill** for addresses and payment details.
-- **Sync** — no account, no cross-device. A deliberate fit with local-first, but users will ask.
-- **Reading list / read-it-later**, distinct from bookmarks.
-- **Reader mode** — Readability is already a dependency for Web Memory; this is nearly free.
-- **PDF viewer** — Chromium's is available but needs wiring.
-- **Tab search** (Ctrl+Shift+A) — essential past ~30 tabs.
-- **Tab groups within a workspace** — colour-coded runs in the strip.
-- **Picture-in-picture**, **cast**, **translate**.
-- **Import from Chrome/Edge** — bookmarks, history, passwords. Without this, switching is a wall.
-- **Accessibility pass** — no screen reader has ever been tried; keyboard navigation is partial.
 - **Multi-window session restore** — snapshots are per-database, so restoring puts every tab in one
   window regardless of where it came from.
+- **Custom keyboard shortcuts.** The sheet lists them; nothing remaps them. The menu already owns
+  every accelerator, so this is a settings surface over an existing map.
+- **Form-state restore** — needs its own decision: it means writing what you typed, excluding
+  password fields, into the local database. Off by default, and the settings copy would have to say
+  exactly that.
+- **Picture-in-picture, cast, page translation.** None built. Translation in particular cannot be
+  done without sending page text somewhere, so it needs the same opt-in treatment as the AI layer.
+- **Side panels inset the page rather than floating.** Correct for the architecture, but it makes
+  opening History feel heavy. An overlay-view panel would suit quick lookups.
 
----
+### Extensions — read this before promising anything
 
-## 6. UI/UX problems worth fixing
+**Electron cannot install Chrome Web Store extensions.** Unpacked folders only, a subset of the
+APIs, no `webRequest` blocking and no full `declarativeNetRequest` — so uBlock Origin, the extension
+most people would want, **does not work**. That is why Slash Shield is built in.
 
-- **The side panel insets the page rather than floating.** Correct given the architecture, but it
-  makes opening History feel heavy. Consider an overlay-view panel for quick lookups.
-- **No empty states.** Empty history, no bookmarks, no downloads all render as blank space.
-- **No onboarding.** First launch should offer: import from your old browser, pick an accent, choose
-  a search engine, explain what tab sleeping will do. Three screens.
-- **Errors are silent.** A failed page load shows Chromium's default; there is no Slash-styled error
-  page with a Retry that also says whether Shield blocked it.
-- **No loading feedback on slow panels** — memory search over a large index just pauses.
-- **Favicon fallbacks** are inconsistent — some tabs show a blank square.
-- **The tab strip does not scroll or shrink gracefully** past ~15 tabs; titles become unreadable
-  before anything adapts.
-- **No visible keyboard-shortcut discovery.** Everything is in the menu, which is hidden behind Alt.
-- **Settings is one long scroll** — it needs sections and a search box.
+Nothing extension-related is built today. What is realistically buildable: a "load unpacked
+extension" setting, or a Slash-native plugin API over the existing IPC contracts. What will not be
+done: implying Web Store compatibility.
 
 ---
 
@@ -167,15 +85,13 @@ These are unglamorous and their absence is felt immediately:
 
 | # | Work | Why |
 |---|---|---|
-| 1 | ~~Visible tab sleeping, memory in omnibox~~ · new tab page, workspace theming | Partly done. The new tab page is still the weakest screen. |
-| 2 | Onboarding — ~~import from Chrome/Edge~~ | Import is built; the three-screen first run is not. |
-| 3 | ~~Private browsing~~ | Built. |
-| 4 | ~~Tab search, reader mode, PDF~~ · empty states | Only empty states left. |
-| 5 | Personalisation — ~~vertical tabs~~, themes, density | Vertical tabs, accent, density and glass are all in. |
-| 6 | Extensions: load-unpacked + honest scoping | Real capability without overpromising. |
-| 7 | Auto-update + code signing + crash reporting | **Mandatory before anyone else uses it.** |
-| 8 | Password manager, sync | Larger projects, lower urgency. |
+| 1 | Code signing → installing updates | Everything else is downstream of shipping safely |
+| 2 | Accessibility pass | The largest untested surface in the product |
+| 3 | Multi-window restore, custom shortcuts | Small, visible, no new architecture |
+| 4 | Sync | Large; needs an account system that does not exist |
+| 5 | Extensions: load-unpacked, honestly scoped | Real capability without overpromising |
 
-Form-state restore sits alongside #5 and needs its own decision: it means writing what you typed —
-excluding password fields — into the local database. It is off by default and the settings copy says
-exactly that.
+## Keeping this file honest
+
+Before adding an entry, grep for it. Before trusting one, grep for it. The QA pass that found the
+last round of rot did it with `grep -rl` against `src/` and took under a minute.

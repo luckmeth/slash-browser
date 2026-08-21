@@ -46,8 +46,12 @@ there are roughly 190 of these.
 
 ## UPDATE — the pre-roll is now removed, by the mechanism described below
 
-The decision left open below was taken: `YouTubeAdFilter` injects one script into YouTube's own
-JavaScript context and deletes the ad-break fields.
+The decision left open below was taken: one script runs in YouTube's own JavaScript context and
+deletes the ad-break fields. It was originally a dedicated `YouTubeAdFilter`; that class no longer
+exists, because only **one** debugger client may attach to a `WebContents` and a second feature
+needing the page (the `window.open` defuser) would have silently lost the race for it. Both scripts
+now register with `ScriptletInjector`, the single attach point, and each re-checks its own hostname
+and setting at runtime.
 
 ### UPDATE 2 — the SPA hole: "ads still play"
 

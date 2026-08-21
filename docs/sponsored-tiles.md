@@ -8,6 +8,13 @@ endpoint (`sponsorEndpoint`). With either missing, no request is ever made — w
 onboarding claim that "nothing leaves this device unless you turn it on" remains literally true on
 a default install.
 
+> **If you ship a build with an endpoint preconfigured and tiles switched on, that claim becomes
+> false and you must change the copy.** It appears in the first onboarding screen and in the start
+> page footer ("Everything here stays on this device"). Shipping either of those next to a browser
+> that fetches advert batches on launch is the single fastest way to lose the trust this product is
+> built on — far more damaging than the revenue is worth. Either leave it opt-in, or reword both
+> to say exactly what leaves and what does not.
+
 ## The shape it has, and why
 
 A browser sold on blocking advertising does not get to serve advertising carelessly. Four rules are
@@ -76,9 +83,15 @@ impressions and reported none of them. The probe caught it; see `SLASH_SPONSOR_P
 npm run build && SLASH_SPONSOR_PROBE=1 npx electron-vite preview
 ```
 
-Runs a local server offering three creatives — one valid, one with a remote image, one with an
-`http:` click target — and asserts that two are refused, that the fetch carried no cookie or
-identifier, and that the report body contains counts and a day and nothing else.
+Runs a local server offering five creatives — three valid, one with a remote image, one with an
+`http:` click target — and asserts that the two bad ones are refused, that reading the status does
+not rotate the advert, that every cached creative resolves by its own id, that an invented id is
+refused, that the fetch carried no cookie or identifier, and that the report body contains counts
+and a day and nothing else.
+
+The batch is deliberately **more than one** creative. An earlier version served a single valid tile,
+and `rotation % 1` is always `0` — which hid a bug where reading the status rotated the batch, so a
+click resolved against a different advert, was billed, and opened nothing.
 
 ## What this will and will not earn
 
