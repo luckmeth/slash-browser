@@ -273,6 +273,25 @@ if (!app.requestSingleInstanceLock()) {
       void import('./dev/spikeCapture').then(({ runPaletteCapture }) => runPaletteCapture(window))
     }
 
+    if (process.env['SLASH_POLISH_PROBE']) {
+      void Promise.all([import('./dev/spikeCapture'), import('electron')]).then(
+        ([{ runPolishCapture }, { Menu }]) =>
+          runPolishCapture(window, {
+            menuAccelerators: () => {
+              const menu = Menu.getApplicationMenu()
+              if (!menu) return 0
+              let count = 0
+              for (const top of menu.items) {
+                for (const item of top.submenu?.items ?? []) {
+                  if (item.accelerator && item.visible !== false) count += 1
+                }
+              }
+              return count
+            }
+          })
+      )
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>

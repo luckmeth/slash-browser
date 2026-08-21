@@ -7,6 +7,7 @@ import {
   type MenuItemConstructorOptions,
   type WebContents
 } from 'electron'
+import { DEFAULT_SETTINGS } from '@shared/types/settings'
 import { SEARCH_ENGINES, type SearchEngineId } from '@shared/constants'
 import { isInternalUrl } from '@shared/types/tab'
 import type { TabManager } from '../tabs/TabManager'
@@ -16,7 +17,8 @@ export interface ContextMenuDeps {
   tabs: TabManager
   window: BaseWindow
   workspaces: WorkspaceRepository
-  searchEngineId: () => SearchEngineId
+  /** May be a built-in id or one of the user's own engines. */
+  searchEngineId: () => string
   bookmarkUrl: (url: string, title: string) => void
   /** Confirmed before moving a tab across an isolation boundary. */
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void
@@ -128,7 +130,11 @@ function buildPageMenu(
   } else if (params.selectionText) {
     const text = params.selectionText.trim()
     const shown = text.length > 30 ? `${text.slice(0, 30)}…` : text
-    const engine = SEARCH_ENGINES[deps.searchEngineId()]
+    // Falls back to the schema default when the chosen engine is one of the
+    // user's own, which this menu does not carry the list for.
+    const engine =
+      SEARCH_ENGINES[deps.searchEngineId() as SearchEngineId] ??
+      SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId as SearchEngineId]
     items.push(
       { label: 'Copy', role: 'copy' },
       {

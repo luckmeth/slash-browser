@@ -12,7 +12,20 @@ import { z } from 'zod'
  */
 export const SettingsSchema = z.object({
   // --- Phase 1: core browser -------------------------------------------------
-  searchEngineId: z.enum(['duckduckgo', 'google', 'bing', 'startpage']).default('google'),
+  /**
+   * The default search engine.
+   *
+   * A plain string, not an enum of the four built-ins, so one of the user's
+   * **own** engines can be the default. That is not only a convenience: a search
+   * partnership pays against a URL carrying your partner code, and it only earns
+   * anything if it is where searches actually go. An enum here made that
+   * impossible — the partner engine could be typed with a keyword and never be
+   * the default.
+   *
+   * An id matching nothing falls back to the schema default rather than
+   * searching somewhere the user did not choose.
+   */
+  searchEngineId: z.string().default('google'),
   homepage: z.string().default('app://newtab'),
   /**
    * User-defined search engines, triggered by typing their keyword first.

@@ -158,6 +158,13 @@ export function buildApplicationMenu(ctx: AppContext): void {
           }
         },
         {
+          // Conventional, and it makes the rest of this menu discoverable
+          // without pressing Alt to find the menu bar first.
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CommandOrControl+/',
+          click: () => ctx.focusedWindow()?.showShortcuts()
+        },
+        {
           // Ctrl+K is the near-universal binding for this, and it is free here.
           label: 'Command Palette…',
           accelerator: 'CommandOrControl+K',

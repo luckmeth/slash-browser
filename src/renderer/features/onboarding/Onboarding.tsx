@@ -205,7 +205,12 @@ function SearchStep({
   current,
   onPick
 }: {
-  current: SearchEngineId
+  /**
+   * May be one of the user's own engines, since the default is a free-form id
+   * now. First run only offers the built-ins, so an unrecognised value simply
+   * highlights nothing rather than being coerced.
+   */
+  current: string
   onPick: (id: SearchEngineId) => void
 }): React.JSX.Element {
   return (

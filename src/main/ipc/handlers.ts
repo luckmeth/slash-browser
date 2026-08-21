@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { app, dialog, shell } from 'electron'
+import { Menu, app, dialog, shell } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
@@ -278,6 +278,28 @@ export function registerHandlers(ctx: AppContext): void {
     if (!window) return err('NOT_FOUND', 'No window for this view')
     ipc.broadcast('ui:command', request, window.privilegedContents())
     return ok(undefined)
+  })
+
+  // Walks the menu Electron is actually using, so the sheet cannot disagree
+  // with the keys that really work. Hidden duplicates (the Ctrl+= twin of
+  // Ctrl+Plus) are skipped — they exist for keyboard layouts, not for reading.
+  ipc.handle('shortcuts:list', () => {
+    const menu = Menu.getApplicationMenu()
+    if (!menu) return ok([])
+
+    const rows: { group: string; label: string; accelerator: string }[] = []
+    for (const top of menu.items) {
+      const group = top.label.replace(/&/g, '')
+      for (const item of top.submenu?.items ?? []) {
+        if (!item.accelerator || item.visible === false) continue
+        rows.push({
+          group,
+          label: item.label.replace(/&/g, '').trim(),
+          accelerator: item.accelerator
+        })
+      }
+    }
+    return ok(rows)
   })
 
   ipc.handle('overlay:getState', (_req, context) => {

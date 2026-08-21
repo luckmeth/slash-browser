@@ -9,6 +9,7 @@ import { ShieldPanel } from './features/shield/ShieldPanel'
 import { Onboarding } from './features/onboarding/Onboarding'
 import { PasswordFillPanel } from './features/passwords/PasswordFillPanel'
 import { CommandPalette } from './features/palette/CommandPalette'
+import { ShortcutSheet } from './features/shortcuts/ShortcutSheet'
 
 /**
  * Root of the overlay document.
@@ -55,6 +56,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <PasswordFillPanel />
     case 'command-palette':
       return <CommandPalette />
+    case 'shortcuts':
+      return <ShortcutSheet />
     case 'spike':
       return <SpikeReport />
     case 'none':

@@ -130,7 +130,7 @@ export function SettingsPanel(): React.JSX.Element {
           <select
             value={settings.searchEngineId}
             onChange={(event) =>
-              update({ searchEngineId: event.target.value as Settings['searchEngineId'] })
+              update({ searchEngineId: event.target.value })
             }
             className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
           >
@@ -139,6 +139,19 @@ export function SettingsPanel(): React.JSX.Element {
                 {engine.name}
               </option>
             ))}
+            {/* The user's own engines can be the default too. That is what makes
+                a search partnership possible: the deal pays against a URL
+                carrying your code, and it only earns if searches actually go
+                there rather than needing a keyword typed first. */}
+            {settings.customSearchEngines.length > 0 && (
+              <optgroup label="Your engines">
+                {settings.customSearchEngines.map((engine) => (
+                  <option key={engine.id} value={engine.id}>
+                    {engine.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </Field>
 

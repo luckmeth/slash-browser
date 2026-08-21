@@ -407,6 +407,20 @@ export class BrowserWindowController {
   }
 
   /**
+   * Opens the keyboard-shortcut sheet.
+   *
+   * Not focused: it is a reference card, and stealing focus from whatever the
+   * user was doing to show them a list of keys would be its own small joke.
+   */
+  showShortcuts(): void {
+    const state = this.overlay.show('shortcuts', this.fullBounds(), {
+      modal: true,
+      takeFocus: false
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
    * Opens the command palette.
    *
    * Modal and focused: it is a text field the user just summoned and their next

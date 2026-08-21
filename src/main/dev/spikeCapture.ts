@@ -3677,6 +3677,113 @@ export async function runPaletteCapture(window: BrowserWindowController): Promis
   app.quit()
 }
 
+/**
+ * The shortcut sheet and the tab-strip overflow fix.
+ *
+ * The sheet is checked against the *menu*, not against a list written here.
+ * Its whole claim is that it cannot drift from the real accelerators, so an
+ * assertion that hard-codes them would be testing the wrong thing.
+ */
+export async function runPolishCapture(
+  window: BrowserWindowController,
+  probe: { menuAccelerators: () => number }
+): Promise<void> {
+  await waitForActiveTab(window)
+
+  window.showShortcuts()
+  await delay(3000)
+
+  const overlay = window.overlay.webContents
+  if (!overlay) {
+    log.error('polish probe: FAIL - no overlay')
+    app.quit()
+    return
+  }
+
+  const sheet = (await overlay.executeJavaScript(
+    `(() => {
+       const rows = [...document.querySelectorAll('li')];
+       const keys = [...document.querySelectorAll('kbd')].map((k) => k.textContent);
+       return {
+         rows: rows.length,
+         hasCtrl: keys.includes('Ctrl'),
+         showsRawToken: keys.some((k) => (k || '').includes('CommandOrControl')),
+         groups: document.querySelectorAll('section h3').length
+       };
+     })()`
+  )) as { rows: number; hasCtrl: boolean; showsRawToken: boolean; groups: number }
+
+  const fromMenu = probe.menuAccelerators()
+  log.info(`polish probe: sheet ${JSON.stringify(sheet)} menuAccelerators=${fromMenu}`)
+
+  if (sheet.rows > 0 && sheet.groups > 0) {
+    log.info('polish probe: PASS - the shortcut sheet rendered grouped rows')
+  } else {
+    log.error('polish probe: FAIL - the sheet is empty')
+  }
+
+  // Every accelerator the menu actually has should appear. This is the check
+  // that makes "it cannot drift" true rather than merely claimed.
+  if (sheet.rows === fromMenu) {
+    log.info(`polish probe: PASS - all ${fromMenu} menu accelerators are listed`)
+  } else {
+    log.error(`polish probe: FAIL - sheet lists ${sheet.rows}, menu has ${fromMenu}`)
+  }
+
+  if (sheet.hasCtrl && !sheet.showsRawToken) {
+    log.info('polish probe: PASS - keys read as Ctrl, not CommandOrControl')
+  } else {
+    log.error('polish probe: FAIL - accelerator tokens are shown raw')
+  }
+
+  await overlay.executeJavaScript(
+    `window.browser.invoke('overlay:setState', { visible: false, surface: 'none' })`
+  )
+  await delay(600)
+
+  // Tab strip: open enough tabs to exhaust shrinking, and confirm the strip
+  // scrolls rather than clipping them out of reach.
+  const chrome = window.privilegedContents()[0]
+  if (!chrome) {
+    log.error('polish probe: FAIL - no chrome view')
+    app.quit()
+    return
+  }
+
+  const before = window.tabs.allTabs().length
+  for (let i = 0; i < Math.max(0, 34 - before); i += 1) {
+    window.tabs.create({ url: NEW_TAB_URL_FOR_PROBE, background: true })
+  }
+  await delay(2500)
+
+  const strip = (await chrome.executeJavaScript(
+    `(() => {
+       const el = document.querySelector('[role="tablist"]');
+       if (!el) return null;
+       const style = getComputedStyle(el);
+       return {
+         tabs: el.querySelectorAll('[role="tab"]').length,
+         overflowX: style.overflowX,
+         scrollable: el.scrollWidth > el.clientWidth + 1
+       };
+     })()`
+  )) as { tabs: number; overflowX: string; scrollable: boolean } | null
+
+  log.info(`polish probe: strip ${JSON.stringify(strip)}`)
+  if (strip && strip.overflowX === 'auto' && strip.scrollable) {
+    log.info('polish probe: PASS - the strip scrolls once shrinking bottoms out')
+  } else if (strip && !strip.scrollable) {
+    log.error('polish probe: FAIL - tabs still do not fit and the strip does not scroll')
+  } else {
+    log.error('polish probe: FAIL - could not read the strip')
+  }
+
+  app.quit()
+}
+
+/** The new tab sentinel, spelled out so the probe needs no shared import. */
+const NEW_TAB_URL_FOR_PROBE = 'slash://newtab'
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

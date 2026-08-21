@@ -119,7 +119,8 @@ export const OverlayStateSchema = z.object({
     'shield',
     'onboarding',
     'passwords',
-    'command-palette'
+    'command-palette',
+    'shortcuts'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
@@ -220,6 +221,19 @@ export const invokeContracts = {
    * has to ask main to broadcast, exactly as a menu accelerator does.
    */
   'ui:run': { request: UiCommandSchema, response: z.void() },
+  /**
+   * Every keyboard shortcut, read out of the live application menu.
+   *
+   * Derived rather than transcribed. A hand-written sheet drifts the first time
+   * an accelerator is reassigned, and a shortcut list that lies is worse than
+   * none — it teaches the wrong key and the user stops trusting the feature.
+   */
+  'shortcuts:list': {
+    request: z.void(),
+    response: z.array(
+      z.object({ group: z.string(), label: z.string(), accelerator: z.string() })
+    )
+  },
 
   /**
    * Reserves a strip on the right for a side panel, shrinking the page view.

@@ -43,7 +43,7 @@ export interface CustomSearchEngine {
 
 export function resolveInput(
   rawInput: string,
-  engineId: SearchEngineId,
+  engineId: string,
   customEngines: readonly CustomSearchEngine[] = []
 ): ResolvedInput {
   const input = rawInput.trim()
@@ -62,7 +62,7 @@ export function resolveInput(
 
   const scheme = extractScheme(input)
   if (scheme) {
-    if (BLOCKED_SCHEMES.has(scheme)) return search(input, engineId)
+    if (BLOCKED_SCHEMES.has(scheme)) return search(input, engineId, customEngines)
     if (NAVIGABLE_SCHEMES.has(scheme) && !hasWhitespace) {
       return { kind: 'url', url: input }
     }
@@ -72,10 +72,10 @@ export function resolveInput(
     if (!hasWhitespace && /^[a-z][a-z0-9+.-]*:/i.test(input)) {
       return { kind: 'url', url: input }
     }
-    return search(input, engineId)
+    return search(input, engineId, customEngines)
   }
 
-  if (hasWhitespace) return search(input, engineId)
+  if (hasWhitespace) return search(input, engineId, customEngines)
 
   // localhost and host:port — common enough in development to be worth handling
   // before the generic domain rule, since "localhost:3000" has no dot.
@@ -95,7 +95,7 @@ export function resolveInput(
     return { kind: 'url', url: `https://${input}` }
   }
 
-  return search(input, engineId)
+  return search(input, engineId, customEngines)
 }
 
 /**
@@ -131,14 +131,34 @@ function matchKeyword(
   return { kind: 'search', query: rest, url }
 }
 
-function search(query: string, engineId: SearchEngineId): ResolvedInput {
+function search(
+  query: string,
+  engineId: string,
+  customEngines: readonly CustomSearchEngine[] = []
+): ResolvedInput {
+  // One of the user's own engines may be the default — see the setting's note
+  // on why that matters for a search partnership.
+  const custom = customEngines.find((entry) => entry.id === engineId)
+  if (custom) {
+    const encoded = encodeURIComponent(query)
+    return {
+      kind: 'search',
+      query,
+      url: custom.url.includes('%s')
+        ? custom.url.replace('%s', encoded)
+        : `${custom.url}${custom.url.includes('?') ? '&' : '?'}q=${encoded}`
+    }
+  }
+
   // Falls back to the *configured default*, not to a hardcoded engine. This
   // used to name DuckDuckGo directly, which meant any path that lost the
   // setting — a stale renderer copy, an unrecognised id from an older profile —
   // silently searched somewhere the user had not chosen, while Settings went on
   // showing their real preference. A default that disagrees with the schema's
   // default is indistinguishable from the setting being ignored.
-  const engine = SEARCH_ENGINES[engineId] ?? SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId]
+  const engine =
+    SEARCH_ENGINES[engineId as SearchEngineId] ??
+    SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId as SearchEngineId]
   return {
     kind: 'search',
     query,

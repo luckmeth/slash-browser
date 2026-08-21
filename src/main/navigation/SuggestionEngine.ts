@@ -11,7 +11,8 @@ export interface SuggestionSources {
   history: HistoryEntry[]
   bookmarks: Bookmark[]
   openTabs: Tab[]
-  engineId: SearchEngineId
+  /** May be a built-in id or one of the user's own engines. */
+  engineId: string
   /** The user's own keyword-triggered engines, if any. */
   customEngines?: readonly CustomSearchEngine[]
   /**
@@ -41,7 +42,13 @@ export function buildSuggestions(rawQuery: string, sources: SuggestionSources): 
   // Same rule as UrlResolver: fall back to the configured default rather than
   // to a hardcoded engine, so the row never offers to search somewhere the user
   // did not pick.
-  const engine = SEARCH_ENGINES[sources.engineId] ?? SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId]
+  // The default may be one of the user's own engines, so its name comes from
+  // there when the id is not a built-in.
+  const custom = (sources.customEngines ?? []).find((entry) => entry.id === sources.engineId)
+  const engine = custom
+    ? { name: custom.name, url: custom.url }
+    : (SEARCH_ENGINES[sources.engineId as SearchEngineId] ??
+      SEARCH_ENGINES[DEFAULT_SETTINGS.searchEngineId as SearchEngineId])
   const suggestions: Suggestion[] = []
 
   // 1. The literal interpretation of what was typed, first — pressing Enter
@@ -162,7 +169,10 @@ export function buildSuggestions(rawQuery: string, sources: SuggestionSources): 
       kind: 'search',
       title: query,
       subtitle: `Search with ${engine.name}`,
-      url: SEARCH_ENGINES[sources.engineId].url.replace('%s', encodeURIComponent(query)),
+      // The engine resolved above, which already accounts for the default
+      // being one of the user's own. Re-indexing the built-ins here would send
+      // a partner-coded default to the wrong place.
+      url: engine.url.replace('%s', encodeURIComponent(query)),
       tabId: null,
       faviconUrl: null
     })

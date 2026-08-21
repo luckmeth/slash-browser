@@ -186,3 +186,44 @@ describe('custom search engines with keyword prefixes', () => {
     expect(result.url.startsWith('https://github.com/')).toBe(true)
   })
 })
+
+describe('a custom engine as the default', () => {
+  // The capability a search partnership needs: the deal pays against a URL
+  // carrying your code, and it only earns if searches actually go there rather
+  // than needing a keyword typed first.
+  const partner = [
+    {
+      id: 'ecosia-partner',
+      name: 'Ecosia',
+      keyword: 'ec',
+      url: 'https://www.ecosia.org/search?q=%s&tt=slashbrowser'
+    }
+  ]
+
+  it('sends plain searches to the custom default, partner code intact', () => {
+    const result = resolveInput('climate news', 'ecosia-partner', partner)
+    expect(result.kind).toBe('search')
+    expect(result.url).toBe('https://www.ecosia.org/search?q=climate%20news&tt=slashbrowser')
+  })
+
+  it('still resolves addresses as addresses', () => {
+    expect(resolveInput('example.com', 'ecosia-partner', partner).kind).toBe('url')
+  })
+
+  it('falls back to the schema default when the id matches nothing', () => {
+    // A profile naming a deleted engine must not search somewhere arbitrary.
+    const result = resolveInput('cats', 'deleted-engine', partner)
+    expect(result.url).toContain('google.com')
+  })
+
+  it('appends the query when a custom default has no placeholder', () => {
+    const noPlaceholder = [{ id: 'np', name: 'NP', keyword: 'np', url: 'https://example.com/find' }]
+    expect(resolveInput('widgets', 'np', noPlaceholder).url).toBe(
+      'https://example.com/find?q=widgets'
+    )
+  })
+
+  it('keeps built-in ids working exactly as before', () => {
+    expect(resolveInput('cats', 'bing', partner).url).toBe('https://www.bing.com/search?q=cats')
+  })
+})

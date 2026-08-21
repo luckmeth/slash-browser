@@ -18,15 +18,18 @@ const PINNED_TAB_WIDTH = 42
  *    swallows the click before it arrives
  *  - tabs shrink to fit rather than scrolling, the way Chrome and Edge do. A
  *    horizontally scrolling strip is a desktop-app pattern; browsers compress.
- */
-/**
- * The tab strip, horizontal or vertical.
+ *
+ * Compression has a floor, though, and past it the strip **scrolls** rather
+ * than clipping. That is not a softening of the rule above but a bug fix: with
+ * `overflow-hidden` and a 44px minimum, the thirtieth tab and everything after
+ * it was drawn outside the container and could not be clicked at all. Shrinking
+ * first and scrolling only when shrinking has run out keeps the browser
+ * behaviour and stops tabs becoming unreachable.
  *
  * Vertical is not a restyling of the same thing: horizontal tabs share a fixed
- * width between them and shrink until unreadable, whereas a vertical list gives
- * every tab a full-width label and scrolls instead. So the width maths below
- * applies only to the horizontal case, and the vertical case deliberately has
- * none.
+ * width between them, whereas a vertical list gives every tab a full-width
+ * label and scrolls from the start. So the width maths applies only to the
+ * horizontal case, and the vertical case deliberately has none.
  */
 export function TabStrip({
   orientation = 'horizontal'
@@ -50,6 +53,12 @@ export function TabStrip({
       ? MAX_TAB_WIDTH
       : Math.max(MIN_TAB_WIDTH, Math.min(MAX_TAB_WIDTH, Math.floor(available / flexibleCount) - 2))
 
+  // Shrinking has bottomed out and the run still does not fit. Without
+  // scrolling, every tab past this point is drawn outside the container and is
+  // simply not clickable — which is how a tab becomes unreachable rather than
+  // merely narrow.
+  const overflowing = stripWidth > 0 && flexibleCount * (tabWidth + 2) > available
+
   async function handleDrop(index: number): Promise<void> {
     if (dragId) await window.browser.invoke('tabs:reorder', { tabId: dragId, toIndex: index })
     setDragId(null)
@@ -66,7 +75,9 @@ export function TabStrip({
       className={
         vertical
           ? 'flex min-h-0 flex-1 flex-col items-stretch gap-0.5 overflow-y-auto px-1.5 py-1.5'
-          : 'flex min-w-0 flex-1 items-end gap-0.5 overflow-hidden px-2 pt-1.5'
+          : `flex min-w-0 flex-1 items-end gap-0.5 px-2 pt-1.5 ${
+              overflowing ? 'overflow-x-auto overflow-y-hidden' : 'overflow-hidden'
+            }`
       }
       role="tablist"
       aria-label="Tabs"
