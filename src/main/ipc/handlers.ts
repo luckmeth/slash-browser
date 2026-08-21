@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { copyFileSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { Menu, app, dialog, shell } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
@@ -16,6 +17,18 @@ import { normaliseHost } from '../passwords/PasswordVault'
 import { ActionExecutor } from '../ai/ActionExecutor'
 import { ContextBuilder } from '../ai/ContextBuilder'
 import type { BrowserWindowController } from '../windows/BrowserWindowController'
+import { createLogger } from '../logger'
+
+const log = createLogger('ipc')
+
+/**
+ * Where the user's chosen start-page background is kept.
+ *
+ * One fixed location, so the read path never takes a filename from settings.
+ */
+function backgroundCachePath(): string {
+  return join(app.getPath('userData'), 'newtab-background.bin')
+}
 
 /**
  * Assembles the AI context for a window.
@@ -1493,26 +1506,44 @@ export function registerHandlers(ctx: AppContext): void {
       filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'avif'] }]
     })
     const file = chosen.canceled ? null : (chosen.filePaths[0] ?? null)
-    if (file) ctx.settings.update({ newTabCustomBackground: file, newTabBackground: 'custom' })
+    if (!file) return ok(null)
+
+    // Copied into userData rather than referenced where it lies. Reading the
+    // stored path directly made this a file-read primitive: anything that could
+    // write a path into settings could have any file on disk handed back to the
+    // renderer as a data URL. Now only a file Slash itself copied is ever read,
+    // so tampering with the setting changes nothing but a label.
+    try {
+      copyFileSync(file, backgroundCachePath())
+    } catch (error) {
+      log.warn('could not copy the chosen background', error)
+      return ok(null)
+    }
+
+    // The original path is kept for display only, and is never opened again.
+    ctx.settings.update({ newTabCustomBackground: file, newTabBackground: 'custom' })
     return ok(file)
   })
 
-  // Read here and handed back as a data URL. The renderer never receives a
-  // filesystem path to load, which is what stops the start page becoming a way
-  // to read arbitrary files.
+  // Handed back as a data URL, read **only** from Slash's own copy in userData.
+  // The stored path is used for nothing but choosing a mime label, so a
+  // tampered setting cannot make this open a file of someone else's choosing.
   ipc.handle('newtab:backgroundImage', () => {
-    const path = ctx.settings.getAll().newTabCustomBackground
-    if (path === '') return ok(null)
+    const original = ctx.settings.getAll().newTabCustomBackground
+    if (original === '') return ok(null)
     try {
-      const bytes = readFileSync(path)
+      const bytes = readFileSync(backgroundCachePath())
       // A very large photograph would be inlined into the document on every new
       // tab; past a few megabytes that is a real cost for a backdrop.
       if (bytes.byteLength > 12 * 1024 * 1024) return ok(null)
-      const ext = path.split('.').pop()?.toLowerCase() ?? 'png'
+      const ext = original.split('.').pop()?.toLowerCase() ?? 'png'
       const mime = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext
-      return ok(`data:image/${mime};base64,${bytes.toString('base64')}`)
+      // Only image types the picker offers. Anything else is labelled png
+      // rather than echoing an arbitrary string into the data URL.
+      const safe = ['png', 'jpeg', 'webp', 'avif'].includes(mime) ? mime : 'png'
+      return ok(`data:image/${safe};base64,${bytes.toString('base64')}`)
     } catch {
-      // A moved or deleted file falls back to the gradient rather than erroring.
+      // Never copied, or the copy was removed: fall back to the gradient.
       return ok(null)
     }
   })

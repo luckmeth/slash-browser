@@ -1,9 +1,13 @@
 import { safeStorage } from 'electron'
 import type { SavedLogin, VaultStatus } from '@shared/types/logins'
+import { normaliseHost } from './hostRules'
 import type { Database } from '../db/Database'
 import { createLogger } from '../logger'
 
 const log = createLogger('vault')
+
+/** Re-exported so existing callers keep one import site for this. */
+export { normaliseHost } from './hostRules'
 
 interface Row {
   id: number
@@ -133,25 +137,6 @@ export class PasswordVault {
 
   clearAll(): void {
     this.db.connection.prepare('DELETE FROM saved_logins').run()
-  }
-}
-
-/**
- * Host, lower-cased and without `www.`.
- *
- * Sites move between the bare domain and the www subdomain freely, and a user
- * does not think of those as two accounts.
- */
-export function normaliseHost(value: string): string {
-  const trimmed = value.trim().toLowerCase()
-  if (trimmed === '') return ''
-  try {
-    // Accepts either a bare host or a full URL, so callers do not each have to
-    // remember which they are holding.
-    const host = trimmed.includes('://') ? new URL(trimmed).hostname : trimmed
-    return host.replace(/^www\./, '')
-  } catch {
-    return trimmed.replace(/^www\./, '')
   }
 }
 
