@@ -1,5 +1,6 @@
 import { net } from 'electron'
 import { SponsorBatchSchema, type SponsorStatus, type SponsoredTile } from '@shared/types/sponsor'
+import { acceptCreative, reportUrlFor, selectTile } from './sponsorRules'
 import type { Database } from '../db/Database'
 import type { SettingsStore } from '../settings/SettingsStore'
 import { createLogger } from '../logger'
@@ -59,28 +60,45 @@ export class SponsorService {
     return this.settings.getAll().sponsoredTilesEnabled && this.endpoint !== ''
   }
 
+  /**
+   * What the start page and the settings panel need to know.
+   *
+   * **Side-effect free.** It used to rotate the batch as it read it, which made
+   * every caller advance the ad — including the click handler, which then
+   * compared the clicked id against a *different* creative, failed its own
+   * guard, and recorded a billable click that opened nothing. Reading state must
+   * not change it; rotation is now `recordImpression`'s job, because an advert
+   * having been *shown* is the thing that should move the batch on.
+   */
   status(): SponsorStatus {
     const cached = this.cachedTiles()
     return {
       enabled: this.settings.getAll().sponsoredTilesEnabled,
       configured: this.endpoint !== '',
-      tile: this.active ? this.pick(cached) : null,
+      tile: this.active ? this.currentTile(cached) : null,
       cached: cached.length,
       pendingReports: this.pendingCount()
     }
   }
 
   /**
-   * Rotates through the cached batch.
+   * The creative currently due, without advancing.
    *
    * Round-robin rather than random, so a small batch is shown evenly instead of
    * one creative dominating by luck — which is what a sponsor is paying for.
    */
-  private pick(tiles: SponsoredTile[]): SponsoredTile | null {
-    if (tiles.length === 0) return null
-    const tile = tiles[this.rotation % tiles.length]!
-    this.rotation += 1
-    return tile
+  private currentTile(tiles: SponsoredTile[]): SponsoredTile | null {
+    return selectTile(tiles, this.rotation)
+  }
+
+  /**
+   * One cached creative by id.
+   *
+   * How a click resolves its destination: from our own record, by the id the
+   * renderer sent, never from whatever the rotation happens to be pointing at.
+   */
+  tileFor(id: string): SponsoredTile | null {
+    return this.cachedTiles().find((tile) => tile.id === id) ?? null
   }
 
   private cachedTiles(): SponsoredTile[] {
@@ -101,17 +119,35 @@ export class SponsorService {
       }))
   }
 
-  /** Impressions and clicks are recorded per creative per day, nothing finer. */
+  /**
+   * Impressions and clicks are recorded per creative per day, nothing finer.
+   *
+   * Recording an impression is also what **advances the rotation**: the advert
+   * has now been shown, so the next start page should get the next one. Keeping
+   * it here rather than in `status()` means reading the state never changes it.
+   */
   recordImpression(tileId: string): void {
-    this.bump(tileId, 'impressions')
+    if (!this.bump(tileId, 'impressions')) return
+    this.rotation += 1
   }
 
   recordClick(tileId: string): void {
     this.bump(tileId, 'clicks')
   }
 
-  private bump(tileId: string, column: 'impressions' | 'clicks'): void {
-    if (!this.active) return
+  /**
+   * @returns whether the count was recorded.
+   *
+   * Ids are checked against the cache first. The id arrives from the renderer,
+   * and an unrecognised one would otherwise be inserted and then reported to
+   * the sponsor as billing data for a creative that was never served.
+   */
+  private bump(tileId: string, column: 'impressions' | 'clicks'): boolean {
+    if (!this.active) return false
+    if (!this.tileFor(tileId)) {
+      log.warn(`ignored a ${column} count for unknown creative ${tileId}`)
+      return false
+    }
     const day = new Date().toISOString().slice(0, 10)
     this.db.connection
       .prepare(
@@ -119,6 +155,7 @@ export class SponsorService {
          ON CONFLICT(tile_id, day) DO UPDATE SET ${column} = ${column} + 1`
       )
       .run(tileId, day)
+    return true
   }
 
   private pendingCount(): number {
@@ -182,19 +219,13 @@ export class SponsorService {
       // distant expiry: stale advertising is a support problem, not a feature.
       const expiresAt = Math.min(parsed.data.expiresAt, Date.now() + MAX_BATCH_AGE_MS)
 
+      // Rejection rules live in `sponsorRules` so they can be tested without
+      // launching a browser — they are the rules that keep a tile from becoming
+      // a tracking pixel, which makes them the ones worth pinning down.
       const accepted = parsed.data.tiles.filter((tile) => {
-        // Remote images are rejected rather than loaded. This is the rule that
-        // keeps a tile from becoming a tracking pixel, so it is enforced here
-        // rather than left to the renderer to honour.
-        if (tile.image !== '' && !tile.image.startsWith('data:image/')) {
-          log.warn(`tile ${tile.id} dropped: image is not a data: URL`)
-          return false
-        }
-        if (!/^https:\/\//i.test(tile.clickUrl)) {
-          log.warn(`tile ${tile.id} dropped: click target is not https`)
-          return false
-        }
-        return true
+        const verdict = acceptCreative(tile)
+        if (!verdict.ok) log.warn(`tile ${tile.id} dropped: ${verdict.reason}`)
+        return verdict.ok
       })
 
       const write = this.db.connection.transaction(() => {
@@ -238,7 +269,10 @@ export class SponsorService {
       .all()
     if (rows.length === 0) return
 
-    const response = await net.fetch(`${this.endpoint.replace(/\/+$/, '')}/report`, {
+    const reportUrl = reportUrlFor(this.endpoint)
+    if (!reportUrl) return
+
+    const response = await net.fetch(reportUrl, {
       method: 'POST',
       credentials: 'omit',
       cache: 'no-store',

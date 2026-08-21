@@ -3451,6 +3451,7 @@ export async function runSponsorCapture(probe: {
   status: () => { enabled: boolean; configured: boolean; cached: number; tile: unknown }
   impression: (id: string) => void
   click: (id: string) => void
+  tileFor: (id: string) => { id: string; clickUrl: string } | null
   clear: () => void
 }): Promise<void> {
   const http = await import('node:http')
@@ -3478,6 +3479,23 @@ export async function runSponsorCapture(probe: {
               body: 'With a local image.',
               image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
               clickUrl: 'https://example.com/offer'
+            },
+            // Two more valid creatives, so the batch has more than one entry.
+            // With a single tile `rotation % 1` is always 0 and the rotation
+            // bug is invisible — which is exactly how it shipped.
+            {
+              id: 'tile-second',
+              sponsor: 'Second Co',
+              headline: 'The second advert',
+              image: '',
+              clickUrl: 'https://example.com/second'
+            },
+            {
+              id: 'tile-third',
+              sponsor: 'Third Co',
+              headline: 'The third advert',
+              image: '',
+              clickUrl: 'https://example.com/third'
             },
             {
               // Must be REJECTED: a remote image is a per-impression request to
@@ -3514,11 +3532,41 @@ export async function runSponsorCapture(probe: {
   const status = probe.status()
   log.info(`sponsor probe: cached=${status.cached} configured=${status.configured}`)
 
-  // Two of the three creatives must have been refused.
-  if (status.cached === 1) {
+  // Three valid, two refused.
+  if (status.cached === 3) {
     log.info('sponsor probe: PASS - the remote-image and http creatives were refused')
   } else {
-    log.error(`sponsor probe: FAIL - expected 1 accepted creative, got ${status.cached}`)
+    log.error(`sponsor probe: FAIL - expected 3 accepted creatives, got ${status.cached}`)
+  }
+
+  // Reading the status must not advance the batch. This is the regression that
+  // billed a click and opened nothing: the click handler read the tile through
+  // status(), which rotated, so it compared the clicked id against a different
+  // creative and silently declined to open anything.
+  const first = probe.status().tile as { id: string } | null
+  const second = probe.status().tile as { id: string } | null
+  if (first && second && first.id === second.id) {
+    log.info('sponsor probe: PASS - reading the status does not rotate the advert')
+  } else {
+    log.error('sponsor probe: FAIL - status() still mutates the rotation')
+  }
+
+  // And every creative must resolve by id, whichever one is currently due.
+  const resolved = ['tile-good', 'tile-second', 'tile-third'].every(
+    (id) => probe.tileFor(id)?.id === id
+  )
+  if (resolved) {
+    log.info('sponsor probe: PASS - every cached creative resolves by its own id')
+  } else {
+    log.error('sponsor probe: FAIL - a click could not resolve its landing page')
+  }
+
+  // An id that was never served must not become billing data.
+  probe.click('tile-invented')
+  if (!probe.tileFor('tile-invented')) {
+    log.info('sponsor probe: PASS - an unknown creative id is refused')
+  } else {
+    log.error('sponsor probe: FAIL - an invented id was accepted')
   }
 
   if (status.tile) {

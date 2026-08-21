@@ -1446,9 +1446,13 @@ export function registerHandlers(ctx: AppContext): void {
   // the same rule the held-popup release follows.
   ipc.handle('sponsor:click', (request, context) => {
     const window = windowOf(context.sender)
-    const tile = ctx.sponsor.status().tile
+    // Resolved by id from our own cache. Reading it out of `status()` meant
+    // taking whatever the rotation was pointing at, which with more than one
+    // cached creative was a *different* advert — so the guard below failed and
+    // the click was billed while the landing page never opened.
+    const tile = ctx.sponsor.tileFor(request.tileId)
     ctx.sponsor.recordClick(request.tileId)
-    if (window && tile && tile.id === request.tileId) {
+    if (window && tile) {
       window.tabs.create({ url: tile.clickUrl, background: false })
     }
     return ok(undefined)

@@ -261,6 +261,7 @@ if (!app.requestSingleInstanceLock()) {
           status: () => context.sponsor.status(),
           impression: (id) => context.sponsor.recordImpression(id),
           click: (id) => context.sponsor.recordClick(id),
+          tileFor: (id) => context.sponsor.tileFor(id),
           clear: () => {
             context.sponsor.clear()
             context.settings.update({ sponsorEndpoint: '', sponsoredTilesEnabled: false })
