@@ -238,7 +238,7 @@ export class AppContext {
       this.blocker.adblock,
       () => this.settings.getAll().blockAds
     )
-    this.injector = new ScriptletInjector()
+    this.injector = new ScriptletInjector(() => this.settings.getAll().allowPageScripts)
     this.injector.register({
       id: 'youtube-ads',
       enabled: () =>

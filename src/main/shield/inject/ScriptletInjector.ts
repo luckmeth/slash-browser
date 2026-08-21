@@ -43,6 +43,13 @@ export class ScriptletInjector {
   private readonly scripts: MainWorldScript[] = []
   private readonly attached = new Set<number>()
 
+  /**
+   * @param allowed The user's switch for page scripts as a whole. Checked on
+   *   every attach, so turning it off stops new tabs immediately; `releaseAll`
+   *   hands back the debugger clients already held.
+   */
+  constructor(private readonly allowed: () => boolean = () => true) {}
+
   register(script: MainWorldScript): void {
     this.scripts.push(script)
   }
@@ -63,6 +70,7 @@ export class ScriptletInjector {
   }
 
   private attach(contents: WebContents): void {
+    if (!this.allowed()) return
     if (contents.isDestroyed() || this.attached.has(contents.id)) return
 
     const active = this.scripts.filter((script) => script.enabled())
@@ -102,6 +110,17 @@ export class ScriptletInjector {
         log.warn('could not install scripts', error)
         this.detach(contents)
       })
+  }
+
+  /**
+   * Releases every debugger client, for when the user switches page scripts off.
+   *
+   * Without this, turning the setting off would stop *new* tabs being touched
+   * while every tab already open kept its client — so the switch would appear
+   * not to work on the pages the user was actually looking at.
+   */
+  releaseAll(all: readonly WebContents[]): void {
+    for (const contents of all) this.detach(contents)
   }
 
   private detach(contents: WebContents): void {

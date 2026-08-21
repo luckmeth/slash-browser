@@ -218,6 +218,18 @@ export const SettingsSchema = z.object({
    * not affect sponsor segments the creator reads out, which are part of the
    * video itself.
    */
+  /**
+   * Whether Slash may run its own scripts inside a page's JavaScript context.
+   *
+   * This is the one capability that reaches into the page itself, so it gets an
+   * explicit switch rather than being implied by the shield settings. Two
+   * scripts depend on it: the YouTube ad-break strip, and the `window.open`
+   * defuser that stops a refused popup from killing the click that asked for it.
+   *
+   * Turning it off also releases the debugger client Slash holds on each tab —
+   * relevant if another tool needs it.
+   */
+  allowPageScripts: z.boolean().default(true),
   blockYouTubeVideoAds: z.boolean().default(true),
   /** Sites the user has turned blocking off for. */
   blockingAllowedSites: z.array(z.string()).default([]),

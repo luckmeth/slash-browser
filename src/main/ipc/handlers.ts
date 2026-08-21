@@ -173,6 +173,20 @@ export function registerHandlers(ctx: AppContext): void {
     // Anything holding a derived copy of a setting has to be told too, or the
     // stored value and the engine's view of it drift apart.
     ctx.blocker.refreshAllowedSites()
+
+    // Switching page scripts off has to reach tabs that are already open.
+    // Gating new attachments alone would leave every current tab still holding
+    // a debugger client, so the switch would appear not to work on the very
+    // page the user was looking at when they turned it off.
+    if (patch.allowPageScripts === false) {
+      const live = ctx
+        .allWindows()
+        .flatMap((window) => window.tabs.allTabs())
+        .map((tab) => tab.contents)
+        .filter((contents): contents is NonNullable<typeof contents> => contents !== null)
+      ctx.injector.releaseAll(live)
+    }
+
     return ok(next)
   })
 

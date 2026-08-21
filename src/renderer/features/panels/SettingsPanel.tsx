@@ -194,6 +194,16 @@ export function SettingsPanel(): React.JSX.Element {
           onChange={(blockMaliciousSites) => update({ blockMaliciousSites })}
         />
         {/*
+          Given its own switch rather than being implied by the shield settings,
+          because it is the one capability that reaches inside a page.
+        */}
+        <Toggle
+          label="Let Slash run scripts inside pages"
+          hint="Needed to remove YouTube's ad breaks, and to stop a blocked popup from breaking the link you clicked. Turning this off also frees the debugger connection Slash keeps on each tab."
+          checked={settings.allowPageScripts}
+          onChange={(allowPageScripts) => update({ allowPageScripts })}
+        />
+        {/*
           Said plainly, because a shield icon invites the assumption that this is
           antivirus. It is not, and a browser cannot be.
         */}
