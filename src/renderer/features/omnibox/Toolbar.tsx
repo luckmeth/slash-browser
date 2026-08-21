@@ -356,6 +356,16 @@ export function Toolbar(): React.JSX.Element {
         active={panel === 'settings'}
         onClick={() => togglePanel('settings')}
       />
+
+      {/* The app menu every browser has. Private browsing and the AI panel were
+          both built and both reachable only by a shortcut nobody was told
+          about, which from the user's side is indistinguishable from missing.
+          Never hideable: it is the route to everything else. */}
+      <NavButton
+        icon="menu"
+        label="Main menu"
+        onClick={() => void window.browser.invoke('menu:showAppMenu', undefined)}
+      />
     </div>
   )
 }

@@ -33,6 +33,7 @@ export const INVOKE_CHANNELS = [
   'overlay:getState',
   'ui:run',
   'shortcuts:list',
+  'menu:showAppMenu',
   'layout:setRightPanelWidth',
   'layout:setChromeHeight',
 

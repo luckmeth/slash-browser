@@ -311,5 +311,20 @@ export function toPermissionKinds(
 
 /** Permissions we answer without ever prompting. */
 export function isSilentlyGranted(electronPermission: string): boolean {
-  return electronPermission === 'clipboard-sanitized-write' || electronPermission === 'mediaKeySystem'
+  return (
+    electronPermission === 'clipboard-sanitized-write' ||
+    electronPermission === 'mediaKeySystem' ||
+    // Fullscreen is granted without asking, as every mainstream browser does.
+    //
+    // It only ever arrives after the user has clicked something asking for it,
+    // it reveals nothing, and Escape leaves at any time — which is exactly what
+    // this permission's own consequence text says. Prompting turned "click the
+    // fullscreen button on a video" into a dialog, and a request the user never
+    // answered simply never entered fullscreen, so the feature read as broken.
+    //
+    // `pointer-lock` is deliberately NOT added: it is equally reversible but it
+    // hides the cursor, which is a different kind of surprise, and nobody has
+    // asked for it.
+    electronPermission === 'fullscreen'
+  )
 }

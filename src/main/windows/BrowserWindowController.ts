@@ -246,6 +246,7 @@ export class BrowserWindowController {
         observeRedirects: (tabId, contents) => {
           this.redirectRecorder.attachToTab(tabId, contents)
           this.deps.observeYouTube?.(contents)
+          this.observePageFullscreen(contents)
         },
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
@@ -527,6 +528,57 @@ export class BrowserWindowController {
   setChromeHeight(height: number): void {
     this.layout.setChromeHeight(height)
     this.applyLayout()
+  }
+
+  /**
+   * Honours a page asking for fullscreen — a video, a game, a slide deck.
+   *
+   * Chromium fires these when a page calls `requestFullscreen()`, but it does
+   * nothing about our layout: the page view kept its usual inset hole and the
+   * toolbar and tab strip stayed drawn around it, so "fullscreen" was a video
+   * boxed inside a browser. Giving the page view the whole content rect is what
+   * actually covers the chrome, because that view composites above it.
+   *
+   * The OS window is taken fullscreen too, so the taskbar goes as well —
+   * otherwise the page fills the window and the window still fills only part of
+   * the screen.
+   */
+  private observePageFullscreen(contents: WebContents): void {
+    // The window state change is deferred out of the event handler.
+    //
+    // Chromium is mid-handshake with the renderer when this fires, and taking
+    // the OS window fullscreen synchronously inside it makes the renderer wait
+    // on a window operation that is itself waiting on the renderer. The layout
+    // is applied immediately — that is what covers the chrome — and only the
+    // window call is pushed to the next tick.
+    contents.on('enter-html-full-screen', () => {
+      this.layout.setPageFullscreen(true)
+      this.applyLayout()
+      setImmediate(() => {
+        if (this.window.isDestroyed()) return
+        if (!this.window.isFullScreen()) this.window.setFullScreen(true)
+        this.applyLayout()
+      })
+    })
+
+    contents.on('leave-html-full-screen', () => {
+      this.layout.setPageFullscreen(false)
+      this.applyLayout()
+      setImmediate(() => {
+        if (this.window.isDestroyed()) return
+        if (this.window.isFullScreen()) this.window.setFullScreen(false)
+        this.applyLayout()
+      })
+    })
+
+    // A tab closed or navigated away while fullscreen would otherwise strand
+    // the window with no chrome and no page asking for it.
+    contents.on('destroyed', () => {
+      if (!this.layout.isPageFullscreen) return
+      this.layout.setPageFullscreen(false)
+      if (this.window.isFullScreen()) this.window.setFullScreen(false)
+      this.applyLayout()
+    })
   }
 
   private applyLayout(): void {

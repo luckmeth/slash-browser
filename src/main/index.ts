@@ -27,7 +27,26 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   const context = new AppContext()
 
-  app.on('second-instance', () => {
+  /**
+   * Which window a launch is asking for.
+   *
+   * The taskbar jump list relaunches the executable with a flag rather than
+   * talking to the running copy, so the single-instance path has to read the
+   * *second* instance's argv — not this process's — and act on it.
+   */
+  const windowRequest = (argv: readonly string[]): 'private' | 'normal' | null => {
+    if (argv.includes('--new-private-window')) return 'private'
+    if (argv.includes('--new-window')) return 'normal'
+    return null
+  }
+
+  app.on('second-instance', (_event, argv) => {
+    const requested = windowRequest(argv)
+    if (requested) {
+      context.createWindow({ isPrivate: requested === 'private' })
+      return
+    }
+
     const [existing] = BrowserWindow.getAllWindows()
     if (existing) {
       if (existing.isMinimized()) existing.restore()
@@ -38,7 +57,36 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     context.start()
     buildApplicationMenu(context)
-    const window = context.createWindow()
+
+    // Right-clicking the taskbar icon. Every mainstream browser offers these
+    // and Slash offered nothing at all, which is one of the two reasons private
+    // browsing looked as though it had never been built.
+    //
+    // Windows-only: `setUserTasks` is a no-op elsewhere, so no platform guard is
+    // needed beyond what Electron already does.
+    app.setUserTasks([
+      {
+        program: process.execPath,
+        arguments: '--new-window',
+        title: 'New window',
+        description: 'Open a new Slash window',
+        iconPath: process.execPath,
+        iconIndex: 0
+      },
+      {
+        program: process.execPath,
+        arguments: '--new-private-window',
+        title: 'New private window',
+        description: 'Open a window that records nothing',
+        iconPath: process.execPath,
+        iconIndex: 0
+      }
+    ])
+
+    // A first launch can itself carry the flag — clicking the jump list while
+    // Slash is closed starts it fresh rather than reaching a running copy.
+    const launchRequest = windowRequest(process.argv)
+    const window = context.createWindow({ isPrivate: launchRequest === 'private' })
 
     // Bring back what was open when the browser was last closed.
     //
@@ -290,6 +338,12 @@ if (!app.requestSingleInstanceLock()) {
               return count
             }
           })
+      )
+    }
+
+    if (process.env['SLASH_FULLSCREEN_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runFullscreenCapture }) =>
+        runFullscreenCapture(window)
       )
     }
 

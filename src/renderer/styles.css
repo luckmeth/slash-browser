@@ -66,6 +66,17 @@
    * of glass is worth that.
    */
   --glass-page: rgba(11, 13, 18, 0.9);
+  /*
+   * Floating panels — the shield, the palette, prompts, dropdowns.
+   *
+   * Nearly opaque for the same reason `--glass-page` is: these carry *text*, and
+   * they float over whatever the page happens to be. At the 0.42 of
+   * `--glass-high` the shield panel over a white page was genuinely unreadable.
+   * The blur and saturation below still give the glass look; what changes is
+   * that the words stay legible over any background rather than only over dark
+   * ones.
+   */
+  --glass-panel: rgba(19, 23, 32, 0.94);
 
   /* Hairlines. Brighter on top, so panes look lit from above. */
   /* Brighter now: at low fill opacity the edge is what defines a pane's shape. */
@@ -159,7 +170,7 @@ body {
 }
 
 .glass-float {
-  background: var(--glass-high);
+  background: var(--glass-panel);
   backdrop-filter: blur(var(--blur-lg)) saturate(160%);
   -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(160%);
   border: 1px solid var(--glass-edge);

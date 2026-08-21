@@ -5,10 +5,12 @@ import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
 import type { BlockingStatus } from '@shared/types/blocking'
+import type { UiCommand } from '@shared/ipc/contracts'
 import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
 import { showTabContextMenu } from '../menus/ContextMenus'
+import { showAppMenu } from '../menus/AppMenu'
 import { buildSuggestions } from '../navigation/SuggestionEngine'
 import { analyseTabs } from '../tabs/brain/tabAnalysis'
 import { isDisabledForHost, toggleHost } from '../cleanup/cleanupRules'
@@ -310,6 +312,42 @@ export function registerHandlers(ctx: AppContext): void {
   // Walks the menu Electron is actually using, so the sheet cannot disagree
   // with the keys that really work. Hidden duplicates (the Ctrl+= twin of
   // Ctrl+Plus) are skipped — they exist for keyboard layouts, not for reading.
+  ipc.handle('menu:showAppMenu', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const send = (command: UiCommand['command']): void =>
+      ipc.broadcast('ui:command', { command }, window.privilegedContents())
+
+    showAppMenu({
+      window: window.browserWindow,
+      createWindow: (options) => ctx.createWindow(options),
+      newTab: () => window.tabs.create({}),
+      send,
+      showCommandPalette: () => window.showCommandPalette(),
+      showShortcuts: () => window.showShortcuts(),
+      toggleSplit: () => {
+        if (window.tabs.splitId) {
+          window.tabs.setSplit(null)
+          return
+        }
+        const { tabs, activeTabId } = window.tabs.snapshot()
+        const index = tabs.findIndex((tab) => tab.id === activeTabId)
+        const partner = tabs[index + 1] ?? tabs[index - 1]
+        if (partner) window.tabs.setSplit(partner.id)
+      },
+      zoom: (step) => {
+        const id = window.tabs.snapshot().activeTabId
+        if (id) window.tabs.setZoomLevel(id, window.tabs.getZoomLevel(id) + step)
+      },
+      resetZoom: () => {
+        const id = window.tabs.snapshot().activeTabId
+        if (id) window.tabs.setZoomLevel(id, 0)
+      },
+      print: () => window.tabs.activeTab?.contents?.print()
+    })
+    return ok(undefined)
+  })
+
   ipc.handle('shortcuts:list', () => {
     const menu = Menu.getApplicationMenu()
     if (!menu) return ok([])

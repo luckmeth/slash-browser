@@ -60,6 +60,24 @@ export class ViewLayoutManager {
   }
 
   private pageInset = 0
+  private pageFullscreen = false
+
+  /**
+   * A page has entered HTML5 fullscreen — a video, a game, a slide deck.
+   *
+   * The page view is composited *above* the chrome view, so giving it the whole
+   * content rect covers the toolbar and tab strip completely. That is the whole
+   * mechanism: without it the page merely fills its usual hole and the browser
+   * chrome stays visible around it, which is what "fullscreen" looked like
+   * before — a video boxed inside a browser.
+   */
+  setPageFullscreen(on: boolean): void {
+    this.pageFullscreen = on
+  }
+
+  get isPageFullscreen(): boolean {
+    return this.pageFullscreen
+  }
 
   compute(contentWidth: number, contentHeight: number): LayoutRects {
     const width = Math.max(0, Math.round(contentWidth))
@@ -68,6 +86,13 @@ export class ViewLayoutManager {
 
     // Clamp so a very short or narrow window degrades to a zero-size page area
     // rather than a negative one, which Chromium rejects.
+    // Fullscreen wins over every inset: no gutter, no sidebar, no panel. A
+    // side panel left open would otherwise carve a strip out of a fullscreen
+    // video.
+    if (this.pageFullscreen) {
+      return { chrome: full, full, page: full }
+    }
+
     const pageY = Math.min(this.chromeHeight, height)
     const pageX = Math.min(this.sidebarWidth, width)
     const available = Math.max(0, width - pageX)

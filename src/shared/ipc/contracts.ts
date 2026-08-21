@@ -228,6 +228,14 @@ export const invokeContracts = {
    * an accelerator is reassigned, and a shortcut list that lies is worse than
    * none — it teaches the wrong key and the user stops trusting the feature.
    */
+  /**
+   * Opens the app menu as a native OS menu.
+   *
+   * Native rather than a React dropdown: a CSS menu in the chrome document is
+   * composited under the page view and clips at the window edge, both of which
+   * have already bitten this codebase.
+   */
+  'menu:showAppMenu': { request: z.void(), response: z.void() },
   'shortcuts:list': {
     request: z.void(),
     response: z.array(

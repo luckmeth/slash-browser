@@ -3866,6 +3866,86 @@ export async function runPolishCapture(
 /** The new tab sentinel, spelled out so the probe needs no shared import. */
 const NEW_TAB_URL_FOR_PROBE = 'slash://newtab'
 
+/**
+ * HTML5 fullscreen — a page asking to fill the screen.
+ *
+ * The reported symptom was a video that went "fullscreen" while the toolbar and
+ * tab strip stayed drawn around it. The page view is composited above the
+ * chrome, so the fix is to give it the whole content rect; this asserts the
+ * rect, not the appearance, because that is the thing that was wrong.
+ */
+export async function runFullscreenCapture(window: BrowserWindowController): Promise<void> {
+  await waitForActiveTab(window)
+  const tabId = window.tabs.activeTab?.id
+  if (!tabId) {
+    log.error('fullscreen probe: FAIL - no active tab')
+    app.quit()
+    return
+  }
+
+  window.tabs.navigate(tabId, 'https://example.com')
+  await delay(6000)
+
+  const contents = window.tabs.activeTab?.contents
+  if (!contents) {
+    log.error('fullscreen probe: FAIL - no page')
+    app.quit()
+    return
+  }
+
+  const before = window.tabs.paneBoundsForProbe().primary
+  const windowBounds = window.browserWindow.getContentBounds()
+  log.info(`fullscreen probe: before ${JSON.stringify(before)} window ${windowBounds.width}x${windowBounds.height}`)
+
+  if (before && (before.width < windowBounds.width || before.height < windowBounds.height)) {
+    log.info('fullscreen probe: PASS - the page is inset while not fullscreen')
+  } else {
+    log.error('fullscreen probe: FAIL - the page already fills the window')
+  }
+
+  // `true` supplies the user gesture requestFullscreen() insists on.
+  await contents.executeJavaScript(
+    'void document.documentElement.requestFullscreen(); true',
+    true
+  )
+  await delay(2500)
+
+  const during = window.tabs.paneBoundsForProbe().primary
+  const fsWindow = window.browserWindow.getContentBounds()
+  log.info(`fullscreen probe: during ${JSON.stringify(during)} window ${fsWindow.width}x${fsWindow.height}`)
+
+  const fills =
+    during !== null &&
+    during.x === 0 &&
+    during.y === 0 &&
+    during.width === fsWindow.width &&
+    during.height === fsWindow.height
+  if (fills) {
+    log.info('fullscreen probe: PASS - the page covers the whole window, chrome included')
+  } else {
+    log.error('fullscreen probe: FAIL - the chrome is still taking space')
+  }
+
+  if (window.browserWindow.isFullScreen()) {
+    log.info('fullscreen probe: PASS - the OS window went fullscreen too')
+  } else {
+    log.error('fullscreen probe: FAIL - the window is not fullscreen, so the taskbar still shows')
+  }
+
+  await contents.executeJavaScript('void document.exitFullscreen(); true', true)
+  await delay(2000)
+
+  const after = window.tabs.paneBoundsForProbe().primary
+  log.info(`fullscreen probe: after ${JSON.stringify(after)}`)
+  if (after && before && after.y === before.y && after.width === before.width) {
+    log.info('fullscreen probe: PASS - leaving restores the toolbar and tab strip')
+  } else {
+    log.error('fullscreen probe: FAIL - the layout did not come back')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]
