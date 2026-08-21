@@ -3826,6 +3826,40 @@ export async function runPolishCapture(
     log.error('polish probe: FAIL - could not read the strip')
   }
 
+  // Resizing the window must re-measure the strip. Without a ResizeObserver the
+  // width only updated when React happened to re-render, so dragging the window
+  // edge left every tab at its old size — and the overflow flag stale with it.
+  const readStrip = async (): Promise<{ width: number; tabWidth: number } | null> =>
+    (await chrome.executeJavaScript(
+      `(() => {
+         const el = document.querySelector('[role="tablist"]');
+         const tab = el && el.querySelector('[role="tab"]');
+         if (!el || !tab) return null;
+         return {
+           width: Math.round(el.clientWidth),
+           tabWidth: Math.round(tab.getBoundingClientRect().width)
+         };
+       })()`
+    )) as { width: number; tabWidth: number } | null
+
+  const original = window.browserWindow.getBounds()
+  const beforeResize = await readStrip()
+  window.browserWindow.setBounds({ ...original, width: Math.max(700, original.width - 420) })
+  await delay(1500)
+  const afterResize = await readStrip()
+  window.browserWindow.setBounds(original)
+  await delay(800)
+
+  log.info(
+    `polish probe: strip width ${beforeResize?.width} -> ${afterResize?.width}, ` +
+      `tab width ${beforeResize?.tabWidth} -> ${afterResize?.tabWidth}`
+  )
+  if (beforeResize && afterResize && afterResize.width < beforeResize.width) {
+    log.info('polish probe: PASS - the strip re-measures when the window resizes')
+  } else {
+    log.error('polish probe: FAIL - the strip did not notice the window resizing')
+  }
+
   app.quit()
 }
 

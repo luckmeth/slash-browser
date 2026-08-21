@@ -24,6 +24,12 @@ const log = createLogger('adblock')
  * therefore be briefly visible on a slow page; the alternative is injecting
  * before the document commits, which needs the debugger and is not worth
  * spending the one CDP client on.
+ *
+ * Also applied on in-page navigation, because a single-page app changes route
+ * without a new document and would otherwise keep the rules of whichever page
+ * happened to load first. Re-inserting is cheap and idempotent — the rules for
+ * a host are the same each time, and a duplicate stylesheet hides the same
+ * elements.
  */
 export class CosmeticFilter {
   constructor(
@@ -33,6 +39,17 @@ export class CosmeticFilter {
 
   observe(contents: WebContents): void {
     contents.on('dom-ready', () => {
+      if (!this.enabled() || !this.adblock.ready) return
+      void this.apply(contents)
+    })
+
+    // In-page navigation too. A single-page app — YouTube, Reddit, Twitter —
+    // changes route without loading a new document, so `dom-ready` fires once
+    // and never again. Without this, cosmetic rules applied to the first page
+    // you landed on and silently stopped working for every route after it,
+    // which is precisely the wrong failure on the sites that need it most.
+    contents.on('did-navigate-in-page', (_event, _url, isMainFrame) => {
+      if (!isMainFrame) return
       if (!this.enabled() || !this.adblock.ready) return
       void this.apply(contents)
     })

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { Tab } from '@shared/types/tab'
 import { isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
@@ -44,6 +44,31 @@ export function TabStrip({
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [stripWidth, setStripWidth] = useState(0)
 
+  /**
+   * Tracks the strip's own width, including while the window is being dragged.
+   *
+   * A ref callback alone only re-measures when React happens to re-render, so
+   * resizing the window left every tab at its old width — and, once the strip
+   * learned to scroll, left the overflow flag stale too, so it could fail to
+   * scroll at exactly the moment it needed to. Tab snapshots re-render often
+   * enough to hide this most of the time, which is what made it easy to miss.
+   */
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const measureStrip = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    if (!node) return
+
+    setStripWidth(node.clientWidth)
+    const observer = new ResizeObserver(([entry]) => {
+      // contentRect excludes padding, which is what the width maths already
+      // assumes; clientWidth would double-count it.
+      if (entry) setStripWidth(Math.round(entry.contentRect.width))
+    })
+    observer.observe(node)
+    observerRef.current = observer
+  }, [])
+
   const pinnedCount = tabs.filter((t) => t.isPinned).length
   const flexibleCount = tabs.length - pinnedCount
   // Leave room for the new-tab button.
@@ -59,6 +84,9 @@ export function TabStrip({
   // merely narrow.
   const overflowing = stripWidth > 0 && flexibleCount * (tabWidth + 2) > available
 
+  // The ref callback disconnects when the node changes; this covers unmount.
+  useEffect(() => () => observerRef.current?.disconnect(), [])
+
   async function handleDrop(index: number): Promise<void> {
     if (dragId) await window.browser.invoke('tabs:reorder', { tabId: dragId, toIndex: index })
     setDragId(null)
@@ -69,9 +97,7 @@ export function TabStrip({
 
   return (
     <div
-      ref={(node) => {
-        if (node) setStripWidth(node.clientWidth)
-      }}
+      ref={measureStrip}
       className={
         vertical
           ? 'flex min-h-0 flex-1 flex-col items-stretch gap-0.5 overflow-y-auto px-1.5 py-1.5'
