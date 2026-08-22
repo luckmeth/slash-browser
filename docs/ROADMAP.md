@@ -98,13 +98,16 @@ needs `webRequestBlocking`; neither will run. Grammarly, being a content script,
 
 ## Suggested order
 
+Items 2 through 5 of the previous list are built. What is left is not
+development work in the usual sense:
+
 | # | Work | Why |
 |---|---|---|
-| 1 | Code signing → installing updates | Everything else is downstream of shipping safely |
-| 2 | Accessibility pass | The largest untested surface in the product |
-| 3 | Multi-window restore, custom shortcuts | Small, visible, no new architecture |
-| 4 | Sync | Large; needs an account system that does not exist |
-| 5 | Extensions: load-unpacked, honestly scoped | Real capability without overpromising |
+| 1 | **Buy a code-signing certificate** | The only thing between this build and self-updating. The install path is written, wired and gated on a real signature check. A purchase and a business verification, not a coding task |
+| 2 | **Run a screen reader against the whole browser** | The focus, contrast and live-region work is done and none of it has been tried by somebody actually using assistive technology. It remains the largest unknown in the product |
+| 3 | **Exercise sync and translation against something live** | Both have unit tests over their logic and neither has spoken to a real server or provider. Two devices and one API key would settle it |
+| 4 | **Stand up the ad platform** | Four accounts and the RLS check in `platform/README.md`. Test row-level security first, with two real advertiser accounts |
+| 5 | A search partnership | Still worth more than the ad platform at your current size. `docs/LAUNCH.md` |
 
 ## Keeping this file honest
 
