@@ -45,27 +45,36 @@ scrolls once shrinking bottoms out).
 
 ## Genuinely missing
 
-### Blocking, in order of what it costs you
+### Blocking
 
-1. **Installing updates.** `UpdateService` checks a feed and deliberately refuses to install,
-   because an unsigned auto-installer is an unauthenticated code path onto the user's machine. Needs
-   a code-signing certificate — a purchase, not a coding task. See `docs/LAUNCH.md`.
-2. **Sync.** No account, no cross-device anything. A deliberate fit with local-first, and the thing
-   users will ask for first.
-3. **Accessibility pass.** No screen reader has ever been tried against this; keyboard navigation is
-   partial. Untested rather than known-bad.
+1. **A code-signing certificate.** The *only* thing left on updates. The download-and-install path
+   is written and wired; `isSignedBuild()` asks Windows whether the running binary carries a valid
+   Authenticode signature, and `canInstall` follows from that. Buy a certificate, set `CSC_LINK` and
+   `CSC_KEY_PASSWORD` for the build, and the button in Settings stops being disabled — **no code
+   change**. A purchase, not a coding task. See `docs/LAUNCH.md`.
 
-### Smaller gaps
+### Built since the last revision
 
-- **Multi-window session restore** — snapshots are per-database, so restoring puts every tab in one
-  window regardless of where it came from.
-- **Custom keyboard shortcuts.** The sheet lists them; nothing remaps them. The menu already owns
-  every accelerator, so this is a settings surface over an existing map.
-- **Form-state restore** — needs its own decision: it means writing what you typed, excluding
-  password fields, into the local database. Off by default, and the settings copy would have to say
-  exactly that.
-- **Picture-in-picture, cast, page translation.** None built. Translation in particular cannot be
-  done without sending page text somewhere, so it needs the same opt-in treatment as the AI layer.
+- **Sync** — bookmarks and reading list, end-to-end encrypted, provider-agnostic. The server holds
+  ciphertext and nothing readable. See `docs/sync.md`, including what does leak.
+- **Accessibility** — focus-visible styles across the chrome (there were none), `prefers-contrast`
+  support, live regions for messages that appear without focus moving, and the omnibox's broken
+  cross-document `aria-controls` replaced with something that works. Still never tried against a
+  real screen reader.
+- **Custom keyboard shortcuts** · **multi-window session restore** · **picture-in-picture** ·
+  **hardware media keys** · **print preview** · **page translation** (through the configured AI
+  provider, gated on the same page-content consent) · **saved addresses with autofill** ·
+  **profiles**.
+- **Form-state restore** was already built — `restoreFormState`, off by default.
+
+### Smaller gaps that remain
+
+- **Cast to a TV.** No Electron API. Would mean bundling a third-party stack.
+- **Payment-card autofill.** Deliberately not built: storing a card number means holding regulated
+  data this project cannot protect better than a dedicated password manager already does. Addresses
+  are filled; cards are not, and the settings screen says so.
+- **Two profiles at once.** The single-instance lock is application-wide, so switching relaunches.
+  Chrome runs a process per profile; matching that is a larger change than it looks.
 - **Side panels inset the page rather than floating.** Correct for the architecture, but it makes
   opening History feel heavy. An overlay-view panel would suit quick lookups.
 
@@ -75,9 +84,15 @@ scrolls once shrinking bottoms out).
 APIs, no `webRequest` blocking and no full `declarativeNetRequest` — so uBlock Origin, the extension
 most people would want, **does not work**. That is why Slash Shield is built in.
 
-Nothing extension-related is built today. What is realistically buildable: a "load unpacked
-extension" setting, or a Slash-native plugin API over the existing IPC contracts. What will not be
-done: implying Web Store compatibility.
+**Built:** `ExtensionManager` loads unpacked folders, and `manifestGaps` reads each manifest and
+states in the UI which of its permissions will not work here — `nativeMessaging`,
+`webRequestBlocking`, full `declarativeNetRequest`, `downloads`, MV3 service workers. Saying so
+before the install is the whole design: the alternative is an extension that appears to load and
+then quietly does nothing.
+
+**Still not possible:** Web Store installation, and therefore the extensions most people would name.
+IDM's browser integration needs `nativeMessaging` (it talks to a Windows program) and uBlock Origin
+needs `webRequestBlocking`; neither will run. Grammarly, being a content script, largely does.
 
 ---
 

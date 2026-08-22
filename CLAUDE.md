@@ -50,6 +50,12 @@ These are not aspirations; they constrain the code.
 | Four-pane split view | Each pane is a live renderer, and Chromium composites every attached view | Capped at **two**. Two is the one deliberate exception to "only the active tab's view is attached", justified because both panes are genuinely visible; four is a different performance conversation, not a bigger number. The drag handle may live in the chrome document *only* because it sits in the gutter, where no page view composites above it |
 | Tab groups that behave like small workspaces | A workspace owns a session partition; a group is a label over tabs that already exist | Deleting a group never deletes tabs, and moving a tab between groups never reloads it. "Ungroup (keeps tabs open)" and "Close N tabs" are separate channels with separate names, because they are one careless click apart and only one is recoverable. Collapsing is **not** sleeping — the tabs keep their views, so the chip shows a count rather than letting a run silently vanish |
 | Semantic search out of the box | Running a language model needs weights from somewhere | MiniLM **ships with the app** (`resources/models/`, ~23 MB) rather than being fetched on first enable. Downloading it would have turned a local search feature into an outbound request to a third party. Still opt-in, and keyword search never depends on it |
+| Two profiles open side by side | The single-instance lock is application-wide, and `app.setPath('userData')` is only honoured before anything has opened a file — by the time a user clicks "switch", the database, every session partition and every cache are already open | **One profile at a time.** Switching relaunches with `--profile=<id>`, which Chrome does too. The default profile keeps the original directory untouched so no existing install moves; others are **siblings**, never children, or the default's "delete all data" would take them with it |
+| Media keys that only reach Slash | `globalShortcut` is exactly that — global. Electron does not route hardware media keys to the focused page, and Chromium's own handling sits above the layer Electron exposes | Registered on focus, released on blur, so pausing Spotify does not pause a minimised browser tab. `mediaKeysAlwaysOn` opts into the rude version for people who use Slash as their music player, and the settings copy says what it takes |
+| Translate a page without sending it anywhere | A translation model worth using is gigabytes; the browser ships a ~23 MB embedding model and bundling a translator would quadruple the installer for a feature most people never open | Translation goes through the **already-configured AI provider** and is gated on `aiMayReadPageContent` — the same switch as every other route page text takes to a provider, not a second one to find. It translates the *article* (Readability blocks, shown in the reader), never the live page, because rewriting text in place would mean scripting every site in its own world |
+| Autofill a saved payment card | Storing one means holding a primary account number: a regulated category of data with obligations this project cannot meet, and nothing the browser can do protects it better than a dedicated password manager already does | Addresses are stored and filled; **cards are not**, and the settings screen says so rather than half-doing it. Address filling reuses the password path exactly — the preload reports which *kinds* of field exist and never a value, main focuses one and calls `insertText` |
+| Sync that a server operator could read | Nothing, technically — which is the problem. A sync that uploads readable bookmarks turns "local-first, nothing leaves the machine" into a slogan | End-to-end encrypted: scrypt from a passphrase that **never leaves the machine**, AES-256-GCM per item, and no derived key stored. The server holds ciphertext and a timestamp. The cost is stated before the switch is thrown — forget the passphrase and the data is unrecoverable, because nobody holds a spare. History is deliberately not synced |
+| An accessible combobox: omnibox + its suggestion popup | The suggestions render in the **overlay**, a separate `WebContentsView` with its own document. `aria-controls` and `aria-activedescendant` are id references, and an id cannot be resolved across documents — so the relationship was declared and silently resolved to nothing | `aria-autocomplete="list"` plus a `role="status"` live region **in the chrome document**, announcing how many suggestions there are. The overlay list keeps `role="listbox"`/`option` for its own document. The relationship is not faked with attributes that cannot work |
 | "Find any page by meaning" | Only the first ~8,000 characters of a page are embedded (10 passages), and MiniLM reads 256 word-pieces at a time | The cap is stated in the UI. A long page is matched on its opening, not its entirety |
 
 ## Architecture rules
@@ -137,6 +143,22 @@ These are not aspirations; they constrain the code.
   a virtual table, so `MemoryRepository` holds the `VectorStore` and calls `forgetPage` *before* the
   page row goes. `VectorStore.enable()` also prunes orphans left by a session where the extension
   never loaded.
+- **The profile is chosen before `app.whenReady()`, and nothing may read a path before it.**
+  `prepareUserDataPath()` then `applyProfile()`, in that order, at the very top of `main/index.ts`.
+  `app.setPath('userData', …)` is silently ignored once anything has opened a file under the old
+  path — there is no error, the browser simply uses the wrong profile's data and writes to it. The
+  profile list is therefore plain JSON beside the directories, not SQLite: it has to be readable
+  before the database exists.
+- **A deletion that has to reach another device is a row, not an absence.** Bookmarks and reading
+  list items write to `sync_tombstones` *before* the row goes, while their identity can still be
+  read. Without that, "missing here" is indistinguishable from "new there" and every deleted item
+  comes back on the next sync. Bookmarks carry a `guid` for the same reason: the AUTOINCREMENT
+  primary key is unique on one machine and meaningless on any other.
+- **Anything that reaches a page's fields goes through `insertText`, never script.** Passwords and
+  addresses both: `preload/content.ts` reports which *kinds* of field exist and holds the element
+  references, main asks it to focus one, then types the value through Chromium's own input pipeline.
+  `executeJavaScript` would put the value in script source in the page's own world; sending it to
+  the content preload would hand it to a process running untrusted web content.
 
 ## Stack
 

@@ -50,16 +50,29 @@ deliberately no finer timestamp, no page, no session and no id — that is the d
       "headline": "Short line of copy",
       "body": "One supporting sentence.",
       "image": "data:image/png;base64,iVBORw0KGgo…",
-      "clickUrl": "https://example.com/landing"
+      "clickUrl": "https://example.com/landing",
+      "startsAt": 1755820800000,
+      "endsAt": 1755907200000
     }
   ]
 }
 ```
 
 - `expiresAt` — unix ms. Capped at 7 days regardless of what you send, so a stale batch cannot live
-  forever.
+  forever. This is when the **batch** goes stale, which is a different thing from when a campaign
+  runs.
 - `image` — optional, but **must** be a `data:` URL if present. Keep it small; it is stored and
   inlined on every new tab.
+- `startsAt` / `endsAt` — optional, unix ms, null or absent for a campaign with no schedule.
+  **Enforced on the reader's machine**, half-open: a campaign ending at 15:00 is not shown at 15:00,
+  so two campaigns bought back to back never both run for the instant they touch.
+
+  This is what makes selling an advert by the hour possible at all. A batch is fetched at most every
+  six hours, so an hour sold for 14:00–15:00 would be invisible to any copy that last asked at
+  13:00. Send campaigns *before* they start — a browser holds the window and starts them itself —
+  and expect to send anything beginning within about twelve hours of the fetch.
+
+  A window whose end is not after its start is dropped at fetch time rather than never appearing.
 - Anything not matching this shape is ignored rather than partially applied.
 
 ## What comes back
