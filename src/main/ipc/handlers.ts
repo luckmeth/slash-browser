@@ -1,16 +1,20 @@
 import { copyFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Menu, app, dialog, shell } from 'electron'
+import { app, dialog, shell } from 'electron'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
 import type { BlockingStatus } from '@shared/types/blocking'
 import type { UiCommand } from '@shared/ipc/contracts'
+import type { AddressFieldKind } from '@shared/addressFields'
 import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
 import { resolveInput } from '../navigation/UrlResolver'
 import { showTabContextMenu } from '../menus/ContextMenus'
 import { showAppMenu } from '../menus/AppMenu'
+import { buildApplicationMenu, listShortcuts } from '../menu'
+import { findConflicts, isValidAccelerator, pruneOverrides } from '../menus/shortcutMap'
+import { groupByWindow } from '../snapshots/windowGrouping'
 import { buildSuggestions } from '../navigation/SuggestionEngine'
 import { analyseTabs } from '../tabs/brain/tabAnalysis'
 import { isDisabledForHost, toggleHost } from '../cleanup/cleanupRules'
@@ -189,6 +193,13 @@ export function registerHandlers(ctx: AppContext): void {
     // stored value and the engine's view of it drift apart.
     ctx.blocker.refreshAllowedSites()
 
+    // Media keys must be released *now*, not at next launch. They are global
+    // shortcuts, so until released they keep taking presses from whatever else
+    // the user is listening to — which is exactly what switching them off means.
+    if (patch.mediaKeysEnabled !== undefined || patch.mediaKeysAlwaysOn !== undefined) {
+      ctx.mediaKeys.sync()
+    }
+
     // Switching page scripts off has to reach tabs that are already open.
     // Gating new attachments alone would leave every current tab still holding
     // a debugger client, so the switch would appear not to work on the very
@@ -343,28 +354,121 @@ export function registerHandlers(ctx: AppContext): void {
         const id = window.tabs.snapshot().activeTabId
         if (id) window.tabs.setZoomLevel(id, 0)
       },
-      print: () => window.tabs.activeTab?.contents?.print()
+      print: () => window.showPrintPreview()
     })
     return ok(undefined)
   })
 
-  ipc.handle('shortcuts:list', () => {
-    const menu = Menu.getApplicationMenu()
-    if (!menu) return ok([])
+  /**
+   * Tells every privileged view the settings changed.
+   *
+   * The renderer store only updates from this event, so a write without it
+   * lands in SQLite and the UI keeps rendering the old value until relaunch.
+   */
+  const broadcastSettings = (context: AppContext): void => {
+    const next = context.settings.getAll()
+    for (const window of context.allWindows()) {
+      ipc.broadcast('settings:changed', next, window.privilegedContents())
+    }
+  }
 
-    const rows: { group: string; label: string; accelerator: string }[] = []
-    for (const top of menu.items) {
-      const group = top.label.replace(/&/g, '')
-      for (const item of top.submenu?.items ?? []) {
-        if (!item.accelerator || item.visible === false) continue
-        rows.push({
-          group,
-          label: item.label.replace(/&/g, '').trim(),
-          accelerator: item.accelerator
+  // --- printing --------------------------------------------------------------
+
+  ipc.handle('print:preview', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.activeTab
+    const preview = await ctx.printing.preview(
+      String(window.browserWindow.id),
+      tab?.contents ?? null,
+      request.choices
+    )
+    if (!preview) return ok(null)
+    return ok({ ...preview, title: tab?.snapshot.title ?? 'Page' })
+  })
+
+  ipc.handle('print:run', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const result = await ctx.printing.print(
+      window.tabs.activeTab?.contents ?? null,
+      request.choices,
+      request.pageCount
+    )
+    return ok(result)
+  })
+
+  ipc.handle('print:savePdf', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.activeTab
+    const result = await ctx.printing.saveAsPdf(
+      window.browserWindow,
+      tab?.contents ?? null,
+      request.choices,
+      tab?.snapshot.title ?? 'page'
+    )
+    return ok(result)
+  })
+
+  ipc.handle('notice:current', (_req, context) => {
+    const window = windowOf(context.sender)
+    return ok(window?.currentNotice() ?? { message: '', tone: 'info' as const })
+  })
+
+  ipc.handle('shortcuts:list', () => ok(listShortcuts(ctx)))
+
+  /**
+   * Rebinds one command.
+   *
+   * Everything here is checked in main rather than trusted from the renderer,
+   * because the failure is not local: an accelerator Electron cannot parse makes
+   * `setApplicationMenu` throw, and the browser is then left with no menu and no
+   * shortcuts at all — including the ones needed to reach this screen again.
+   *
+   * A conflict is reported but **not** refused. Two commands on one chord is a
+   * choice somebody may want; silently losing one of them is not, which is why
+   * the renderer is told exactly which command it now shares with.
+   */
+  ipc.handle('shortcuts:set', (request) => {
+    const rows = listShortcuts(ctx)
+    const target = rows.find((row) => row.id === request.id)
+    if (!target) return ok({ ok: false, problem: 'That command no longer exists.', conflictsWith: [] })
+
+    const current = ctx.settings.getAll().keyboardShortcuts
+    const next: Record<string, string> = { ...current }
+
+    if (request.accelerator === null) {
+      delete next[request.id]
+    } else {
+      if (!isValidAccelerator(request.accelerator)) {
+        return ok({
+          ok: false,
+          problem:
+            'That combination cannot be used. Try one with Ctrl, Alt or Shift held, or a function key.',
+          conflictsWith: []
         })
       }
+      next[request.id] = request.accelerator
     }
-    return ok(rows)
+
+    const pruned = pruneOverrides(next, rows)
+    ctx.settings.update({ keyboardShortcuts: pruned })
+    buildApplicationMenu(ctx)
+
+    const conflicts = findConflicts(listShortcuts(ctx))
+    const bound = request.accelerator ?? target.defaultAccelerator
+    const sharing = (conflicts.get(bound) ?? []).filter((id) => id !== request.id)
+
+    broadcastSettings(ctx)
+    return ok({ ok: true, problem: null, conflictsWith: sharing })
+  })
+
+  ipc.handle('shortcuts:resetAll', () => {
+    ctx.settings.update({ keyboardShortcuts: {} })
+    buildApplicationMenu(ctx)
+    broadcastSettings(ctx)
+    return ok(undefined)
   })
 
   ipc.handle('overlay:getState', (_req, context) => {
@@ -859,8 +963,22 @@ export function registerHandlers(ctx: AppContext): void {
       )
     }
 
-    const restored = window.tabs.restoreFromSnapshot(tabs, { activateFirst: true })
-    return ok({ restored })
+    // A restore point remembers how many windows it came from. Rebuilding them
+    // is the point of recording it — restoring two windows of work into one
+    // loses the arrangement while appearing to have worked, because every page
+    // is still there.
+    const groups = groupByWindow(tabs)
+    if (groups.length === 0) return ok({ restored: 0, windows: 0 })
+
+    let restored = window.tabs.restoreFromSnapshot(groups[0]!, { activateFirst: true })
+
+    for (const group of groups.slice(1)) {
+      const extra = ctx.createWindow()
+      extra.tabs.loadGroups(ctx.tabGroups.list())
+      restored += extra.tabs.restoreFromSnapshot(group, { activateFirst: true })
+    }
+
+    return ok({ restored, windows: groups.length })
   })
 
   ipc.handle('snapshots:restoreTab', (request, context) => {
@@ -1064,6 +1182,92 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('updates:status', () => ok(ctx.updates.current()))
   ipc.handle('updates:check', async () => ok(await ctx.updates.check()))
+  ipc.handle('updates:install', async () => ok(await ctx.updates.downloadAndInstall()))
+
+  // --- sync ------------------------------------------------------------------
+
+  // --- profiles --------------------------------------------------------------
+
+  ipc.handle('profiles:list', () =>
+    ok({
+      activeId: ctx.activeProfileId,
+      profiles: ctx.profiles?.list() ?? []
+    })
+  )
+
+  ipc.handle('profiles:create', (request) => {
+    const created = ctx.profiles?.create(request.name)
+    return created ? ok(created.id) : err('INTERNAL', 'Profiles are not available in this build')
+  })
+
+  ipc.handle('profiles:rename', (request) => {
+    ctx.profiles?.rename(request.id, request.name)
+    return ok(undefined)
+  })
+
+  ipc.handle('profiles:delete', (request) => {
+    if (request.id === ctx.activeProfileId) {
+      // Deleting the profile you are using would pull the database out from
+      // under every open tab. Switch first, then delete.
+      return ok({ ok: false, reason: 'Switch to another profile before deleting this one.' })
+    }
+    return ok(ctx.profiles?.delete(request.id) ?? { ok: false, reason: 'Profiles are unavailable.' })
+  })
+
+  ipc.handle('profiles:switch', (request) => {
+    ctx.switchProfile(request.id)
+    return ok(undefined)
+  })
+
+  // --- saved addresses -------------------------------------------------------
+
+  ipc.handle('addresses:list', () => ok(ctx.addresses.list()))
+
+  ipc.handle('addresses:save', (request) => ok(ctx.addresses.save(request)))
+
+  ipc.handle('addresses:delete', (request) => {
+    ctx.addresses.delete(request.id)
+    return ok(undefined)
+  })
+
+  ipc.handle('addresses:fieldsHere', (_req, context) => {
+    const window = windowOf(context.sender)
+    const contents = window?.tabs.activeTab?.contents
+    if (!contents) return ok([])
+    return ok([...(ctx.addressForms.get(contents.id) ?? [])])
+  })
+
+  ipc.handle('addresses:fill', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const address = ctx.addresses.get(request.id)
+    const contents = window.tabs.activeTab?.contents
+    if (!address || !contents) return ok({ filled: 0 })
+
+    // The kinds come from what the *page* reported, not from the request. A
+    // renderer asking to fill a field the page does not have would otherwise be
+    // asking main to type the user's address into nothing in particular.
+    const present = (ctx.addressForms.get(contents.id) ?? []) as AddressFieldKind[]
+    const filled = await ctx.addressFiller.fill(contents, address, present)
+
+    if (filled === 0) {
+      window.showNotice('There was nothing on this page matching that address.', 'warn')
+    }
+    return ok({ filled })
+  })
+
+  ipc.handle('sync:status', () => ok(ctx.sync.status()))
+  ipc.handle('sync:unlock', async (request) => ok(await ctx.sync.unlock(request.passphrase)))
+  ipc.handle('sync:lock', () => {
+    ctx.sync.lock()
+    return ok(ctx.sync.status())
+  })
+  ipc.handle('sync:now', async () => ok(await ctx.sync.sync()))
+  ipc.handle('sync:reset', () => {
+    ctx.sync.reset()
+    return ok(ctx.sync.status())
+  })
 
   // --- diagnostics / crash reporting ----------------------------------------
 
@@ -1321,6 +1525,31 @@ export function registerHandlers(ctx: AppContext): void {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
     return ok(window.pendingReader ?? { article: null, reason: 'There is nothing to read.' })
+  })
+
+  ipc.handle('reader:translateAvailable', () => ok(ctx.translation.available()))
+
+  ipc.handle('reader:translate', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const pending = window.pendingReader
+    if (!pending?.article) {
+      return ok({ ok: false as const, reason: 'There is nothing in the reader to translate.' })
+    }
+
+    const language = request.language.trim() || ctx.settings.getAll().translateTargetLanguage
+    const outcome = await ctx.translation.translate(
+      pending.article.blocks,
+      pending.article.title,
+      language
+    )
+
+    return ok(
+      outcome.ok
+        ? { ok: true as const, title: outcome.title, blocks: outcome.blocks }
+        : { ok: false as const, reason: outcome.reason }
+    )
   })
 
   // --- import from another browser ------------------------------------------

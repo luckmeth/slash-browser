@@ -11,6 +11,8 @@ import { PasswordFillPanel } from './features/passwords/PasswordFillPanel'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { ShortcutSheet } from './features/shortcuts/ShortcutSheet'
 import { CleanupPanel } from './features/cleanup/CleanupPanel'
+import { NoticeToast } from './features/notice/NoticeToast'
+import { PrintPreview } from './features/print/PrintPreview'
 
 /**
  * Root of the overlay document.
@@ -61,6 +63,10 @@ export function OverlayApp(): React.JSX.Element | null {
       return <ShortcutSheet />
     case 'cleanup':
       return <CleanupPanel />
+    case 'notice':
+      return <NoticeToast />
+    case 'print':
+      return <PrintPreview />
     case 'spike':
       return <SpikeReport />
     case 'none':

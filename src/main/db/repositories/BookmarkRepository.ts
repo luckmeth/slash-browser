@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Bookmark } from '@shared/types/browsing'
 import type { Database } from '../Database'
 
@@ -72,8 +73,11 @@ export class BookmarkRepository {
 
     const info = this.db.connection
       .prepare(
-        `INSERT INTO bookmarks (url, title, favicon_url, parent_id, is_folder, sort_order, created_at)
-         VALUES (@url, @title, @favicon, @parent, @isFolder, @sortOrder, @now)`
+        `INSERT INTO bookmarks
+           (url, title, favicon_url, parent_id, is_folder, sort_order, created_at,
+            guid, updated_at)
+         VALUES (@url, @title, @favicon, @parent, @isFolder, @sortOrder, @now,
+                 @guid, @now)`
       )
       .run({
         url: input.isFolder ? null : input.url,
@@ -82,7 +86,11 @@ export class BookmarkRepository {
         parent: input.parentId,
         isFolder: input.isFolder ? 1 : 0,
         sortOrder: next.next,
-        now: input.createdAt ?? Date.now()
+        now: input.createdAt ?? Date.now(),
+        // A stable identity, because the primary key is not one: it is an
+        // AUTOINCREMENT integer, unique here and meaningless anywhere else, so
+        // two devices would each call their new bookmark 7.
+        guid: randomUUID()
       })
 
     return this.requireById(Number(info.lastInsertRowid))
@@ -92,7 +100,8 @@ export class BookmarkRepository {
     const existing = this.requireById(input.id)
     this.db.connection
       .prepare(
-        `UPDATE bookmarks SET title = @title, url = @url, parent_id = @parent, sort_order = @sortOrder
+        `UPDATE bookmarks SET title = @title, url = @url, parent_id = @parent,
+           sort_order = @sortOrder, updated_at = @now
          WHERE id = @id`
       )
       .run({
@@ -100,14 +109,45 @@ export class BookmarkRepository {
         title: input.title ?? existing.title,
         url: existing.isFolder ? null : (input.url ?? existing.url),
         parent: input.parentId === undefined ? existing.parentId : input.parentId,
-        sortOrder: input.sortOrder ?? existing.sortOrder
+        sortOrder: input.sortOrder ?? existing.sortOrder,
+        // Stamped on every edit: it is the only ordering a last-write-wins
+        // merge has, and a row that changed without saying so loses the merge.
+        now: Date.now()
       })
     return this.requireById(input.id)
   }
 
-  /** Deleting a folder cascades to its children via the FK constraint. */
+  /**
+   * Deleting a folder cascades to its children via the FK constraint.
+   *
+   * A tombstone is written for the row and every descendant *before* the delete,
+   * while their guids can still be read. Without one, the deletion is an absence
+   * — and an absence is indistinguishable from "the other device has something
+   * new", so the bookmark comes back the moment another machine syncs.
+   */
   delete(id: number): void {
-    this.db.connection.prepare('DELETE FROM bookmarks WHERE id = ?').run(id)
+    const remove = this.db.connection.transaction(() => {
+      const doomed = this.db.connection
+        .prepare<[number], { guid: string }>(
+          `WITH RECURSIVE tree(id) AS (
+             SELECT id FROM bookmarks WHERE id = ?
+             UNION ALL
+             SELECT b.id FROM bookmarks b JOIN tree ON b.parent_id = tree.id
+           )
+           SELECT guid FROM bookmarks WHERE id IN (SELECT id FROM tree) AND guid IS NOT NULL`
+        )
+        .all(id)
+
+      const tomb = this.db.connection.prepare(
+        `INSERT INTO sync_tombstones (collection, item_id, deleted_at) VALUES ('bookmarks', ?, ?)
+         ON CONFLICT(collection, item_id) DO UPDATE SET deleted_at = excluded.deleted_at`
+      )
+      const now = Date.now()
+      for (const row of doomed) tomb.run(row.guid, now)
+
+      this.db.connection.prepare('DELETE FROM bookmarks WHERE id = ?').run(id)
+    })
+    remove()
   }
 
   findByUrl(url: string): Bookmark | null {

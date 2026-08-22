@@ -17,12 +17,20 @@ import { Icon } from '../../components/Icon'
 export function Reader(): React.JSX.Element | null {
   const [article, setArticle] = useState<ReaderArticle | null>(null)
   const [reason, setReason] = useState<string | null>(null)
+  /** The translated text, when there is some. The original is never discarded. */
+  const [translated, setTranslated] = useState<{ title: string; blocks: string[] } | null>(null)
+  const [translating, setTranslating] = useState(false)
+  const [translateProblem, setTranslateProblem] = useState('')
+  const [canTranslate, setCanTranslate] = useState(false)
 
   useEffect(() => {
     void window.browser.invoke('reader:get', undefined).then((result) => {
       if (!result.ok) return
       setArticle(result.value.article)
       setReason(result.value.reason)
+    })
+    void window.browser.invoke('reader:translateAvailable', undefined).then((result) => {
+      if (result.ok) setCanTranslate(result.value)
     })
   }, [])
 
@@ -54,6 +62,37 @@ export function Reader(): React.JSX.Element | null {
             {article.siteName ?? hostOf(article.url)} · {article.readingMinutes} min read
             {article.byline ? ` · ${article.byline}` : ''}
           </p>
+          {canTranslate && (
+            <button
+              type="button"
+              disabled={translating}
+              onClick={() => {
+                if (translated) {
+                  // Toggling back. The original was never thrown away, so this
+                  // costs nothing and needs no second request.
+                  setTranslated(null)
+                  return
+                }
+                setTranslating(true)
+                setTranslateProblem('')
+                void window.browser.invoke('reader:translate', { language: '' }).then((result) => {
+                  setTranslating(false)
+                  if (!result.ok) {
+                    setTranslateProblem('The translation request could not be made.')
+                    return
+                  }
+                  if (result.value.ok) {
+                    setTranslated({ title: result.value.title, blocks: result.value.blocks })
+                  } else {
+                    setTranslateProblem(result.value.reason)
+                  }
+                })
+              }}
+              className="ml-auto shrink-0 cursor-default rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+            >
+              {translating ? 'Translating…' : translated ? 'Show original' : 'Translate'}
+            </button>
+          )}
           <button
             type="button"
             onClick={close}
@@ -65,11 +104,29 @@ export function Reader(): React.JSX.Element | null {
           </button>
         </div>
 
-        <h1 className="mb-6 text-3xl leading-tight font-semibold text-balance">{article.title}</h1>
+        <h1 className="mb-6 text-3xl leading-tight font-semibold text-balance">
+          {translated?.title ?? article.title}
+        </h1>
+
+        {translateProblem !== '' && (
+          <p role="status" aria-live="polite" className="mb-4 text-xs text-[var(--color-warn)]">
+            {translateProblem}
+          </p>
+        )}
+
+        {translated && (
+          <p className="mb-4 rounded-md border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+            Translated by your AI provider — the text of this page was sent to it. Machine
+            translation gets things wrong, and the original is one click away.
+          </p>
+        )}
 
         <article className="space-y-4">
           {article.blocks.map((block, index) => (
-            <Block key={index} block={block} />
+            <Block
+              key={index}
+              block={translated ? { ...block, text: translated.blocks[index] ?? block.text } : block}
+            />
           ))}
         </article>
 

@@ -1,3 +1,5 @@
+import type { ProfileRegistry } from './profiles/ProfileRegistry'
+import type { AddressFieldKind } from '@shared/addressFields'
 import { join } from 'node:path'
 import { app, type WebContents } from 'electron'
 import { Database } from './db/Database'
@@ -30,6 +32,12 @@ import { MemoryIndexer } from './memory/MemoryIndexer'
 import { SemanticIndex } from './memory/embedding/SemanticIndex'
 import { MemorySearchService } from './memory/MemorySearchService'
 import { ChromiumImporter } from './import/ChromiumImporter'
+import { MediaKeyService } from './media/MediaKeyService'
+import { AddressBook } from './addresses/AddressBook'
+import { AddressFiller } from './addresses/AddressFiller'
+import { PrintService } from './printing/PrintService'
+import { SyncService } from './sync/SyncService'
+import { TranslationService } from './translate/TranslationService'
 import { ReaderService } from './reader/ReaderService'
 import { CleanupService } from './cleanup/CleanupService'
 import { PageInsightService } from './insight/PageInsightService'
@@ -112,6 +120,23 @@ export class AppContext {
   readonly memory: MemoryIndexer
   readonly importer: ChromiumImporter
   readonly reader = new ReaderService()
+  readonly printing = new PrintService()
+  readonly sync: SyncService
+  readonly translation: TranslationService
+  readonly addresses: AddressBook
+  readonly addressFiller = new AddressFiller()
+  /** Set at launch from the base user-data path — see `applyProfile`. */
+  profiles: ProfileRegistry | null = null
+  activeProfileId = 'default'
+  /** Which address fields each live document offers, by WebContents id. */
+  readonly addressForms = new Map<number, readonly string[]>()
+  private syncTimer: NodeJS.Timeout | null = null
+  /**
+   * Hardware media keys. Registered only while Slash has focus by default —
+   * `globalShortcut` is genuinely global, and holding these permanently would
+   * silently steal pause from whatever else the user is listening to.
+   */
+  readonly mediaKeys: MediaKeyService
   readonly cleanup = new CleanupService()
   readonly insight = new PageInsightService()
   readonly downloadEngine: DownloadQueue
@@ -241,6 +266,16 @@ export class AppContext {
       () => this.settings.getAll().blockAds
     )
     this.injector = new ScriptletInjector(() => this.settings.getAll().allowPageScripts)
+    this.translation = new TranslationService(this.providers, this.settings)
+    this.addresses = new AddressBook(this.db)
+    this.sync = new SyncService(this.db, this.settings, () =>
+      this.broadcastAll('sync:changed', this.sync.status())
+    )
+    this.mediaKeys = new MediaKeyService(
+      this.settings,
+      () => this.allWindows(),
+      () => this.focusedWindow() ?? null
+    )
     this.injector.register({
       id: 'youtube-ads',
       enabled: () =>
@@ -290,10 +325,49 @@ export class AppContext {
     })
   }
 
+  /** Called once at launch, before `start()`. */
+  attachProfiles(registry: ProfileRegistry, activeId: string): void {
+    this.profiles = registry
+    this.activeProfileId = activeId
+  }
+
+  /**
+   * Restarts into another profile.
+   *
+   * A relaunch, because `app.setPath('userData', …)` is only honoured before
+   * anything has opened a file — by the time a user clicks "switch", the
+   * database, the session partitions and every cache are already open on the
+   * current profile. Chrome does the same thing for the same reason.
+   *
+   * One profile at a time: the single-instance lock covers the whole
+   * application, so a second profile cannot run alongside the first. Stated in
+   * the UI rather than discovered.
+   */
+  switchProfile(id: string): void {
+    if (!this.profiles?.has(id) || id === this.activeProfileId) return
+    // Everything else on the command line is dropped deliberately: relaunching
+    // with --new-private-window, say, would reopen whatever the last launch
+    // asked for rather than the profile the user just chose.
+    app.relaunch({ args: [`--profile=${id}`] })
+    app.quit()
+  }
+
   start(): void {
     if (this.started) return
     this.db.open()
     this.settings.load()
+
+    // After settings load: it reads them to decide whether to register at all.
+    this.mediaKeys.start()
+
+    // Sync on a timer while the browser is open. Does nothing at all until the
+    // user has enabled it, set an endpoint, and unlocked with a passphrase —
+    // `SyncService.sync` returns immediately otherwise, so this costs an
+    // interval check and no network on a default install.
+    this.syncTimer = setInterval(
+      () => void this.sync.sync(),
+      Math.max(5, this.settings.getAll().syncIntervalMinutes) * 60_000
+    )
 
     SessionHardening.normaliseUserAgent()
     // Acquiring the session through the registry is what applies the hardening;
@@ -319,6 +393,12 @@ export class AppContext {
         onLoginForm: (webContentsId, form) => {
           if (form.hasPasswordField) this.loginForms.set(webContentsId, form)
           else this.loginForms.delete(webContentsId)
+        },
+        // Same lifetime rule: what the *current document* offers. A navigation
+        // replaces the entry, so an offer to fill can never outlive its form.
+        onAddressForm: (webContentsId, fields) => {
+          if (fields.length > 0) this.addressForms.set(webContentsId, fields)
+          else this.addressForms.delete(webContentsId)
         }
       }
     )
@@ -584,6 +664,25 @@ export class AppContext {
         }
       },
       enqueueDownload: (url) => this.downloadEngine.enqueue(url),
+      // Offered only where the page reported address fields, so the entry never
+      // appears on a comment box or a search bar.
+      addressOffers: (contents) => {
+        if ((this.addressForms.get(contents.id) ?? []).length === 0) return []
+        return this.addresses.list().map((address, index) => ({
+          id: address.id,
+          label:
+            address.label.trim() !== ''
+              ? address.label
+              : [address.streetLine1, address.city].filter((part) => part !== '').join(', ') ||
+                `Address ${index + 1}`
+        }))
+      },
+      fillAddress: (contents, id) => {
+        const address = this.addresses.get(id)
+        if (!address) return
+        const present = (this.addressForms.get(contents.id) ?? []) as AddressFieldKind[]
+        void this.addressFiller.fill(contents, address, present)
+      },
       observeYouTube: (contents) => {
         this.injector.observe(contents)
         this.cosmetics.observe(contents)
@@ -726,6 +825,9 @@ export class AppContext {
     // Settles every pending prompt as denied; an unresolved permission promise
     // would leave the page's callback hanging.
     this.permissions.stop()
+    if (this.syncTimer) clearInterval(this.syncTimer)
+    this.mediaKeys.stop()
+    void this.printing.cleanup()
     // Kills the utility process. Not awaited — `will-quit` is synchronous and
     // the child is killed outright if it does not answer, so there is nothing
     // to wait for that would change the outcome.

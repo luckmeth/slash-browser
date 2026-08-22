@@ -50,6 +50,9 @@ export interface WindowDeps {
   onBookmarkRequested: (url: string, title: string) => void
   /** Hands a link to the segmented download engine, from the link context menu. */
   enqueueDownload?: (url: string) => void
+  /** Saved addresses that could fill the page this context menu opened over. */
+  addressOffers?: (contents: WebContents) => { id: number; label: string }[]
+  fillAddress?: (contents: WebContents, id: number) => void
   /** Installs the YouTube ad-break filter on a new page view. */
   observeYouTube?: (contents: WebContents) => void
   /** Shield's known ad/tracking host list, for classifying redirect chains. */
@@ -341,6 +344,8 @@ export class BrowserWindowController {
       searchEngineId: () => this.deps.settings.getAll().searchEngineId,
       bookmarkUrl: (url, title) => this.deps.onBookmarkRequested(url, title),
       enqueueDownload: (url) => this.deps.enqueueDownload?.(url),
+      addressOffers: (contents) => this.deps.addressOffers?.(contents) ?? [],
+      fillAddress: (contents, id) => this.deps.fillAddress?.(contents, id),
       moveTabToWorkspace: (tabId, workspaceId) => {
         const from = this.tabs.findById(tabId)?.snapshot.workspaceId
         const target = this.deps.workspaces.findById(workspaceId)
@@ -588,6 +593,60 @@ export class BrowserWindowController {
     this.tabs.setPageBounds(rects.page)
     this.overlay.relayout(rects.full)
   }
+
+  /**
+   * Opens the print preview.
+   *
+   * Modal and focused, over the page it is previewing. Slash used to hand
+   * straight to the operating system's print dialog, so there was no page range,
+   * no scale, and no way to discover you were about to print forty pages of
+   * navigation furniture until it was in the tray.
+   */
+  showPrintPreview(): void {
+    const state = this.overlay.show('print', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
+   * Shows a transient message over the page.
+   *
+   * Exists because several browser-level actions can correctly do nothing —
+   * there is no video to pop out, no text worth translating — and a control that
+   * silently does nothing is indistinguishable from one that is broken.
+   *
+   * Sized to a strip at the bottom rather than the window, and **not modal**: an
+   * overlay swallows every click inside its own bounds, so a full-window toast
+   * would make the whole page inert for as long as it showed.
+   */
+  showNotice(message: string, tone: 'info' | 'warn' = 'info'): void {
+    if (message.trim() === '') return
+    this.notice = { message, tone }
+
+    const { width, height } = this.window.getContentBounds()
+    const stripHeight = 92
+    const stripWidth = Math.min(460, Math.max(260, Math.round(width * 0.5)))
+    const state = this.overlay.show(
+      'notice',
+      {
+        x: Math.round((width - stripWidth) / 2),
+        y: Math.max(0, height - stripHeight - 24),
+        width: stripWidth,
+        height: stripHeight
+      },
+      { modal: false, takeFocus: false }
+    )
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /** What `notice:current` answers with. */
+  currentNotice(): { message: string; tone: 'info' | 'warn' } {
+    return this.notice
+  }
+
+  private notice: { message: string; tone: 'info' | 'warn' } = { message: '', tone: 'info' }
 
   /** Full content rect, for modal overlay surfaces. */
   fullBounds() {

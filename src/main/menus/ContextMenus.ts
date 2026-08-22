@@ -7,6 +7,7 @@ import {
   type MenuItemConstructorOptions,
   type WebContents
 } from 'electron'
+import { togglePictureInPicture } from '../media/pictureInPicture'
 import { DEFAULT_SETTINGS } from '@shared/types/settings'
 import { SEARCH_ENGINES, type SearchEngineId } from '@shared/constants'
 import { isInternalUrl } from '@shared/types/tab'
@@ -24,6 +25,14 @@ export interface ContextMenuDeps {
   moveTabToWorkspace: (tabId: string, workspaceId: string) => void
   /** Hands a link to the segmented download engine. */
   enqueueDownload: (url: string) => void
+  /**
+   * Saved addresses that could fill this page, and how to fill one.
+   *
+   * Returns an empty list when the page has no address fields, so the entry
+   * appears only where it would do something.
+   */
+  addressOffers: (contents: WebContents) => { id: number; label: string }[]
+  fillAddress: (contents: WebContents, id: number) => void
 }
 
 /**
@@ -115,8 +124,39 @@ function buildPageMenu(
     )
   }
 
+  // --- video ---------------------------------------------------------------
+  // Only on a video, where it always applies — so unlike the View-menu entry
+  // this one never has to explain that there was nothing to pop out.
+  if (params.mediaType === 'video') {
+    items.push(
+      {
+        label: 'Picture in picture',
+        click: () => {
+          void togglePictureInPicture(contents)
+        }
+      },
+      separator
+    )
+  }
+
   // --- editable field ------------------------------------------------------
   if (params.isEditable) {
+    // Offered only where the page actually has fields an address could fill, so
+    // this never appears on a comment box or a search bar.
+    const offers = deps.addressOffers(contents)
+    if (offers.length > 0) {
+      items.push(
+        {
+          label: 'Fill address',
+          submenu: offers.map((offer) => ({
+            label: offer.label,
+            click: () => deps.fillAddress(contents, offer.id)
+          }))
+        },
+        separator
+      )
+    }
+
     items.push(
       { label: 'Undo', role: 'undo', enabled: params.editFlags.canUndo },
       { label: 'Redo', role: 'redo', enabled: params.editFlags.canRedo },
@@ -168,6 +208,8 @@ function buildPageMenu(
         label: 'Save page as…',
         click: () => contents.downloadURL(contents.getURL())
       },
+      // The system dialog, deliberately: this entry is reached by right-clicking
+      // a specific frame, and the preview renders the top-level page.
       { label: 'Print…', click: () => contents.print() },
       separator
     )

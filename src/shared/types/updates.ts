@@ -3,16 +3,18 @@ import { z } from 'zod'
 /**
  * Update checking.
  *
- * Deliberately **check-only**. Downloading and installing an update is not
- * offered, and that is a security decision rather than an unfinished one: this
- * build is not code-signed, so an update package cannot be verified as coming
- * from us. An unsigned auto-installer is an unauthenticated way to put code on
- * the user's machine, which is worse than having no updates at all.
+ * Installing is **gated on the build being code-signed**, checked against the
+ * binary on this machine rather than a flag set when it was built. Unsigned, an
+ * update package cannot be verified as coming from us, and an auto-installer
+ * with nothing to verify against is an unauthenticated way to put code on the
+ * user's machine — worse than having no updates at all.
  *
- * So the browser tells you a newer version exists and where to get it. The
- * moment a signing certificate exists, `installUpdate` becomes the small
- * addition it should be — and `verifyUpdateCodeSignature` in the builder config
- * is already on, so it will refuse a package that does not match.
+ * The install path itself is written and wired. Buying a certificate and setting
+ * `CSC_LINK`/`CSC_KEY_PASSWORD` for the build is the whole of what switches it
+ * on: `isSignedBuild()` starts returning true, `canInstall` follows, and the
+ * button in Settings stops being disabled. No code change is involved.
+ * `verifyUpdateCodeSignature` in the builder config is already on, so the
+ * installer will refuse a package whose signature does not match.
  */
 
 export const UpdateStateSchema = z.enum([
@@ -22,6 +24,8 @@ export const UpdateStateSchema = z.enum([
   'checking',
   'up-to-date',
   'update-available',
+  /** Fetching the package. Only reachable on a signed build. */
+  'downloading',
   'error'
 ])
 export type UpdateState = z.infer<typeof UpdateStateSchema>

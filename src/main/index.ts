@@ -3,15 +3,23 @@ import { app, BrowserWindow } from 'electron'
 import { AppContext } from './AppContext'
 import { parseQuery as parseQueryForDev } from './memory/parseQuery'
 import { buildApplicationMenu } from './menu'
+import { groupByWindow } from './snapshots/windowGrouping'
 import { createLogger } from './logger'
-import { prepareUserDataPath } from './userData'
+import { applyProfile, prepareUserDataPath } from './userData'
+import { profileFromArgv } from './profiles/profilePaths'
+import { ProfileRegistry } from './profiles/ProfileRegistry'
 import { CrashReporting } from './diagnostics/CrashReporting'
 
 const log = createLogger('main')
 
 // Before anything reads a path, and before the single-instance lock, which is
 // itself keyed off the user-data location.
-prepareUserDataPath()
+const baseUserData = prepareUserDataPath()
+
+// Immediately after, and still before anything opens a file. `app.setPath` only
+// takes effect while nothing has read the old path, and being late produces no
+// error — the browser just uses the wrong profile's data and writes to it.
+const activeProfile = applyProfile(baseUserData, profileFromArgv(process.argv))
 
 // Before any renderer exists. Chromium writes a minidump when one dies, but
 // discards it unless the reporter is running — and the most interesting crash is
@@ -26,6 +34,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   const context = new AppContext()
+  // Read from the base path, not the profile's: the list is shared by all of
+  // them and lives outside every profile directory.
+  context.attachProfiles(new ProfileRegistry(baseUserData), activeProfile)
 
   /**
    * Which window a launch is asking for.
@@ -102,9 +113,18 @@ if (!app.requestSingleInstanceLock()) {
     if (context.settings.getAll().restoreTabsOnStartup) {
       const previous = context.snapshots.latestRestorable()
       if (previous && previous.tabs.length > 0) {
-        const restored = window.tabs.restoreFromSnapshot(previous.tabs, { activateFirst: true })
+        // Back into the windows they were in. A session of three windows used to
+        // come back as one containing everything: every page was there, so
+        // nothing looked broken, and the arrangement was simply gone.
+        const groups = groupByWindow(previous.tabs)
+        let restored = 0
+        for (const [index, group] of groups.entries()) {
+          const target = index === 0 ? window : context.createWindow()
+          if (index > 0) target.tabs.loadGroups(context.tabGroups.list())
+          restored += target.tabs.restoreFromSnapshot(group, { activateFirst: true })
+        }
         log.info(
-          `startup: restored ${restored} tab(s) from the previous session ` +
+          `startup: restored ${restored} tab(s) across ${groups.length} window(s) ` +
             `(${previous.kind === 'automatic' ? 'autosave — the browser did not exit cleanly' : 'clean exit'})`
         )
       }

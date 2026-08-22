@@ -16,6 +16,7 @@ export function SponsorSection(): React.JSX.Element {
 
   const enabled = settings?.sponsoredTilesEnabled ?? false
   const endpoint = settings?.sponsorEndpoint ?? ''
+  const portal = settings?.advertisePortalUrl ?? ''
 
   const load = (): void => {
     void window.browser.invoke('sponsor:status', undefined).then((result) => {
@@ -114,6 +115,25 @@ export function SponsorSection(): React.JSX.Element {
             Delete stored adverts and counts
           </button>
         </div>
+
+        <label className="mt-3 block text-[11px] text-[var(--color-text-muted)]">
+          Where &ldquo;Advertise on Slash&rdquo; points
+        </label>
+        <input
+          value={portal}
+          onChange={(event) =>
+            void window.browser.invoke('settings:update', {
+              advertisePortalUrl: event.target.value
+            })
+          }
+          placeholder="https://ads.example.com"
+          aria-label="Advertiser portal address"
+          className="mt-1.5 w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+        />
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          Adds one line to the start page for companies wanting to buy the tile. Left empty — the
+          default — nothing is shown and nothing is requested to find that out.
+        </p>
       </details>
     </div>
   )

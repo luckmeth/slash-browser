@@ -52,6 +52,15 @@ export class Tab {
   private rssBeforeHibernate: number | null = null
   /** Scroll offset awaiting reapplication after a snapshot restore. */
   private pendingScrollY = 0
+  /**
+   * When this tab last started making sound, as unix ms; 0 if never.
+   *
+   * Main-side only, deliberately not in `TabSnapshot`: it changes on every
+   * play and pause, and putting it in the snapshot would push an IPC broadcast
+   * to every window each time a video buffered. Media keys are the only caller
+   * and they run in main.
+   */
+  lastAudibleAt = 0
 
   constructor(init: { workspaceId: string; url?: string; id?: string }) {
     this.id = init.id ?? nextTabId()

@@ -1,6 +1,8 @@
 import { Menu, app, shell, type MenuItemConstructorOptions } from 'electron'
 import type { UiCommand } from '@shared/ipc/contracts'
 import type { AppContext } from './AppContext'
+import { collectShortcuts, commandId, pruneOverrides, type MenuNode } from './menus/shortcutMap'
+import { pipMessage, togglePictureInPicture } from './media/pictureInPicture'
 
 /**
  * The application menu, which on Windows is also how a browser gets its keyboard
@@ -16,6 +18,15 @@ import type { AppContext } from './AppContext'
  * depend on renderer state (which input has focus, which panel is open) are sent
  * to the UI as a `ui:command` event.
  */
+/**
+ * The menu template with no user remapping applied.
+ *
+ * Kept because the settings screen needs to know what each command *ships*
+ * bound to, and the installed menu no longer knows — its accelerators are
+ * whatever the user last chose.
+ */
+let defaultTemplate: MenuNode[] = []
+
 export function buildApplicationMenu(ctx: AppContext): void {
   const withTabs = (fn: (tabs: NonNullable<ReturnType<AppContext['focusedWindow']>>['tabs']) => void) => () => {
     const window = ctx.focusedWindow()
@@ -144,6 +155,23 @@ export function buildApplicationMenu(ctx: AppContext): void {
           click: send('open-find')
         },
         {
+          // Chromium implements picture-in-picture; what a page cannot do is
+          // offer it when the site's own player has no button, which is most
+          // players that are not YouTube. So the browser offers it instead.
+          label: 'Picture in Picture',
+          accelerator: 'Alt+P',
+          click: () => {
+            const window = ctx.focusedWindow()
+            if (!window) return
+            void togglePictureInPicture(window.tabs.activeTab?.contents ?? null).then((outcome) => {
+              // Says so when nothing happened. A control that silently does
+              // nothing is indistinguishable from one that is broken.
+              const message = pipMessage(outcome)
+              if (message !== '') window.showNotice(message, 'warn')
+            })
+          }
+        },
+        {
           label: 'Reader Mode',
           accelerator: 'F9',
           click: () => {
@@ -252,10 +280,12 @@ export function buildApplicationMenu(ctx: AppContext): void {
         {
           label: 'Print…',
           accelerator: 'CommandOrControl+P',
-          click: withTabs((tabs) => {
-            const id = tabs.snapshot().activeTabId
-            if (id) tabs.print(id)
-          })
+          // Opens Slash's own preview rather than handing straight to the
+          // operating system's dialog. Chromium can render the page exactly as
+          // it will print, and going without that meant no page range, no scale,
+          // and no way to find out you were about to print forty pages of
+          // navigation furniture until it was in the tray.
+          click: () => ctx.focusedWindow()?.showPrintPreview()
         },
         {
           label: 'Full Screen',
@@ -425,8 +455,76 @@ export function buildApplicationMenu(ctx: AppContext): void {
     }
   ]
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  // The user's remappings, applied last so they win over every default without
+  // any of the 46 items above having to know they can be rebound.
+  //
+  // Wrapped: Electron *throws* on a malformed accelerator, and that throw would
+  // take the entire menu with it — leaving a browser with no shortcuts at all
+  // and no menu bar to fix them from. `pruneOverrides` should make this
+  // unreachable; the catch is here because the cost of being wrong is the whole
+  // application menu.
+  defaultTemplate = toNodes(template)
+  const overrides = pruneOverrides(
+    ctx.settings.getAll().keyboardShortcuts,
+    collectShortcuts(defaultTemplate)
+  )
+  try {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(rebind(template, overrides)))
+  } catch {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  }
   app.setName('Slash')
+}
+
+/**
+ * The shortcut list the settings screen shows.
+ *
+ * Read from the template as it was *before* overrides were applied, kept above.
+ * Reading the live menu instead would report each command's current binding as
+ * its default — so "Reset to default" would restore the override, and the row
+ * would never look changed however many times it was rebound.
+ */
+export function listShortcuts(ctx: AppContext): ReturnType<typeof collectShortcuts> {
+  if (defaultTemplate.length === 0) return []
+  return collectShortcuts(defaultTemplate, ctx.settings.getAll().keyboardShortcuts)
+}
+
+/**
+ * The label-and-accelerator skeleton of a template.
+ *
+ * Electron's own `submenu` may be a built `Menu` rather than an array, which is
+ * why `shortcutMap` cannot simply be generic over the real type — and why it
+ * stays free of any electron import.
+ */
+function toNodes(template: readonly MenuItemConstructorOptions[]): MenuNode[] {
+  return template.map((top) => ({
+    label: typeof top.label === 'string' ? top.label : undefined,
+    submenu: Array.isArray(top.submenu)
+      ? top.submenu.map((item) => ({
+          label: typeof item.label === 'string' ? item.label : undefined,
+          accelerator: item.accelerator
+        }))
+      : undefined
+  }))
+}
+
+/** The real template with the user's accelerators substituted in. */
+function rebind(
+  template: readonly MenuItemConstructorOptions[],
+  overrides: Readonly<Record<string, string>>
+): MenuItemConstructorOptions[] {
+  return template.map((top) => {
+    if (typeof top.label !== 'string' || !Array.isArray(top.submenu)) return { ...top }
+    const group = top.label
+    return {
+      ...top,
+      submenu: top.submenu.map((item) => {
+        if (typeof item.label !== 'string' || !item.accelerator) return { ...item }
+        const custom = overrides[commandId(group, item.label)]
+        return custom ? { ...item, accelerator: custom } : { ...item }
+      })
+    }
+  })
 }
 
 /** One Chromium zoom step is a factor of 1.2, which is 0.5 in level units. */

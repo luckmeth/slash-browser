@@ -32,7 +32,13 @@ export const INVOKE_CHANNELS = [
   'overlay:setState',
   'overlay:getState',
   'ui:run',
+  'notice:current',
+  'print:preview',
+  'print:run',
+  'print:savePdf',
   'shortcuts:list',
+  'shortcuts:set',
+  'shortcuts:resetAll',
   'menu:showAppMenu',
   'layout:setRightPanelWidth',
   'layout:setChromeHeight',
@@ -172,6 +178,8 @@ export const INVOKE_CHANNELS = [
   // --- reader mode ---
   'reader:open',
   'reader:get',
+  'reader:translate',
+  'reader:translateAvailable',
 
   // --- import from another browser ---
   'import:sources',
@@ -228,6 +236,22 @@ export const INVOKE_CHANNELS = [
   // --- updates ---
   'updates:status',
   'updates:check',
+  'profiles:list',
+  'profiles:create',
+  'profiles:rename',
+  'profiles:delete',
+  'profiles:switch',
+  'addresses:list',
+  'addresses:save',
+  'addresses:delete',
+  'addresses:fieldsHere',
+  'addresses:fill',
+  'sync:status',
+  'sync:unlock',
+  'sync:lock',
+  'sync:now',
+  'sync:reset',
+  'updates:install',
 
   // --- diagnostics / crash reporting ---
   'crashes:report',
@@ -275,6 +299,7 @@ export const EVENT_CHANNELS = [
   'downloads:changed',
   'history:changed',
   'bookmarks:changed',
+  'sync:changed',
   'workspaces:snapshot',
   'performance:changed',
   /** Chrome → overlay, so the dropdown can render outside the chrome document. */

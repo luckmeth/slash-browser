@@ -150,6 +150,10 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
   })
 
   contents.on('media-started-playing', () => {
+    // Recorded here rather than derived from the snapshot, because "which tab
+    // was making noise most recently" is the whole of how a media key decides
+    // what to act on — and once a tab falls silent the snapshot no longer says.
+    tab.lastAudibleAt = Date.now()
     tab.patch({ isAudible: contents.isCurrentlyAudible() })
     hooks.onChanged()
   })
@@ -160,6 +164,7 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
   })
 
   contents.on('audio-state-changed', (event) => {
+    if (event.audible) tab.lastAudibleAt = Date.now()
     tab.patch({ isAudible: event.audible })
     hooks.onChanged()
   })

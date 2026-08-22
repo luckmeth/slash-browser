@@ -288,3 +288,56 @@ textarea,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Keyboard focus
+   --------------------------------------------------------------------------
+   There were no focus styles at all before this. The chrome uses `outline-none`
+   with a border colour change on several controls, which is invisible to anyone
+   navigating by keyboard on the icon-only buttons — and those are most of the
+   toolbar.
+
+   `:focus-visible` rather than `:focus`, so a mouse click does not leave a ring
+   behind on a browser toolbar. Two layers: a dark inner line and the accent
+   outside it, so the ring stays visible against both a pale page and the dark
+   chrome without knowing which it is sitting on. */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+}
+
+/* Inside the omnibox and other text fields the ring would sit on top of the
+   field's own border and read as a doubled edge. */
+:where(input, textarea, select):focus-visible {
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------------------------
+   Increased contrast
+   --------------------------------------------------------------------------
+   Glass surfaces are translucent by design, which is precisely what somebody
+   who asked the operating system for more contrast is asking us not to do.
+   Panels become opaque and edges become solid; nothing moves, so no layout
+   changes and nothing needs re-testing for position. */
+@media (prefers-contrast: more) {
+  :root {
+    --glass-edge: rgba(255, 255, 255, 0.34);
+    --glass-high: rgba(19, 23, 32, 0.98);
+    --glass-raised: rgba(30, 36, 48, 0.98);
+    --glass-panel: rgba(12, 15, 21, 0.99);
+    --color-text-muted: #c3cbdb;
+  }
+
+  .glass-float,
+  .glass-raised,
+  .glass-high {
+    backdrop-filter: none;
+  }
+
+  :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline-width: 3px;
+  }
+}

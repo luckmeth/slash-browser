@@ -11,6 +11,10 @@ import { ToolbarSection } from './ToolbarSection'
 import { PasswordsSection } from './PasswordsSection'
 import { NewTabSection } from './NewTabSection'
 import { SponsorSection } from './SponsorSection'
+import { ShortcutEditor } from './ShortcutEditor'
+import { AddressSection } from './AddressSection'
+import { ProfileSection } from './ProfileSection'
+import { SyncSection } from './SyncSection'
 import { ExtensionsSection } from './ExtensionsSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
 import { UpdateSection } from './UpdateSection'
@@ -298,6 +302,37 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Profiles">
+        <ProfileSection />
+      </Group>
+
+      <Group title="Saved addresses">
+        <AddressSection />
+      </Group>
+
+      <Group title="Sync">
+        <SyncSection />
+      </Group>
+
+      <Group title="Keyboard shortcuts">
+        <ShortcutEditor />
+      </Group>
+
+      <Group title="Media keys">
+        <Toggle
+          label="Let the media keys control Slash"
+          hint="Play/pause, next and previous act on whichever tab is making sound — or the last one that did."
+          checked={settings.mediaKeysEnabled}
+          onChange={(mediaKeysEnabled) => update({ mediaKeysEnabled })}
+        />
+        <Toggle
+          label="Even when Slash is in the background"
+          hint="Off by default. These keys are taken from the whole system, so with this on, pressing pause while listening to something else pauses a Slash tab instead — and nothing on screen explains why."
+          checked={settings.mediaKeysAlwaysOn}
+          onChange={(mediaKeysAlwaysOn) => update({ mediaKeysAlwaysOn })}
+        />
+      </Group>
+
       <Group title="Restore points">
         <Toggle
           label="Reopen tabs from the last session"
@@ -477,6 +512,26 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
   'Saved sign-ins': {
     category: 'Privacy & security',
     keywords: 'password passwords login logins credentials autofill fill vault account'
+  },
+  Profiles: {
+    category: 'Privacy & security',
+    keywords: 'people accounts separate user switch multiple person work personal'
+  },
+  'Saved addresses': {
+    category: 'Privacy & security',
+    keywords: 'autofill address delivery shipping billing postcode form checkout card payment'
+  },
+  Sync: {
+    category: 'Privacy & security',
+    keywords: 'devices bookmarks reading list encrypted passphrase account cross-device backup'
+  },
+  'Media keys': {
+    category: 'Browsing',
+    keywords: 'play pause next previous track hardware headphones music video global'
+  },
+  'Keyboard shortcuts': {
+    category: 'Browsing',
+    keywords: 'keys keybinding hotkey accelerator remap rebind ctrl alt shift shortcut customise'
   },
   'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
   'Browsing memory': {

@@ -44,6 +44,13 @@ const ContentStateSchema = z.discriminatedUnion('kind', [
     kind: z.literal('login-form'),
     hasPasswordField: z.boolean(),
     hasUsernameField: z.boolean()
+  }),
+  // Which KINDS of address field this page has — never their contents. The
+  // preload holds the element references; main only ever learns that a "city"
+  // box exists somewhere on the page.
+  z.object({
+    kind: z.literal('address-form'),
+    fields: z.array(z.string().max(40)).max(30)
   })
 ])
 
@@ -57,6 +64,8 @@ export interface ContentSignalHooks {
     webContentsId: number,
     form: { hasPasswordField: boolean; hasUsernameField: boolean }
   ) => void
+  /** Which kinds of address field this page offers. */
+  onAddressForm?: (webContentsId: number, fields: readonly string[]) => void
 }
 
 export function installContentSignalListener(
@@ -85,6 +94,11 @@ export function installContentSignalListener(
         hasPasswordField: parsed.data.hasPasswordField,
         hasUsernameField: parsed.data.hasUsernameField
       })
+      return
+    }
+
+    if (parsed.data.kind === 'address-form') {
+      hooks.onAddressForm?.(event.sender.id, parsed.data.fields)
       return
     }
 

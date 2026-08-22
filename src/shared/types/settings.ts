@@ -142,6 +142,53 @@ export const SettingsSchema = z.object({
    * aggregate counts go back. See `docs/sponsored-tiles.md` for the contract.
    */
   sponsorEndpoint: z.string().default(''),
+  /**
+   * Where "Advertise on Slash" points, if anywhere.
+   *
+   * Empty by default, so a default install shows no such link at all. Held as a
+   * plain setting rather than fetched from the portal deliberately: a link that
+   * had to be looked up would mean a request from every start page, which is
+   * the per-impression call the whole sponsored-tile design exists to avoid,
+   * spent on a hyperlink.
+   */
+  advertisePortalUrl: z.string().default(''),
+  /**
+   * Remapped keyboard shortcuts: command id → Electron accelerator.
+   *
+   * Only genuine differences are stored. A binding equal to the default is
+   * pruned on write, so changing a default later reaches everybody instead of
+   * being silently pinned to whatever it was the day somebody opened this
+   * screen. Ids are derived from the menu path — see `menus/shortcutMap.ts`.
+   */
+  keyboardShortcuts: z.record(z.string(), z.string()).default({}),
+  /**
+   * Whether the hardware media keys control the browser.
+   *
+   * On by default, but only while Slash has focus — see `mediaKeysAlwaysOn`.
+   */
+  mediaKeysEnabled: z.boolean().default(true),
+  /**
+   * Keep the media keys even when Slash is in the background.
+   *
+   * Off by default, because `globalShortcut` is exactly that: taking these keys
+   * permanently means pressing pause while listening to something else pauses a
+   * tab in a minimised browser instead, and nothing on screen explains why.
+   */
+  mediaKeysAlwaysOn: z.boolean().default(false),
+  /**
+   * Whether bookmarks and the reading list are synced between machines.
+   *
+   * Off by default and inert without an endpoint, so a fresh install contacts
+   * nothing. What is uploaded is **ciphertext only** — the passphrase never
+   * leaves the machine, and no key derived from it is stored.
+   */
+  syncEnabled: z.boolean().default(false),
+  /** Where the encrypted blobs go. Empty by default; see docs/sync.md. */
+  syncEndpoint: z.string().default(''),
+  /** Bearer token for the sync account, if the server wants one. */
+  syncToken: z.string().default(''),
+  /** How often to sync while the browser is open, in minutes. */
+  syncIntervalMinutes: z.number().int().min(5).max(1440).default(30),
   /** Compact trades padding for rows on screen. */
   uiDensity: z.enum(['comfortable', 'compact']).default('comfortable'),
   /**
@@ -319,7 +366,15 @@ export const SettingsSchema = z.object({
   /** Page *content* may only reach a provider with a per-request approval too. */
   aiMayReadPageContent: z.boolean().default(false),
   /** For the OpenAI-compatible adapter — Ollama, LM Studio, a local server. */
-  aiBaseUrl: z.string().default('http://localhost:11434/v1')
+  aiBaseUrl: z.string().default('http://localhost:11434/v1'),
+  /**
+   * What "Translate" translates into.
+   *
+   * A plain language name rather than a code, because it is passed straight to
+   * a language model and "Brazilian Portuguese" is a more useful instruction
+   * than "pt-BR".
+   */
+  translateTargetLanguage: z.string().default('English')
 })
 
 export type Settings = z.infer<typeof SettingsSchema>

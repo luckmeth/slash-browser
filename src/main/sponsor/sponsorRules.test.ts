@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { acceptCreative, reportUrlFor, selectTile } from './sponsorRules'
+import { acceptCreative, isLive, reportUrlFor, selectLive, selectTile } from './sponsorRules'
 
 const tile = (id: string): { id: string } => ({ id })
 
@@ -98,5 +98,97 @@ describe('reportUrlFor', () => {
     expect(reportUrlFor('')).toBeNull()
     expect(reportUrlFor('   ')).toBeNull()
     expect(reportUrlFor('not a url')).toBeNull()
+  })
+})
+
+describe('isLive', () => {
+  const AT = 1_700_000_000_000
+
+  it('treats an unbounded window as always running', () => {
+    expect(isLive({ startsAt: null, endsAt: null }, AT)).toBe(true)
+  })
+
+  it('does not run a campaign before it starts', () => {
+    expect(isLive({ startsAt: AT + 1, endsAt: null }, AT)).toBe(false)
+    expect(isLive({ startsAt: AT, endsAt: null }, AT)).toBe(true)
+  })
+
+  it('is half-open at the end, so an hour cannot be sold twice', () => {
+    // A campaign ending at the same instant the next one starts must not still
+    // be live at that instant, or both are shown for the moment they touch and
+    // one advertiser is paying for time the other is also paying for.
+    expect(isLive({ startsAt: null, endsAt: AT }, AT)).toBe(false)
+    expect(isLive({ startsAt: null, endsAt: AT + 1 }, AT)).toBe(true)
+  })
+
+  it('honours both ends together', () => {
+    const window = { startsAt: AT, endsAt: AT + 3_600_000 }
+    expect(isLive(window, AT - 1)).toBe(false)
+    expect(isLive(window, AT)).toBe(true)
+    expect(isLive(window, AT + 3_599_999)).toBe(true)
+    expect(isLive(window, AT + 3_600_000)).toBe(false)
+  })
+})
+
+describe('selectLive', () => {
+  const AT = 1_700_000_000_000
+  const tile = (id: string, startsAt: number | null, endsAt: number | null) => ({
+    id,
+    startsAt,
+    endsAt
+  })
+
+  it('skips a campaign that has not started and one that has finished', () => {
+    const tiles = [
+      tile('past', null, AT - 1),
+      tile('now', AT - 1000, AT + 1000),
+      tile('future', AT + 1000, null)
+    ]
+    expect(selectLive(tiles, 0, AT)?.id).toBe('now')
+    expect(selectLive(tiles, 1, AT)?.id).toBe('now')
+    expect(selectLive(tiles, 7, AT)?.id).toBe('now')
+  })
+
+  it('rotates evenly across only the live campaigns', () => {
+    // Rotation applies after filtering, so a batch carrying days of future
+    // scheduling still shows today's campaigns evenly instead of leaving gaps
+    // where a scheduled one would have gone.
+    const tiles = [
+      tile('a', null, null),
+      tile('scheduled', AT + 86_400_000, null),
+      tile('b', null, null)
+    ]
+    expect([0, 1, 2, 3].map((r) => selectLive(tiles, r, AT)?.id)).toEqual(['a', 'b', 'a', 'b'])
+  })
+
+  it('returns null when everything cached is out of window', () => {
+    // A batch can outlive every campaign in it. Showing nothing is correct;
+    // showing a finished campaign is billing somebody for time they did not buy.
+    const tiles = [tile('past', null, AT - 1), tile('future', AT + 1, null)]
+    expect(selectLive(tiles, 0, AT)).toBeNull()
+  })
+})
+
+describe('acceptCreative — scheduling', () => {
+  const good = { id: '1', image: '', clickUrl: 'https://example.com/offer' }
+
+  it('accepts a creative with no window at all', () => {
+    expect(acceptCreative(good).ok).toBe(true)
+  })
+
+  it('accepts a well-ordered window', () => {
+    expect(acceptCreative({ ...good, startsAt: 1000, endsAt: 2000 }).ok).toBe(true)
+  })
+
+  it('refuses a window that ends before it starts', () => {
+    // Never runnable, so it is dropped at fetch rather than silently never
+    // appearing — an operator should find out the same day.
+    const verdict = acceptCreative({ ...good, startsAt: 2000, endsAt: 1000 })
+    expect(verdict.ok).toBe(false)
+    expect(verdict).toMatchObject({ reason: 'campaign ends before it starts' })
+  })
+
+  it('refuses a zero-length window', () => {
+    expect(acceptCreative({ ...good, startsAt: 1000, endsAt: 1000 }).ok).toBe(false)
   })
 })

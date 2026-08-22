@@ -632,6 +632,135 @@ const m014_missions: Migration = {
   `
 }
 
+const m019_sponsor_schedule: Migration = {
+  version: 19,
+  name: 'sponsor_schedule',
+  sql: /* sql */ `
+    -- When a creative may run, as unix ms. NULL at either end means unbounded.
+    --
+    -- Campaigns are sold by the hour, but a batch is fetched at most every six
+    -- hours -- so an hour bought at 14:00 would be invisible to any copy that
+    -- last fetched at 13:00, which is most of them. Carrying the window in the
+    -- batch lets each machine start and stop the campaign itself, from data it
+    -- already has: no extra requests, correct while offline, and nothing about
+    -- the reader ever sent to find out whether an advert is due.
+    --
+    -- Distinct from expires_at, which is when the BATCH goes stale. One is the
+    -- campaign's life, the other is the cache's.
+    ALTER TABLE sponsored_tiles ADD COLUMN starts_at INTEGER;
+    ALTER TABLE sponsored_tiles ADD COLUMN ends_at   INTEGER;
+  `
+}
+
+const m020_snapshot_windows: Migration = {
+  version: 20,
+  name: 'snapshot_windows',
+  sql: /* sql */ `
+    -- Which window a tab was in when the snapshot was taken.
+    --
+    -- Without it a restore point is a flat list, and restoring two windows of
+    -- work produced one window containing everything. Nothing looked broken --
+    -- every page came back -- so the only symptom was an arrangement the user
+    -- built by hand quietly collapsing, with no way to tell whether the browser
+    -- had forgotten it or never recorded it.
+    --
+    -- Defaults to 0, so every snapshot taken before this migration restores as a
+    -- single window, which is exactly what it was.
+    ALTER TABLE snapshot_tabs ADD COLUMN window_index INTEGER NOT NULL DEFAULT 0;
+  `
+}
+
+const m021_sync: Migration = {
+  version: 21,
+  name: 'sync',
+  sql: /* sql */ `
+    -- A stable identity for a bookmark, so two machines can agree what "the
+    -- same bookmark" is.
+    --
+    -- The primary key is an AUTOINCREMENT integer, which is unique on this
+    -- machine and meaningless anywhere else: two devices creating a bookmark
+    -- each would both call it 7. Backfilled with random values for rows that
+    -- already exist; new rows get one from the repository.
+    ALTER TABLE bookmarks ADD COLUMN guid TEXT;
+    UPDATE bookmarks SET guid = lower(hex(randomblob(16))) WHERE guid IS NULL;
+    CREATE UNIQUE INDEX idx_bookmarks_guid ON bookmarks (guid);
+
+    -- When each row last changed, which is the only ordering a last-write-wins
+    -- merge has. Seeded from creation time: a row nobody has touched since it
+    -- was made was, in fact, last changed then.
+    ALTER TABLE bookmarks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+    UPDATE bookmarks SET updated_at = created_at;
+
+    ALTER TABLE reading_list ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+    UPDATE reading_list SET updated_at = added_at;
+
+    -- What was deleted, and when.
+    --
+    -- Without this a deletion is an absence, and an absence is indistinguishable
+    -- from "the other device has something new" — so every bookmark deleted on
+    -- one machine comes back the moment another one syncs. Pruned after a long
+    -- window; see mergeTombstoneMaxAge.
+    CREATE TABLE sync_tombstones (
+      collection TEXT    NOT NULL,
+      item_id    TEXT    NOT NULL,
+      deleted_at INTEGER NOT NULL,
+      PRIMARY KEY (collection, item_id)
+    );
+
+    -- One row. Holds this device's identity and how far it has read.
+    --
+    -- The salt is stored, the passphrase is not, and no key derived from it is
+    -- either -- the key is derived on each unlock and held in memory only. The
+    -- verifier lets a second device tell a wrong passphrase from an empty
+    -- account, which is otherwise indistinguishable.
+    CREATE TABLE sync_state (
+      id            INTEGER PRIMARY KEY CHECK (id = 1),
+      device_id     TEXT    NOT NULL,
+      cursor        INTEGER NOT NULL DEFAULT 0,
+      salt          TEXT    NOT NULL DEFAULT '',
+      verifier      TEXT    NOT NULL DEFAULT '',
+      last_sync_at  INTEGER,
+      last_error    TEXT
+    );
+  `
+}
+
+const m022_addresses: Migration = {
+  version: 22,
+  name: 'addresses',
+  sql: /* sql */ `
+    -- Addresses the user chose to save, for filling checkout and delivery forms.
+    --
+    -- Not encrypted, and that is a considered position rather than an oversight:
+    -- an address is not a credential. It is printed on the parcels arriving at
+    -- the house and is already in the address book of every shop the user has
+    -- ordered from. Encrypting it would need a key, and the only place to put
+    -- that key is beside the data -- which buys the appearance of protection and
+    -- none of the substance. Passwords, which ARE credentials, go through
+    -- safeStorage instead; see PasswordVault.
+    --
+    -- Card numbers are deliberately absent. See docs/testing/autofill.md.
+    CREATE TABLE saved_addresses (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      label         TEXT    NOT NULL DEFAULT '',
+      name          TEXT    NOT NULL DEFAULT '',
+      given_name    TEXT    NOT NULL DEFAULT '',
+      family_name   TEXT    NOT NULL DEFAULT '',
+      organization  TEXT    NOT NULL DEFAULT '',
+      street_line1  TEXT    NOT NULL DEFAULT '',
+      street_line2  TEXT    NOT NULL DEFAULT '',
+      city          TEXT    NOT NULL DEFAULT '',
+      region        TEXT    NOT NULL DEFAULT '',
+      postal_code   TEXT    NOT NULL DEFAULT '',
+      country       TEXT    NOT NULL DEFAULT '',
+      phone         TEXT    NOT NULL DEFAULT '',
+      email         TEXT    NOT NULL DEFAULT '',
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -650,7 +779,11 @@ export const migrations: readonly Migration[] = [
   m015_tab_groups,
   m016_reading_list,
   m017_logins,
-  m018_sponsored
+  m018_sponsored,
+  m019_sponsor_schedule,
+  m020_snapshot_windows,
+  m021_sync,
+  m022_addresses
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

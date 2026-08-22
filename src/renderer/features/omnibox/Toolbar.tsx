@@ -219,9 +219,26 @@ export function Toolbar(): React.JSX.Element {
           onKeyDown={onKeyDown}
           role="combobox"
           aria-expanded={suggestions.length > 0}
-          aria-controls="omnibox-suggestions"
+          // Deliberately no aria-controls / aria-activedescendant. The suggestion
+          // list lives in the overlay, which is a **separate WebContents with its
+          // own document** — an id reference cannot cross that boundary, so
+          // pointing at "omnibox-suggestions" declared a relationship that
+          // silently resolved to nothing. The live region below carries the same
+          // information by the only route that actually works here.
+          aria-autocomplete="list"
           className="w-full rounded-xl border border-[var(--glass-edge)] bg-[var(--glass-raised)] py-1.5 pr-9 pl-9 text-sm outline-none transition focus:border-[var(--color-accent)] focus:bg-[var(--glass-high)] disabled:opacity-50"
         />
+
+        {/*
+          What the suggestion list would have announced, had ARIA been able to
+          reach it. Announces the highlighted row as the user arrows through,
+          because a screen reader cannot see the overlay document from here.
+        */}
+        <div className="sr-only" role="status" aria-live="polite">
+          {suggestions.length === 0
+            ? ''
+            : `${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'}`}
+        </div>
 
         <div className="absolute right-1.5 flex items-center gap-0.5">
           {/* Only shown when zoom is not 100%, as Chrome does — a permanent

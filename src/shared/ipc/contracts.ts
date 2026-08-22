@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PrintChoicesSchema, PrintPreviewSchema } from '../types/print'
 import { SettingsSchema } from '../types/settings'
 import { TabsSnapshotSchema, TabSchema } from '../types/tab'
 import { TabGroupSchema } from '../types/tabGroup'
@@ -24,6 +25,8 @@ import { RedirectChainSchema } from '../types/redirectChain'
 import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
 import { AiComparisonSchema, ComparePreviewSchema } from '../types/aiCompare'
 import { CrashReportSchema } from '../types/diagnostics'
+import { SavedAddressSchema } from '../types/address'
+import { SyncStatusSchema } from '../types/sync'
 import { UpdateStatusSchema } from '../types/updates'
 import { PageChangeSchema, WatchStatusSchema } from '../types/watch'
 import { MissionStatusSchema } from '../types/mission'
@@ -122,7 +125,18 @@ export const OverlayStateSchema = z.object({
     'passwords',
     'command-palette',
     'shortcuts',
-    'cleanup'
+    'cleanup',
+    /** Print preview: what will come out of the printer, before it does. */
+    'print',
+    /**
+     * A transient message: what happened, when the answer is "nothing".
+     *
+     * In the overlay because it has to be readable over a web page, and sized to
+     * a small strip rather than the window — an overlay swallows clicks inside
+     * its own bounds, and a full-window one would make the page inert for as
+     * long as a toast was showing.
+     */
+    'notice'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>
@@ -238,12 +252,68 @@ export const invokeContracts = {
    * have already bitten this codebase.
    */
   'menu:showAppMenu': { request: z.void(), response: z.void() },
+  /**
+   * Renders the page as it would print, with the current choices.
+   *
+   * A real render rather than an approximation — the same `printToPDF` call the
+   * "Save as PDF" button makes. A preview that is not what prints is worse than
+   * no preview, because it is trusted.
+   */
+  'print:preview': {
+    request: z.object({ choices: PrintChoicesSchema }),
+    response: PrintPreviewSchema.nullable()
+  },
+  'print:run': {
+    request: z.object({ choices: PrintChoicesSchema, pageCount: z.number().int() }),
+    response: z.object({ ok: z.boolean(), reason: z.string() })
+  },
+  'print:savePdf': {
+    request: z.object({ choices: PrintChoicesSchema }),
+    response: z.object({ ok: z.boolean(), path: z.string() })
+  },
+
+  /** The text of the notice currently showing, read by the overlay on mount. */
+  'notice:current': {
+    request: z.void(),
+    response: z.object({
+      message: z.string(),
+      tone: z.enum(['info', 'warn'])
+    })
+  },
   'shortcuts:list': {
     request: z.void(),
     response: z.array(
-      z.object({ group: z.string(), label: z.string(), accelerator: z.string() })
+      z.object({
+        /** Derived from the menu path; what a remapping is stored against. */
+        id: z.string(),
+        group: z.string(),
+        label: z.string(),
+        /** What it is bound to now. */
+        accelerator: z.string(),
+        /** What it ships bound to, so a row can say it has been changed. */
+        defaultAccelerator: z.string()
+      })
     )
   },
+  /**
+   * Rebinds one command, or clears the binding when `accelerator` is null.
+   *
+   * Validated in the main process rather than trusted from the renderer: an
+   * accelerator Electron cannot parse makes `setApplicationMenu` throw, and that
+   * throw would take the whole menu — every shortcut in the browser — with it.
+   */
+  'shortcuts:set': {
+    request: z.object({ id: z.string().min(1), accelerator: z.string().nullable() }),
+    response: z.object({
+      ok: z.boolean(),
+      /** Why it was refused, for the settings row to show. */
+      problem: z.string().nullable(),
+      /** Commands now sharing keys with this one. Advisory: the binding is still made. */
+      conflictsWith: z.array(z.string())
+    })
+  },
+  /** Puts every shortcut back to what it shipped as. */
+  'shortcuts:resetAll': { request: z.void(), response: z.void() },
 
   /**
    * Reserves a strip on the right for a side panel, shrinking the page view.
@@ -538,7 +608,11 @@ export const invokeContracts = {
       /** Put every tab into one new workspace instead of their original ones. */
       intoNewWorkspace: z.boolean().default(false)
     }),
-    response: z.object({ restored: z.number().int() })
+    response: z.object({
+      restored: z.number().int(),
+      /** How many windows were opened, so the UI can say so rather than surprise. */
+      windows: z.number().int()
+    })
   },
   /** Restore a single tab out of a snapshot, by its index within it. */
   'snapshots:restoreTab': {
@@ -762,6 +836,27 @@ export const invokeContracts = {
   'reader:open': { request: z.void(), response: ReaderResultSchema },
   /** Pulled by the overlay document once it has mounted. */
   'reader:get': { request: z.void(), response: ReaderResultSchema },
+  /**
+   * Translates the article currently in the reader.
+   *
+   * **Sends the page's text to the configured AI provider**, so it is gated on
+   * `aiMayReadPageContent` — the same switch that governs every other way page
+   * content reaches a provider, rather than a second one to find and reason
+   * about. Refuses with a reason instead of failing silently.
+   */
+  'reader:translate': {
+    request: z.object({ language: z.string().default('') }),
+    response: z.union([
+      z.object({
+        ok: z.literal(true),
+        title: z.string(),
+        blocks: z.array(z.string())
+      }),
+      z.object({ ok: z.literal(false), reason: z.string() })
+    ])
+  },
+  /** Whether translation could run at all, so the button can say why not. */
+  'reader:translateAvailable': { request: z.void(), response: z.boolean() },
 
   'import:sources': { request: z.void(), response: z.array(ImportSourceSchema) },
   /**
@@ -869,6 +964,85 @@ export const invokeContracts = {
    * build is unsigned, so it cannot verify one came from us.
    */
   'updates:check': { request: z.void(), response: UpdateStatusSchema },
+
+  // --- sync -----------------------------------------------------------------
+
+  // --- profiles --------------------------------------------------------------
+
+  'profiles:list': {
+    request: z.void(),
+    response: z.object({
+      activeId: z.string(),
+      profiles: z.array(
+        z.object({ id: z.string(), name: z.string(), createdAt: z.number() })
+      )
+    })
+  },
+  'profiles:create': { request: z.object({ name: z.string() }), response: z.string() },
+  'profiles:rename': {
+    request: z.object({ id: z.string(), name: z.string() }),
+    response: z.void()
+  },
+  'profiles:delete': {
+    request: z.object({ id: z.string() }),
+    response: z.object({ ok: z.boolean(), reason: z.string() })
+  },
+  /**
+   * Restarts into another profile.
+   *
+   * A relaunch rather than a swap: the database, session partitions and caches
+   * are all open on the current profile by the time anybody clicks this, and
+   * `app.setPath('userData')` is only honoured before any of that happened.
+   */
+  'profiles:switch': { request: z.object({ id: z.string() }), response: z.void() },
+
+  // --- saved addresses -------------------------------------------------------
+
+  'addresses:list': { request: z.void(), response: z.array(SavedAddressSchema) },
+  'addresses:save': {
+    request: SavedAddressSchema.partial({ id: true }),
+    response: SavedAddressSchema
+  },
+  'addresses:delete': { request: z.object({ id: z.number().int() }), response: z.void() },
+  /** Which address fields the page in front offers, so the UI can offer to fill them. */
+  'addresses:fieldsHere': { request: z.void(), response: z.array(z.string()) },
+  /**
+   * Types a saved address into the page.
+   *
+   * The value never crosses into the renderer or the page's preload — main sends
+   * "focus this field" and then `insertText`. Only an id crosses this boundary.
+   */
+  'addresses:fill': {
+    request: z.object({ id: z.number().int() }),
+    response: z.object({ filled: z.number().int() })
+  },
+
+  'sync:status': { request: z.void(), response: SyncStatusSchema },
+  /**
+   * Derives the key from a passphrase and checks it against the account.
+   *
+   * The passphrase crosses this boundary once and is never stored — not on
+   * disk, not in settings, and no key derived from it either. It is the only
+   * message in the browser that carries one, which is why it goes no further
+   * than `SyncService.unlock`.
+   */
+  'sync:unlock': {
+    request: z.object({ passphrase: z.string() }),
+    response: z.object({ ok: z.boolean(), problem: z.string() })
+  },
+  'sync:lock': { request: z.void(), response: SyncStatusSchema },
+  'sync:now': { request: z.void(), response: SyncStatusSchema },
+  'sync:reset': { request: z.void(), response: SyncStatusSchema },
+  /**
+   * Downloads and installs the available update, then relaunches.
+   *
+   * Refuses on an unsigned build. The refusal is returned rather than thrown so
+   * the UI can say why, which is the whole point of offering the button at all.
+   */
+  'updates:install': {
+    request: z.void(),
+    response: z.object({ ok: z.boolean(), detail: z.string() })
+  },
 
   /**
    * Local crash record. Dumps stay on the machine — there is no upload server,
@@ -1043,6 +1217,8 @@ export const eventContracts = {
   'downloads:changed': z.array(DownloadItemSchema),
   'history:changed': z.object({}),
   'bookmarks:changed': z.array(BookmarkSchema),
+  /** Sync state moved: unlocked, synced, failed, or reset. */
+  'sync:changed': SyncStatusSchema,
   'workspaces:snapshot': WorkspacesSnapshotSchema,
   'performance:changed': PerformanceSnapshotSchema,
   'omnibox:state': OmniboxStateSchema,

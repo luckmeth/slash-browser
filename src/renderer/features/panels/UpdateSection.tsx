@@ -23,6 +23,8 @@ export function UpdateSection({
 }): React.JSX.Element {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [draft, setDraft] = useState(feedUrl)
+  const [installing, setInstalling] = useState(false)
+  const [installProblem, setInstallProblem] = useState('')
 
   useEffect(() => {
     void window.browser.invoke('updates:status', undefined).then((result) => {
@@ -52,6 +54,11 @@ export function UpdateSection({
       </p>
 
       {status && <p className="text-[11px] text-[var(--color-text-muted)]">{status.detail}</p>}
+      {installProblem !== '' && (
+        <p role="status" aria-live="polite" className="text-[11px] text-[var(--color-warn)]">
+          {installProblem}
+        </p>
+      )}
 
       <label className="block">
         <span className="mb-1 block text-[11px] text-[var(--color-text-muted)]">
@@ -78,6 +85,34 @@ export function UpdateSection({
         >
           {status?.state === 'checking' ? 'Checking…' : 'Check now'}
         </button>
+        {/*
+          Only offered once the running binary carries a valid signature. The
+          install path is written and wired; `canInstall` is what stands between
+          it and being live, and it flips on its own the day the build is signed.
+          Showing a disabled button rather than hiding it is deliberate: the
+          reason is stated in `status.detail` beside it.
+        */}
+        {status?.state === 'update-available' && (
+          <button
+            type="button"
+            disabled={!status.canInstall || installing}
+            title={
+              status.canInstall
+                ? 'Download and install, then restart'
+                : 'This build is not code-signed, so an update cannot be verified as coming from us.'
+            }
+            onClick={() => {
+              setInstalling(true)
+              void window.browser.invoke('updates:install', undefined).then((result) => {
+                setInstalling(false)
+                if (result.ok && !result.value.ok) setInstallProblem(result.value.detail)
+              })
+            }}
+            className="cursor-default rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+          >
+            {installing ? 'Installing…' : 'Install and restart'}
+          </button>
+        )}
         {status?.releaseUrl && (
           <button
             type="button"

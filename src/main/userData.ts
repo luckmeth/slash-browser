@@ -1,3 +1,5 @@
+import { ProfileRegistry } from './profiles/ProfileRegistry'
+import { DEFAULT_PROFILE_ID } from './profiles/profilePaths'
 import { join } from 'node:path'
 import { existsSync, renameSync } from 'node:fs'
 import { app } from 'electron'
@@ -22,7 +24,7 @@ const LEGACY_FOLDERS = ['adaptive-browser', 'Adaptive Browser']
  *
  * Must run before anything reads a path, which means before `app.whenReady`.
  */
-export function prepareUserDataPath(): void {
+export function prepareUserDataPath(): string {
   const appData = app.getPath('appData')
 
   // Dev probes get a throwaway profile.
@@ -36,7 +38,7 @@ export function prepareUserDataPath(): void {
   if (isProbeRun()) {
     const scratch = join(appData, `${DATA_FOLDER}-probe`)
     app.setPath('userData', scratch)
-    return
+    return scratch
   }
 
   const target = join(appData, DATA_FOLDER)
@@ -55,12 +57,36 @@ export function prepareUserDataPath(): void {
         // If the move fails — a file locked by another process, say — fall back
         // to the old location rather than starting the user from scratch.
         app.setPath('userData', legacy)
-        return
+        return legacy
       }
     }
   }
 
   app.setPath('userData', target)
+  return target
+}
+
+/**
+ * Points the browser at one profile's data directory.
+ *
+ * Must run immediately after `prepareUserDataPath` and before anything opens a
+ * file — `app.setPath` only takes effect if nothing has read the old path yet,
+ * and being late produces no error at all. The browser simply uses the wrong
+ * profile's data and writes to it.
+ *
+ * The default profile keeps the base directory unchanged, so every existing
+ * installation carries on exactly where it was.
+ *
+ * @returns the profile actually in use, which may not be the one asked for: an
+ *   unknown id falls back to the default rather than silently creating a profile,
+ *   because a new empty profile looks exactly like all your data having vanished.
+ */
+export function applyProfile(baseUserData: string, requested: string | null): string {
+  const registry = new ProfileRegistry(baseUserData)
+  const id = requested !== null && registry.has(requested) ? requested : DEFAULT_PROFILE_ID
+  const directory = registry.directoryFor(id)
+  app.setPath('userData', directory)
+  return id
 }
 
 /**

@@ -35,30 +35,63 @@ export class ReadingListRepository {
   add(item: { url: string; title: string; faviconUrl: string | null }): void {
     this.db.connection
       .prepare(
-        `INSERT INTO reading_list (url, title, favicon_url, added_at, read_at)
-         VALUES (?, ?, ?, ?, NULL)
+        `INSERT INTO reading_list (url, title, favicon_url, added_at, read_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?)
          ON CONFLICT(url) DO UPDATE SET
            title = excluded.title,
            favicon_url = excluded.favicon_url,
            added_at = excluded.added_at,
-           read_at = NULL`
+           read_at = NULL,
+           updated_at = excluded.updated_at`
       )
-      .run(item.url, item.title, item.faviconUrl, Date.now())
+      .run(item.url, item.title, item.faviconUrl, Date.now(), Date.now())
+
+    // Re-adding something that was deleted clears the tombstone, or the next
+    // sync would faithfully delete it again on this machine.
+    this.db.connection
+      .prepare("DELETE FROM sync_tombstones WHERE collection = 'reading' AND item_id = ?")
+      .run(item.url)
   }
 
   remove(id: number): void {
-    this.db.connection.prepare('DELETE FROM reading_list WHERE id = ?').run(id)
+    // The URL is the stable identity across devices — the integer id is local.
+    // Read before the delete, while the row is still there to read.
+    const row = this.db.connection
+      .prepare<[number], { url: string }>('SELECT url FROM reading_list WHERE id = ?')
+      .get(id)
+    const remove = this.db.connection.transaction(() => {
+      if (row) this.tombstone(row.url)
+      this.db.connection.prepare('DELETE FROM reading_list WHERE id = ?').run(id)
+    })
+    remove()
+  }
+
+  /** Records that an item was deleted, so other devices stop offering it back. */
+  private tombstone(url: string): void {
+    this.db.connection
+      .prepare(
+        `INSERT INTO sync_tombstones (collection, item_id, deleted_at) VALUES ('reading', ?, ?)
+         ON CONFLICT(collection, item_id) DO UPDATE SET deleted_at = excluded.deleted_at`
+      )
+      .run(url, Date.now())
   }
 
   /** Marked, not deleted, so it is reversible. */
   setRead(id: number, read: boolean): void {
     this.db.connection
-      .prepare('UPDATE reading_list SET read_at = ? WHERE id = ?')
-      .run(read ? Date.now() : null, id)
+      .prepare('UPDATE reading_list SET read_at = ?, updated_at = ? WHERE id = ?')
+      .run(read ? Date.now() : null, Date.now(), id)
   }
 
   clearRead(): void {
-    this.db.connection.prepare('DELETE FROM reading_list WHERE read_at IS NOT NULL').run()
+    const clear = this.db.connection.transaction(() => {
+      const doomed = this.db.connection
+        .prepare<[], { url: string }>('SELECT url FROM reading_list WHERE read_at IS NOT NULL')
+        .all()
+      for (const row of doomed) this.tombstone(row.url)
+      this.db.connection.prepare('DELETE FROM reading_list WHERE read_at IS NOT NULL').run()
+    })
+    clear()
   }
 
   findByUrl(url: string): ReadingItem | null {

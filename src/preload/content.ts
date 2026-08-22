@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron'
 import { countsAsUnsavedWork } from '../shared/unsavedInput'
+import { classifyField, type AddressFieldKind } from '../shared/addressFields'
 
 /** Kept in step with `main/tabs/contentSignals.ts`. Duplicated as a literal so
  * this bundle stays free of imports that would drag zod into a preload. */
@@ -196,6 +197,45 @@ function findUsernameFor(password: HTMLInputElement): HTMLInputElement | null {
   return best ?? candidates[0] ?? null
 }
 
+/**
+ * Address fields on this page, by kind.
+ *
+ * Holds element references here and reports **only the kinds** outward. The
+ * main process never learns a value, and filling works the same way sign-ins do:
+ * main asks this file to focus a field, then uses `webContents.insertText`, so
+ * the text travels Chromium's own input pipeline rather than an IPC payload or a
+ * string of injected script.
+ */
+let addressFields = new Map<AddressFieldKind, HTMLInputElement>()
+
+function scanAddressForm(): void {
+  const found = new Map<AddressFieldKind, HTMLInputElement>()
+
+  for (const input of document.querySelectorAll('input')) {
+    // `labels` rather than searching the DOM for a matching `for`: the browser
+    // already knows, including for inputs wrapped in their label.
+    const label = input.labels?.[0]?.textContent ?? ''
+    const kind = classifyField({
+      autocomplete: input.getAttribute('autocomplete') ?? '',
+      name: input.getAttribute('name') ?? '',
+      id: input.id,
+      placeholder: input.getAttribute('placeholder') ?? '',
+      label,
+      type: input.getAttribute('type') ?? 'text'
+    })
+    // First match wins. A checkout page with a billing and a delivery block has
+    // two of everything, and the first is the one on screen.
+    if (kind && !found.has(kind)) found.set(kind, input)
+  }
+
+  addressFields = found
+
+  ipcRenderer.send(CONTENT_STATE_CHANNEL, {
+    kind: 'address-form',
+    fields: [...found.keys()]
+  })
+}
+
 function scanLoginForm(): void {
   const password = document.querySelector<HTMLInputElement>('input[type="password"]')
   passwordField = password
@@ -225,13 +265,30 @@ ipcRenderer.on(CONTENT_COMMAND_CHANNEL, (_event, raw: unknown) => {
   field.select()
 })
 
+ipcRenderer.on(CONTENT_COMMAND_CHANNEL, (_event, raw: unknown) => {
+  const command = raw as { kind?: string; which?: string } | null
+  if (!command || command.kind !== 'focus-address-field') return
+
+  const field = addressFields.get(command.which as AddressFieldKind)
+  if (!field || !field.isConnected) return
+  // Selecting, not reading: insertText writes at the cursor, so without this a
+  // second fill would append to the first. The value is never inspected.
+  field.focus()
+  field.select()
+})
+
 // Sign-in forms often appear after the initial parse — a modal, a route change,
 // a lazily hydrated component — so the document is rescanned as it settles
 // rather than only once.
 window.addEventListener('DOMContentLoaded', scanLoginForm)
 window.addEventListener('load', scanLoginForm)
+window.addEventListener('DOMContentLoaded', scanAddressForm)
+window.addEventListener('load', scanAddressForm)
 document.addEventListener('focusin', (event) => {
   // Cheap and well-timed: clicking into a sign-in form is exactly when the
   // fields are known to exist, and it costs nothing on pages without one.
-  if ((event.target as HTMLElement | null)?.tagName === 'INPUT') scanLoginForm()
+  if ((event.target as HTMLElement | null)?.tagName === 'INPUT') {
+    scanLoginForm()
+    scanAddressForm()
+  }
 })

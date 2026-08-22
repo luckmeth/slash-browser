@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon'
 import { SlashSummary } from './SlashSummary'
 import { RecentlyClosed } from './RecentlyClosed'
 import { SponsoredTile } from './SponsoredTile'
+import { AdvertiseLink } from './AdvertiseLink'
 import { backgroundCss } from './backgrounds'
 
 /**
@@ -127,6 +128,7 @@ export function NewTabPage(): React.JSX.Element {
         <SlashSummary />
 
         <SponsoredTile />
+        <AdvertiseLink />
 
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">

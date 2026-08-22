@@ -23,6 +23,7 @@ interface TabRow {
   favicon_url: string | null
   workspace_id: string
   tab_order: number
+  window_index: number
   is_pinned: number
   group_id: string | null
   scroll_y: number
@@ -45,9 +46,11 @@ export class SnapshotRepository {
       const insertTab = this.db.connection.prepare(
         `INSERT INTO snapshot_tabs
            (snapshot_id, url, title, favicon_url, workspace_id, tab_order,
-            is_pinned, group_id, scroll_y, entries_json, active_entry_index)
+            window_index, is_pinned, group_id, scroll_y, entries_json,
+            active_entry_index)
          VALUES (@snapshotId, @url, @title, @favicon, @workspaceId, @order,
-                 @isPinned, @groupId, @scrollY, @entries, @activeIndex)`
+                 @windowIndex, @isPinned, @groupId, @scrollY, @entries,
+                 @activeIndex)`
       )
       for (const tab of tabs) {
         insertTab.run({
@@ -57,6 +60,7 @@ export class SnapshotRepository {
           favicon: tab.faviconUrl,
           workspaceId: tab.workspaceId,
           order: tab.order,
+          windowIndex: tab.windowIndex,
           isPinned: tab.isPinned ? 1 : 0,
           groupId: tab.groupId,
           scrollY: tab.scrollY,
@@ -112,7 +116,9 @@ export class SnapshotRepository {
 
   tabsFor(snapshotId: number): SnapshotTab[] {
     const rows = this.db.connection
-      .prepare('SELECT * FROM snapshot_tabs WHERE snapshot_id = ? ORDER BY tab_order')
+      .prepare(
+        'SELECT * FROM snapshot_tabs WHERE snapshot_id = ? ORDER BY window_index, tab_order'
+      )
       .all(snapshotId) as TabRow[]
 
     return rows.map((row) => ({
@@ -121,6 +127,7 @@ export class SnapshotRepository {
       faviconUrl: row.favicon_url,
       workspaceId: row.workspace_id,
       order: row.tab_order,
+      windowIndex: row.window_index ?? 0,
       isPinned: row.is_pinned === 1,
       groupId: row.group_id,
       scrollY: row.scroll_y,

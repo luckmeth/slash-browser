@@ -12,6 +12,52 @@ export interface Creative {
   readonly id: string
   readonly image: string
   readonly clickUrl: string
+  /** Unix ms, or null for unbounded. See `isLive`. */
+  readonly startsAt?: number | null
+  readonly endsAt?: number | null
+}
+
+/** A campaign's window. Null at either end means unbounded in that direction. */
+export interface Scheduled {
+  readonly startsAt: number | null
+  readonly endsAt: number | null
+}
+
+/**
+ * Whether a campaign is running at `now`.
+ *
+ * The window is carried in the batch and judged here, on the reader's own
+ * machine, because the alternative is asking a server — and a request per tab
+ * to find out whether an advert is due is precisely the per-impression call
+ * that batching exists to avoid. It also means the schedule stays correct with
+ * no network at all.
+ *
+ * Half-open: a campaign ending at 15:00 is not shown at 15:00. Two campaigns
+ * bought back-to-back must not both be live for the instant they touch, or one
+ * hour has been sold twice.
+ */
+export function isLive(window: Scheduled, now: number): boolean {
+  if (window.startsAt !== null && now < window.startsAt) return false
+  if (window.endsAt !== null && now >= window.endsAt) return false
+  return true
+}
+
+/**
+ * The creative due now, considering only campaigns currently running.
+ *
+ * Rotation is applied *after* filtering, so a batch holding future campaigns
+ * still shows its live ones evenly rather than leaving gaps where a scheduled
+ * one would have been.
+ */
+export function selectLive<T extends Scheduled>(
+  tiles: readonly T[],
+  rotation: number,
+  now: number
+): T | null {
+  return selectTile(
+    tiles.filter((tile) => isLive(tile, now)),
+    rotation
+  )
 }
 
 /**
@@ -55,6 +101,14 @@ export function acceptCreative(creative: Creative): CreativeVerdict {
   }
   if (!/^https:\/\//i.test(creative.clickUrl)) {
     return { ok: false, reason: 'click target is not https' }
+  }
+  // A window that ends before it starts can never run. Dropped here so an
+  // operator sees it missing from the batch straight away, rather than spending
+  // a day wondering why a campaign somebody paid for never appeared.
+  const startsAt = creative.startsAt ?? null
+  const endsAt = creative.endsAt ?? null
+  if (startsAt !== null && endsAt !== null && endsAt <= startsAt) {
+    return { ok: false, reason: 'campaign ends before it starts' }
   }
   return { ok: true }
 }

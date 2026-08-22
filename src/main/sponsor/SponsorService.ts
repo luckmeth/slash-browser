@@ -1,6 +1,6 @@
 import { net } from 'electron'
 import { SponsorBatchSchema, type SponsorStatus, type SponsoredTile } from '@shared/types/sponsor'
-import { acceptCreative, reportUrlFor, selectTile } from './sponsorRules'
+import { acceptCreative, reportUrlFor, selectLive } from './sponsorRules'
 import type { Database } from '../db/Database'
 import type { SettingsStore } from '../settings/SettingsStore'
 import { createLogger } from '../logger'
@@ -19,6 +19,8 @@ interface TileRow {
   body: string
   image: string
   click_url: string
+  starts_at: number | null
+  ends_at: number | null
 }
 
 /**
@@ -86,9 +88,13 @@ export class SponsorService {
    *
    * Round-robin rather than random, so a small batch is shown evenly instead of
    * one creative dominating by luck — which is what a sponsor is paying for.
+   *
+   * Campaigns outside their window are skipped here rather than dropped from
+   * the cache, so one fetch can carry days of scheduling — which is what makes
+   * selling an advert by the hour work against a six-hourly refresh.
    */
   private currentTile(tiles: SponsoredTile[]): SponsoredTile | null {
-    return selectTile(tiles, this.rotation)
+    return selectLive(tiles, this.rotation, Date.now())
   }
 
   /**
@@ -96,6 +102,11 @@ export class SponsorService {
    *
    * How a click resolves its destination: from our own record, by the id the
    * renderer sent, never from whatever the rotation happens to be pointing at.
+   *
+   * Deliberately ignores the campaign window. A click a moment after a campaign
+   * ends is a click on an advert that was legitimately on screen when it was
+   * pressed, and the reader should land where the tile said — not on nothing
+   * because a timer turned over between the paint and the press.
    */
   tileFor(id: string): SponsoredTile | null {
     return this.cachedTiles().find((tile) => tile.id === id) ?? null
@@ -105,7 +116,7 @@ export class SponsorService {
     const now = Date.now()
     return this.db.connection
       .prepare<[number], TileRow>(
-        `SELECT id, sponsor, headline, body, image, click_url
+        `SELECT id, sponsor, headline, body, image, click_url, starts_at, ends_at
            FROM sponsored_tiles WHERE expires_at > ? ORDER BY id`
       )
       .all(now)
@@ -115,7 +126,9 @@ export class SponsorService {
         headline: row.headline,
         body: row.body,
         image: row.image,
-        clickUrl: row.click_url
+        clickUrl: row.click_url,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at
       }))
   }
 
@@ -232,8 +245,9 @@ export class SponsorService {
         this.db.connection.prepare('DELETE FROM sponsored_tiles').run()
         const insert = this.db.connection.prepare(
           `INSERT INTO sponsored_tiles
-             (id, sponsor, headline, body, image, click_url, fetched_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, sponsor, headline, body, image, click_url, fetched_at, expires_at,
+              starts_at, ends_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         for (const tile of accepted) {
           insert.run(
@@ -244,7 +258,9 @@ export class SponsorService {
             tile.image,
             tile.clickUrl,
             Date.now(),
-            expiresAt
+            expiresAt,
+            tile.startsAt,
+            tile.endsAt
           )
         }
       })

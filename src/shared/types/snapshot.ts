@@ -31,6 +31,14 @@ export const SnapshotTabSchema = z.object({
    * put in by hand.
    */
   groupId: z.string().nullable().default(null),
+  /**
+   * Which window this tab was in, counting from zero.
+   *
+   * Defaults to 0 so snapshots written before windows were recorded restore as
+   * the single window they in fact were. Indices need not be contiguous: a
+   * private window occupies none, because private windows are never recorded.
+   */
+  windowIndex: z.number().int().min(0).default(0),
   scrollY: z.number(),
   /** Full back/forward list, so the Back button survives a restore. */
   entries: z.array(NavigationEntrySchema),

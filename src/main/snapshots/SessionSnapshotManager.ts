@@ -67,6 +67,8 @@ export class SessionSnapshotManager {
    * still alive.
    */
   private retained: SnapshotTab[] = []
+  /** How many windows `retained` already covers, so each gets its own index. */
+  private retainedWindows = 0
 
   /**
    * Records a window's tabs as it closes.
@@ -81,6 +83,11 @@ export class SessionSnapshotManager {
     if (window.isPrivate) return
     const includePageState = this.settings.getAll().restoreFormState
     const tabs: SnapshotTab[] = []
+    // Each closing window gets the next index rather than overwriting what the
+    // last one left. Quitting closes windows one at a time, so replacing here
+    // meant a three-window session was retained as whichever happened to close
+    // last -- and the other two were simply gone.
+    const windowIndex = this.retainedWindows
 
     for (const [index, tab] of window.tabs.allTabs().entries()) {
       const snap = tab.snapshot
@@ -91,6 +98,7 @@ export class SessionSnapshotManager {
         faviconUrl: snap.faviconUrl,
         workspaceId: snap.workspaceId,
         order: index,
+        windowIndex,
         isPinned: snap.isPinned,
         groupId: snap.groupId,
         scrollY: 0,
@@ -99,12 +107,21 @@ export class SessionSnapshotManager {
       })
     }
 
-    this.retained = tabs
+    // Only counted when the window actually held something worth keeping, so a
+    // stray empty window does not leave a gap that restores as a blank one.
+    if (tabs.length > 0) {
+      this.retained = [...this.retained, ...tabs]
+      this.retainedWindows += 1
+    }
   }
 
   async capture(kind: 'automatic' | 'manual' | 'session-end', label?: string): Promise<number | null> {
     const tabs: SnapshotTab[] = []
     const includePageState = this.settings.getAll().restoreFormState
+
+    // Counted separately from the loop index so a skipped private window does
+    // not leave a hole that restores as an empty window.
+    let windowIndex = 0
 
     for (const window of this.windows()) {
       // A private window is never snapshotted. Restore points are written to
@@ -113,6 +130,7 @@ export class SessionSnapshotManager {
       // guarantee.
       if (window.isPrivate) continue
       const ordered = window.tabs.allTabs()
+      let kept = 0
       for (const [index, tab] of ordered.entries()) {
         const snap = tab.snapshot
         // An empty new tab page is not worth restoring; it is what you get
@@ -125,13 +143,19 @@ export class SessionSnapshotManager {
           faviconUrl: snap.faviconUrl,
           workspaceId: snap.workspaceId,
           order: index,
+          windowIndex,
           isPinned: snap.isPinned,
           groupId: snap.groupId,
           scrollY: await readScrollY(tab),
           entries: readEntries(tab, includePageState),
           activeEntryIndex: readActiveIndex(tab)
         })
+        kept += 1
       }
+      // Only advance when the window contributed something. A window holding
+      // nothing but a new tab page would otherwise claim an index and restore
+      // later as an empty window nobody asked for.
+      if (kept > 0) windowIndex += 1
     }
 
     // Every window is already gone — the normal case when quitting by closing
@@ -142,6 +166,7 @@ export class SessionSnapshotManager {
       log.info(`captured ${kind} snapshot #${id} with ${this.retained.length} retained tab(s)`)
       this.repository.trimSessionEnd(SESSION_END_KEEP)
       this.retained = []
+      this.retainedWindows = 0
       return id
     }
 

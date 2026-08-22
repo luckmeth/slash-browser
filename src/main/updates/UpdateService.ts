@@ -1,4 +1,5 @@
 import { app, net } from 'electron'
+import { isSignedBuild } from './buildSignature'
 import { z } from 'zod'
 import type { UpdateStatus } from '@shared/types/updates'
 import { createLogger } from '../logger'
@@ -80,12 +81,17 @@ export class UpdateService {
       const newer = compareVersions(latest, app.getVersion()) > 0
       log.info(`update check: running ${app.getVersion()}, feed offers ${latest}`)
 
+      const signed = await isSignedBuild()
+
       return newer
         ? this.settle(
             'update-available',
             latest,
             parsed.data.releaseUrl ?? null,
-            `Version ${latest} is available. You are running ${app.getVersion()}. Slash will not install it for you — this build is unsigned, so it cannot verify the package came from us.`
+            signed
+              ? `Version ${latest} is available. You are running ${app.getVersion()}.`
+              : `Version ${latest} is available. You are running ${app.getVersion()}. Slash will not install it for you — this build is unsigned, so it cannot verify the package came from us.`,
+            signed
           )
         : this.settle('up-to-date', latest, null, `You are running the newest version (${latest}).`)
     } catch (error) {
@@ -98,7 +104,8 @@ export class UpdateService {
     state: UpdateStatus['state'],
     latestVersion: string | null,
     releaseUrl: string | null,
-    detail: string
+    detail: string,
+    canInstall = false
   ): UpdateStatus {
     this.status = {
       ...this.status,
@@ -107,9 +114,59 @@ export class UpdateService {
       releaseUrl,
       detail,
       checkedAt: Date.now(),
-      canInstall: false
+      canInstall
     }
     return this.status
+  }
+
+  /**
+   * Downloads and installs the available update.
+   *
+   * Gated on the build carrying a valid Authenticode signature, checked against
+   * the binary on this machine rather than against a flag set when it was built.
+   * Unsigned, this refuses — an auto-installer with nothing to verify against is
+   * a remote code path onto the user's machine, and that is the whole reason
+   * this browser has shipped check-only until now.
+   *
+   * When a certificate is bought and the build is signed, this becomes live with
+   * no code change: `isSignedBuild()` starts returning true and the button in
+   * Settings stops being disabled.
+   */
+  async downloadAndInstall(): Promise<{ ok: boolean; detail: string }> {
+    if (this.status.state !== 'update-available') {
+      return { ok: false, detail: 'There is no update to install.' }
+    }
+    if (!(await isSignedBuild())) {
+      return {
+        ok: false,
+        detail:
+          'This build is not code-signed, so it cannot verify that an update came from us. ' +
+          'Download the new version from the release page instead.'
+      }
+    }
+
+    try {
+      // Imported here rather than at module scope: electron-updater reads app
+      // paths and writes a cache directory on load, and doing that at startup
+      // costs every launch for a feature most launches never use.
+      const { autoUpdater } = await import('electron-updater')
+      autoUpdater.autoDownload = false
+      autoUpdater.autoInstallOnAppQuit = true
+      autoUpdater.setFeedURL({ provider: 'generic', url: this.feedUrl().trim() })
+
+      this.status = { ...this.status, state: 'downloading', detail: 'Downloading the update…' }
+      await autoUpdater.downloadUpdate()
+
+      // Quits and relaunches. `verifyUpdateCodeSignature` in electron-builder.yml
+      // makes the installer refuse a package whose signature does not match the
+      // installed app — the check that stops a tampered update being accepted.
+      autoUpdater.quitAndInstall(false, true)
+      return { ok: true, detail: 'Installing…' }
+    } catch (error) {
+      log.warn('update install failed', error)
+      this.status = { ...this.status, state: 'error', detail: 'The update could not be installed.' }
+      return { ok: false, detail: 'The update could not be installed.' }
+    }
   }
 
   /**
