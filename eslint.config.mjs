@@ -8,7 +8,10 @@ export default tseslint.config(
     // runs on Node globals (`process`, `console`, `Buffer`) this config does
     // not define, so linting it here reports six errors about code that is
     // perfectly correct for where it runs.
-    ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**', 'portal/**']
+    // portal/ and platform/ are separate Node and Next applications with their
+    // own toolchains. Linting them with the browser's config reports thousands
+    // of failures about globals and JSX settings that do not apply to them.
+    ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**', 'portal/**', 'platform/**']
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

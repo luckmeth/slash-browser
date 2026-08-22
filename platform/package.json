@@ -1,0 +1,17 @@
+{
+  "name": "slash-ad-platform",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "advertiser",
+    "admin"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p shared/tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  }
+}
