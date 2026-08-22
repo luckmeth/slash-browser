@@ -4028,6 +4028,100 @@ export async function runExtensionCapture(probe: {
   app.quit()
 }
 
+/**
+ * Settings as a page, with a category rail.
+ *
+ * Seventeen groups in a 380px side panel was the least usable part of the
+ * browser. This checks the rail actually narrows what is shown — a navigation
+ * that renders but filters nothing would look right and help nobody — and that
+ * searching still reaches groups in other categories, which is the whole reason
+ * someone types rather than clicks.
+ */
+export async function runSettingsPageCapture(window: BrowserWindowController): Promise<void> {
+  await waitForActiveTab(window)
+  const chrome = window.privilegedContents()[0]
+  if (!chrome) {
+    log.error('settings page probe: FAIL - no chrome view')
+    app.quit()
+    return
+  }
+
+  await chrome.executeJavaScript(
+    `window.browser.invoke('tabs:create', { url: 'slash://settings', background: false })`
+  )
+  await delay(2500)
+
+  const read = async (): Promise<{ groups: number; categories: number; titles: string[] }> =>
+    (await chrome.executeJavaScript(
+      `(() => {
+         const nav = document.querySelector('nav[aria-label="Settings categories"]');
+         const headings = [...document.querySelectorAll('section h3')].map((h) => h.textContent);
+         return {
+           groups: headings.length,
+           categories: nav ? nav.querySelectorAll('li button').length : 0,
+           titles: headings
+         };
+       })()`
+    )) as { groups: number; categories: number; titles: string[] }
+
+  const initial = await read()
+  log.info(`settings page probe: ${JSON.stringify(initial)}`)
+
+  if (initial.categories >= 5) {
+    log.info(`settings page probe: PASS - a rail with ${initial.categories} categories rendered`)
+  } else {
+    log.error('settings page probe: FAIL - no category rail')
+  }
+
+  // The point of the rail: one category at a time, not all seventeen.
+  if (initial.groups > 0 && initial.groups < 8) {
+    log.info(`settings page probe: PASS - showing ${initial.groups} groups, not the whole list`)
+  } else {
+    log.error(`settings page probe: FAIL - ${initial.groups} groups shown; the rail is not filtering`)
+  }
+
+  // Switching category must change what is shown.
+  await chrome.executeJavaScript(
+    `(() => {
+       const nav = document.querySelector('nav[aria-label="Settings categories"]');
+       const buttons = [...nav.querySelectorAll('li button')];
+       const target = buttons.find((b) => /Privacy/.test(b.textContent || ''));
+       if (target) target.click();
+       return true;
+     })()`
+  )
+  await delay(700)
+  const privacy = await read()
+  log.info(`settings page probe: privacy category ${JSON.stringify(privacy.titles)}`)
+  if (privacy.titles.some((t) => /blocking|sign-ins|Privacy/i.test(t ?? ''))) {
+    log.info('settings page probe: PASS - choosing a category changes what is shown')
+  } else {
+    log.error('settings page probe: FAIL - the rail did not switch category')
+  }
+
+  // Searching must cross categories: "cookies" lives in Privacy, and someone
+  // typing it should not have to already know that.
+  await chrome.executeJavaScript(
+    `(() => {
+       const input = document.querySelector('input[aria-label="Search settings"]');
+       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+       setter.call(input, 'zoom');
+       input.dispatchEvent(new Event('input', { bubbles: true }));
+       return true;
+     })()`
+  )
+  await delay(700)
+  const searched = await read()
+  log.info(`settings page probe: search "zoom" -> ${JSON.stringify(searched.titles)}`)
+  if (searched.titles.some((t) => /Zoom/i.test(t ?? ''))) {
+    log.info('settings page probe: PASS - search reaches groups outside the open category')
+  } else {
+    log.error('settings page probe: FAIL - search did not cross categories')
+  }
+
+  app.quit()
+}
+
 export async function runSettingsCapture(window: BrowserWindowController): Promise<void> {
   await waitForActiveTab(window)
   const chrome = window.privilegedContents()[0]

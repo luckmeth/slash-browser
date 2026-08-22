@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { SETTINGS_URL } from '@shared/types/tab'
 import type { Tab, TabsSnapshot } from '@shared/types/tab'
 import type { TabGroup } from '@shared/types/tabGroup'
 import type { Settings } from '@shared/types/settings'
@@ -71,6 +72,16 @@ interface BrowserState {
   activeWorkspace: () => Workspace | null
   setPanel: (panel: PanelId) => void
   togglePanel: (panel: Exclude<PanelId, 'none'>) => void
+  /**
+   * Opens settings as a page, reusing an existing settings tab if one is open.
+   *
+   * A page rather than the 380px side panel: seventeen groups in a narrow
+   * scroll is a list, not a settings screen. Reusing the tab matters because
+   * every entry point leads here — the toolbar, the palette, Ctrl+, and the
+   * sponsored tile's "turn off" — and each opening its own tab would litter the
+   * strip.
+   */
+  openSettings: () => void
   setWorkspaceEditor: (id: string | 'new' | null) => void
   openFind: () => void
   closeFind: () => void
@@ -122,6 +133,15 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   // The workspace editor and the side panels share the same slot, so opening one
   // closes the other rather than stacking two things in the same strip.
   setPanel: (panel) => set({ panel, workspaceEditorId: null }),
+
+  openSettings: () => {
+    const existing = get().tabs.find((tab) => tab.url === SETTINGS_URL)
+    if (existing) {
+      void window.browser.invoke('tabs:activate', { tabId: existing.id })
+      return
+    }
+    void window.browser.invoke('tabs:create', { url: SETTINGS_URL, background: false })
+  },
 
   togglePanel: (panel) =>
     set((state) => ({

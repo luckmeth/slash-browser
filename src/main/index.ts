@@ -358,6 +358,12 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_SETTINGS_PAGE_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runSettingsPageCapture }) =>
+        runSettingsPageCapture(window)
+      )
+    }
+
     const splitPath = process.env['SLASH_SPLIT_CAPTURE']
     if (splitPath) {
       void import('./dev/spikeCapture').then(({ runSplitCapture }) =>

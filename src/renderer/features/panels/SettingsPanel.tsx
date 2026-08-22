@@ -19,6 +19,7 @@ export function SettingsPanel(): React.JSX.Element {
   const settings = useBrowserStore((s) => s.settings)
   const { status: semantic, setEnabled: setSemanticEnabled } = useSemanticStatus()
   const [filter, setFilter] = useState('')
+  const [category, setCategory] = useState<Category>('Appearance')
 
   if (!settings) return <p className="p-4 text-sm text-[var(--color-text-muted)]">Loading…</p>
 
@@ -28,17 +29,53 @@ export function SettingsPanel(): React.JSX.Element {
 
   return (
     <SettingsFilter.Provider value={filter}>
-      <div className="space-y-6 p-4">
-        {/* Settings had grown to one long scroll, which docs/ROADMAP.md lists as
-            a real problem: everything is here and nothing is findable. */}
-        <input
-          type="search"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder="Search settings"
-          aria-label="Search settings"
-          className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
-        />
+     <SettingsCategory.Provider value={category}>
+      <div className="mx-auto flex h-full w-full max-w-5xl gap-6 p-6">
+        {/*
+          A category rail, as Chrome and Brave have. Seventeen groups in one
+          scroll is a list rather than a settings screen, and it was the least
+          usable part of the browser because of it.
+        */}
+        <nav className="w-48 shrink-0" aria-label="Settings categories">
+          <input
+            type="search"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          />
+          <ul className="mt-3 flex flex-col gap-0.5">
+            {CATEGORIES.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  aria-current={filter.trim() === '' && category === name ? 'page' : undefined}
+                  onClick={() => {
+                    // Choosing a category clears the search, or the rail would
+                    // appear not to respond while results from elsewhere showed.
+                    setFilter('')
+                    setCategory(name)
+                  }}
+                  className={`w-full cursor-default rounded-lg px-3 py-2 text-left text-[13px] transition ${
+                    filter.trim() === '' && category === name
+                      ? 'bg-[var(--glass-high)] text-[var(--color-text-primary)]'
+                      : 'text-[var(--color-text-muted)] hover:bg-white/[0.06]'
+                  }`}
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {filter.trim() !== '' && (
+            <p className="mt-3 px-1 text-[11px] leading-snug text-[var(--color-text-muted)]">
+              Showing matches from every category.
+            </p>
+          )}
+        </nav>
+
+        <div className="min-w-0 flex-1 space-y-6 overflow-y-auto pb-8">
       <Group title="Appearance">
         <Field label="Accent colour">
           {/* Swatches rather than a dropdown: the thing being chosen is a
@@ -340,12 +377,14 @@ export function SettingsPanel(): React.JSX.Element {
 
         {/* Nothing matched: say so, rather than leaving an empty panel that
             looks like the settings failed to load. */}
-        {filter.trim() !== '' && !Object.keys(GROUP_KEYWORDS).some((t) => groupMatches(t, filter)) && (
+        {filter.trim() !== '' && !Object.keys(GROUP_META).some((t) => groupMatches(t, filter)) && (
           <p className="text-xs text-[var(--color-text-muted)]">
             Nothing matches &ldquo;{filter.trim()}&rdquo;.
           </p>
         )}
+        </div>
       </div>
+     </SettingsCategory.Provider>
     </SettingsFilter.Provider>
   )
 }
@@ -371,6 +410,15 @@ const ACCENT_SWATCHES: readonly [string, string][] = [
 const SettingsFilter = createContext('')
 
 /**
+ * The category currently selected in the rail.
+ *
+ * A context for the same reason the filter is one: it is ambient to the whole
+ * screen, and threading it through seventeen call sites would mean a new group
+ * silently escaping the navigation by forgetting an argument.
+ */
+const SettingsCategory = createContext<Category>('Appearance')
+
+/**
  * Extra words each group matches on, beyond its heading.
  *
  * Matching only headings would mean searching "zoom" or "cookies" found
@@ -380,30 +428,83 @@ const SettingsFilter = createContext('')
  * groups and the "nothing matched" message can never disagree about what
  * matches.
  */
-const GROUP_KEYWORDS: Record<string, string> = {
-  Zoom: 'zoom per-site text size magnify scale percent',
-  Toolbar: 'toolbar buttons icons hide show customise customize clutter',
-  Extensions: 'extension extensions addon add-on plugin unpacked crx chrome web store',
-  'Start page': 'new tab home background image wallpaper gradient start page appearance',
-  'Sponsored tiles': 'sponsored ads advertising sponsor revenue tile support funding',
-  'Saved sign-ins': 'password passwords login logins credentials autofill fill vault account',
-  'Appearance': 'theme accent colour color density glass tabs vertical strip dark light',
-  'Import from another browser': 'chrome edge bookmarks history migrate transfer',
-  'Search': 'engine google duckduckgo bing startpage keyword shortcut custom default',
-  'Content blocking': 'ads trackers shield popups youtube malicious',
-  'Browsing memory': 'index semantic embedding history pages search',
-  'Restore points': 'session snapshot restore tabs startup',
-  'Privacy': 'cookies clear data private excluded origins',
-  'Downloads': 'folder location ask save',
-  'Updates': 'version upgrade release',
-  'Crash reports': 'diagnostics minidump',
-  'Not built yet': 'roadmap missing planned',
+/**
+ * Which category each group belongs to, and what it matches on in search.
+ *
+ * One table rather than two, so a group cannot end up in the navigation without
+ * being findable, or findable without a home. The categories exist because
+ * seventeen groups in a 380px scroll is not a settings screen, it is a list —
+ * which is what made this the least usable part of the browser.
+ */
+const CATEGORIES = [
+  'Appearance',
+  'Search',
+  'Privacy & security',
+  'Browsing',
+  'Extensions',
+  'Earning',
+  'About Slash'
+] as const
+
+type Category = (typeof CATEGORIES)[number]
+
+const GROUP_META: Record<string, { category: Category; keywords: string }> = {
+  Appearance: {
+    category: 'Appearance',
+    keywords: 'theme accent colour color density glass tabs vertical strip dark light'
+  },
+  'Start page': {
+    category: 'Appearance',
+    keywords: 'new tab home background image wallpaper gradient start page appearance'
+  },
+  Toolbar: {
+    category: 'Appearance',
+    keywords: 'toolbar buttons icons hide show customise customize clutter'
+  },
+  Search: {
+    category: 'Search',
+    keywords: 'engine google duckduckgo bing startpage keyword shortcut custom default'
+  },
+  Zoom: { category: 'Search', keywords: 'zoom per-site text size magnify scale percent' },
+  'Content blocking': {
+    category: 'Privacy & security',
+    keywords: 'ads trackers shield popups youtube malicious scripts'
+  },
+  Privacy: {
+    category: 'Privacy & security',
+    keywords: 'cookies clear data private excluded origins'
+  },
+  'Saved sign-ins': {
+    category: 'Privacy & security',
+    keywords: 'password passwords login logins credentials autofill fill vault account'
+  },
+  'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
+  'Browsing memory': {
+    category: 'Browsing',
+    keywords: 'index semantic embedding history pages search'
+  },
+  Downloads: { category: 'Browsing', keywords: 'folder location ask save' },
+  Extensions: {
+    category: 'Extensions',
+    keywords: 'extension extensions addon add-on plugin unpacked crx chrome web store'
+  },
+  'Sponsored tiles': {
+    category: 'Earning',
+    keywords: 'sponsored ads advertising sponsor revenue tile support funding'
+  },
+  'Import from another browser': {
+    category: 'About Slash',
+    keywords: 'chrome edge bookmarks history migrate transfer'
+  },
+  Updates: { category: 'About Slash', keywords: 'version upgrade release' },
+  'Crash reports': { category: 'About Slash', keywords: 'diagnostics minidump' },
+  'Not built yet': { category: 'About Slash', keywords: 'roadmap missing planned' }
 }
 
 function groupMatches(title: string, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (q === '') return true
-  return `${title} ${GROUP_KEYWORDS[title] ?? ''}`.toLowerCase().includes(q)
+  return `${title} ${GROUP_META[title]?.keywords ?? ''}`.toLowerCase().includes(q)
 }
 
 function Group({
@@ -414,6 +515,12 @@ function Group({
   children: React.ReactNode
 }): React.JSX.Element | null {
   const query = useContext(SettingsFilter)
+  const category = useContext(SettingsCategory)
+
+  // Searching looks across every category — someone typing "cookies" should not
+  // have to already know which section it lives in. Only with an empty box does
+  // the rail decide what is shown.
+  if (query.trim() === '' && GROUP_META[title]?.category !== category) return null
   if (!groupMatches(title, query)) return null
 
   return (

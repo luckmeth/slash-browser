@@ -23,7 +23,7 @@ import { Icon } from '../../components/Icon'
 export function SponsoredTile(): React.JSX.Element | null {
   const [status, setStatus] = useState<SponsorStatus | null>(null)
   const [dismissed, setDismissed] = useState(false)
-  const togglePanel = useBrowserStore((s) => s.togglePanel)
+  const openSettings = useBrowserStore((s) => s.openSettings)
   /** Counted once per tile shown, not once per re-render. */
   const counted = useRef<string | null>(null)
 
@@ -97,7 +97,7 @@ export function SponsoredTile(): React.JSX.Element | null {
         Chosen on this device — no browsing data was sent to show it.{' '}
         <button
           type="button"
-          onClick={() => togglePanel('settings')}
+          onClick={openSettings}
           className="cursor-default underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-primary)]"
         >
           Turn off

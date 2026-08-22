@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { Tab } from '@shared/types/tab'
-import { isInternalUrl } from '@shared/types/tab'
+import { internalPageTitle, isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
@@ -200,7 +200,8 @@ function TabItem({
   onDrop: () => void
 }): React.JSX.Element {
   const internal = isInternalUrl(tab.url)
-  const label = tab.title || (internal ? 'New tab' : hostOf(tab.url)) || 'Untitled'
+  const label =
+    tab.title || (internal ? internalPageTitle(tab.url) : hostOf(tab.url)) || 'Untitled'
   // Below this the label is unreadable anyway, so show icon only — the same
   // thing Chrome does as tabs compress. A vertical row never compresses: it is
   // full width whatever else is open, which is the whole reason to use it.

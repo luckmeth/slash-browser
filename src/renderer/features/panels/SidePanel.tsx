@@ -13,7 +13,6 @@ import { WatchPanel } from '../watch/WatchPanel'
 import { MissionPanel } from '../missions/MissionPanel'
 import { AiHubPanel } from '../ai/AiHubPanel'
 import { DownloadsPanel } from './DownloadsPanel'
-import { SettingsPanel } from './SettingsPanel'
 import { WorkspaceEditor } from '../workspaces/WorkspaceEditor'
 import { PerformancePanel } from '../performance/PerformancePanel'
 import { PermissionsPanel } from '../permissions/PermissionsPanel'
@@ -28,7 +27,6 @@ const TITLES = {
   bookmarks: 'Bookmarks',
   reading: 'Reading list',
   downloads: 'Downloads',
-  settings: 'Settings',
   performance: 'Performance',
   permissions: 'Permissions',
   timemachine: 'Restore points',
@@ -118,7 +116,6 @@ export function SidePanel(): React.JSX.Element | null {
                 </div>
               </>
             )}
-            {panel === 'settings' && <SettingsPanel />}
             {panel === 'performance' && <PerformancePanel />}
             {panel === 'permissions' && <PermissionsPanel />}
             {panel === 'timemachine' && (

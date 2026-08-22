@@ -124,6 +124,17 @@ export type TabsSnapshot = z.infer<typeof TabsSnapshotSchema>
 export const NEW_TAB_URL = 'slash://newtab'
 
 /**
+ * Settings, as a full page rather than a 380px side panel.
+ *
+ * Seventeen groups of settings in a narrow scroll is a list, not a screen, and
+ * it was the least usable part of the browser. Chrome and Brave both make this
+ * a page for the same reason. It rides the internal-page mechanism the new tab
+ * page already uses: no view is attached, and the chrome document fills the
+ * content hole.
+ */
+export const SETTINGS_URL = 'slash://settings'
+
+/**
  * Both schemes are recognised: the browser was renamed, and restore points and
  * history written before that still hold `adaptive://` URLs. Dropping the old
  * prefix would make those tabs look like real web pages and try to navigate to
@@ -131,4 +142,18 @@ export const NEW_TAB_URL = 'slash://newtab'
  */
 export function isInternalUrl(url: string): boolean {
   return url.startsWith('slash://') || url.startsWith('adaptive://')
+}
+
+/**
+ * What to call an internal page in the tab strip.
+ *
+ * These pages have no document to take a title from, so without this every one
+ * of them read as "New tab" — including Settings, which is simply wrong. Kept
+ * beside the URLs themselves so adding a page and forgetting its name is one
+ * edit rather than two files apart.
+ */
+export function internalPageTitle(url: string): string | null {
+  if (url === SETTINGS_URL) return 'Settings'
+  if (url === NEW_TAB_URL) return 'New tab'
+  return isInternalUrl(url) ? 'Slash' : null
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
+import { SETTINGS_URL, NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
 import {
   CHROME_HEIGHT,
   TITLE_BAR_HEIGHT,
@@ -18,6 +18,7 @@ import { TabStrip } from './features/tabs/TabStrip'
 import { Toolbar } from './features/omnibox/Toolbar'
 import { NewTabPage } from './features/newtab/NewTabPage'
 import { ErrorPage } from './features/errors/ErrorPage'
+import { SettingsPanel } from './features/panels/SettingsPanel'
 import { SplitDivider } from './features/split/SplitDivider'
 import { SidePanel } from './features/panels/SidePanel'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
@@ -41,6 +42,7 @@ export function App(): React.JSX.Element {
   const activeTab = useBrowserStore((s) => s.activeTab())
   const setPanel = useBrowserStore((s) => s.setPanel)
   const togglePanel = useBrowserStore((s) => s.togglePanel)
+  const openSettings = useBrowserStore((s) => s.openSettings)
   const requestOmniboxFocus = useBrowserStore((s) => s.requestOmniboxFocus)
   const refreshHistory = useBrowserStore((s) => s.refreshHistory)
   const openFind = useBrowserStore((s) => s.openFind)
@@ -125,7 +127,7 @@ export function App(): React.JSX.Element {
           togglePanel('downloads')
           break
         case 'open-settings':
-          togglePanel('settings')
+          openSettings()
           break
         case 'open-performance':
           togglePanel('performance')
@@ -174,6 +176,7 @@ export function App(): React.JSX.Element {
   }, [togglePanel, setPanel, requestOmniboxFocus, refreshHistory])
 
   const showNewTab = activeTab?.url === NEW_TAB_URL
+  const showSettings = activeTab?.url === SETTINGS_URL
   // Main insets the native page view to match; the two read the same constant.
   const verticalTabs = appearance?.tabStripPosition === 'left'
   const crashed = activeTab?.status === 'crashed'
@@ -253,6 +256,10 @@ export function App(): React.JSX.Element {
                 <ErrorPage error={failed} tabId={activeTab.id} />
               ) : showNewTab ? (
                 <NewTabPage />
+              ) : showSettings ? (
+                <div className="glass-page h-full overflow-y-auto">
+                  <SettingsPanel />
+                </div>
               ) : null}
             </main>
             <SidePanel />

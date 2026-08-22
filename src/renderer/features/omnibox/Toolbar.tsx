@@ -353,8 +353,7 @@ export function Toolbar(): React.JSX.Element {
       <NavButton
         icon="settings"
         label="Settings (Ctrl+,)"
-        active={panel === 'settings'}
-        onClick={() => togglePanel('settings')}
+        onClick={() => useBrowserStore.getState().openSettings()}
       />
 
       {/* The app menu every browser has. Private browsing and the AI panel were
