@@ -15,6 +15,16 @@ import { z } from 'zod'
  * Everything an operator genuinely needs to change without a deploy — prices,
  * the publishable key, live/test mode — is in `platform_settings` instead.
  */
+/**
+ * An optional secret.
+ *
+ * Empty string means absent. A blank 'STRIPE_SECRET_KEY=' in .env.local is how
+ * somebody says "not set up yet", and treating that as a validation failure
+ * takes down every route in the app -- including the batch and config
+ * endpoints, which never touch Stripe. Optional has to mean optional.
+ */
+const optionalSecret = z.preprocess((value) => (value === '' ? undefined : value), z.string().min(1).optional())
+
 const schema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
@@ -23,12 +33,12 @@ const schema = z.object({
   // Server-only from here down. Never prefixed NEXT_PUBLIC_, because that
   // prefix is what puts a value into the JavaScript bundle every visitor
   // downloads.
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-  STRIPE_SECRET_KEY: z.string().min(1).optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
-  RESEND_API_KEY: z.string().min(1).optional(),
-  EMAIL_FROM: z.string().optional(),
-  CRON_SECRET: z.string().min(1).optional()
+  SUPABASE_SERVICE_ROLE_KEY: optionalSecret,
+  STRIPE_SECRET_KEY: optionalSecret,
+  STRIPE_WEBHOOK_SECRET: optionalSecret,
+  RESEND_API_KEY: optionalSecret,
+  EMAIL_FROM: z.preprocess((value) => (value === '' ? undefined : value), z.string().optional()),
+  CRON_SECRET: optionalSecret
 })
 
 const parsed = schema.safeParse({

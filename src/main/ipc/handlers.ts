@@ -1186,6 +1186,8 @@ export function registerHandlers(ctx: AppContext): void {
 
   // --- sync ------------------------------------------------------------------
 
+  ipc.handle('config:remote', () => ok(ctx.remoteConfig.current()))
+
   // --- profiles --------------------------------------------------------------
 
   ipc.handle('profiles:list', () =>

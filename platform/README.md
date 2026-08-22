@@ -14,27 +14,25 @@ once this is running.
 
 ---
 
-## What you have to do yourself
+## The live project
 
-I cannot create accounts or handle live keys. Four services, in this order:
+Supabase project **"Slash Browser"** (`edsuuwzihojdsmgzhzyw`, ap-southeast-1) is set up and running.
+All seven migrations are applied, the `campaign-assets` bucket exists, and both apps have a
+`.env.local` holding the real URL and keys.
 
-1. **Supabase** — [supabase.com](https://supabase.com), new project. Free tier is fine to start.
-2. **Stripe** — [stripe.com](https://stripe.com). Test keys work immediately; live keys need
-   business verification, which takes a few days.
-3. **Resend** — [resend.com](https://resend.com). Needs a domain you can add DNS records to.
-4. **Vercel** — [vercel.com](https://vercel.com), or any Node host. Two projects, one per app.
+**Those files are gitignored and no key is in this repository.** If the access token used to set
+this up was ever shared, rotate it: Supabase → Account → Access Tokens.
 
-Everything works end to end on Stripe's **test** keys. Swapping in live keys is the only change
-needed to start taking real money — no code edit, no redeploy of anything but the environment.
+Nothing is required to run it locally — see "Run it" below.
 
 ---
 
 ## Setting it up
 
-### 1. The database
+### 1. The database — already done
 
-In the Supabase dashboard → **SQL Editor**, run each file in `supabase/migrations/` **in filename
-order**. They are not idempotent; run each once.
+The migrations are applied to the project above. Re-run them only against a *fresh* project; they
+are not idempotent.
 
 ```
 0001_schema.sql            tables
@@ -42,6 +40,8 @@ order**. They are not idempotent; run each once.
 0003_rls.sql               row-level security  ← the important one
 0004_storage_and_seed.sql  bucket, starting prices
 0005_new_user.sql          advertiser row on signup
+0006_sync.sql              encrypted sync storage for the browser
+0007_releases.sql          the update feed the browser reads
 ```
 
 ### 2. Make yourself an operator
@@ -56,16 +56,20 @@ select id, 'owner' from auth.users where email = 'you@yourdomain.com';
 
 ### 3. Environment
 
-`cp advertiser/.env.example advertiser/.env.local` and the same for `admin/`. Values come from:
+Both `.env.local` files already hold the Supabase URL, keys and a generated `CRON_SECRET`. Two
+values are blank and are yours to fill in:
 
-| Variable | Where |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | same page. **Bypasses all security.** Never prefix it `NEXT_PUBLIC_` |
-| `STRIPE_SECRET_KEY` | dashboard.stripe.com/test/apikeys |
-| `STRIPE_WEBHOOK_SECRET` | from `stripe listen`, or the webhook endpoint page |
-| `RESEND_API_KEY`, `EMAIL_FROM` | resend.com/api-keys |
-| `CRON_SECRET` | any long random string you invent |
+| Variable | Where | Without it |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | dashboard.stripe.com/test/apikeys | Campaigns save but cannot be paid for, and the builder says so |
+| `STRIPE_WEBHOOK_SECRET` | from `stripe listen`, or the webhook endpoint page | Payments succeed at Stripe and nothing happens here |
+| `RESEND_API_KEY`, `EMAIL_FROM` | resend.com/api-keys | Nobody is emailed; the email log records the failure |
+
+A blank value means "not configured yet" and is handled as such — the app runs, and only the parts
+that genuinely need the key refuse. It does not refuse to start.
+
+`SUPABASE_SERVICE_ROLE_KEY` is already set and **bypasses all row-level security**. Never prefix it
+`NEXT_PUBLIC_`; that prefix is what puts a value into the JavaScript every visitor downloads.
 
 ### 4. Run it
 
@@ -117,15 +121,22 @@ Locally: `stripe listen --forward-to localhost:3000/api/stripe/webhook`
 
 ## Connecting the browser
 
-In Slash: **Settings → Earning → Sponsored tiles**
+Four endpoints, all served by the advertiser app. Every one is empty-by-default in the browser: a
+fresh install contacts none of them.
 
-| Field | Value |
-|---|---|
-| Sponsor source | `https://ads.yourdomain.com/api/tiles` |
-| Where "Advertise on Slash" points | `https://ads.yourdomain.com` |
+| Where in Slash | Value | What it does |
+|---|---|---|
+| Settings → Earning → Sponsor source | `http://localhost:3000/api/tiles` | The batch of adverts |
+| Settings → Earning → Advertise link | `http://localhost:3000` | One line on the start page for companies wanting to buy |
+| Settings → About Slash → Release feed | `http://localhost:3000/api/updates/latest` | What the update check reads |
+| Settings → About Slash → Publisher configuration | `http://localhost:3000/api/config` | Start-page notice, advertise link, feature flags |
+| Settings → Privacy → Sync server | `http://localhost:3000/api/sync` | Encrypted bookmarks and reading list |
 
-The second adds one line to the start page for companies wanting to buy the tile. Left empty — the
-default — nothing is shown, and no request is made to find that out.
+Swap `localhost:3000` for your domain once it is deployed.
+
+**The last three are the "browser management" half of the operations app.** Without them configured,
+the admin app's Releases and Browser-config pages control nothing — which is exactly what they did
+before this was wired up.
 
 ---
 
@@ -195,18 +206,25 @@ Honest inventory, so you know where to look first when something misbehaves.
   the browser's creative rules, and batch size capping.
 - Both apps compile and typecheck (`next build` clean).
 - The browser-side half — scheduled campaigns, the window enforced on-device — is covered by the
-  browser's own suite: **521 tests passing**, typecheck and lint clean.
+  browser's own suite: **680 tests passing**, typecheck and lint clean.
 
-**Not verified, because it needs accounts I cannot create:**
+**Verified against the live project**, with two real advertiser accounts, then cleaned up:
 
-- Row-level security policies against a live Postgres. **Test these first.** Sign up as two
-  different advertisers and confirm each sees only their own campaigns, payments and figures.
-- The Stripe checkout and webhook round trip.
-- Resend delivery.
-- Storage upload paths and the signed URLs the review queue uses.
+| Check | Result |
+|---|---|
+| 13 tables created, RLS enabled on every one | 25 policies |
+| Advertiser A sees only A's rows; B sees only B's | passes |
+| B PATCHes A's campaign | 204, and **zero rows changed** — the title was untouched |
+| A sets its own campaign to `active` | **403.** The column grant refuses it |
+| A zeroes its own `total_cost` | **403** |
+| A reads `platform_settings` | empty — operator-only |
+| Pricing computed by the trigger | 24 h × $2.50 = **$60.00**, the client's figure discarded |
+| `GET /api/tiles` | an empty batch, correctly shaped |
+| `GET /api/config` | the seeded browser settings |
+| `GET /api/updates/latest` | 404 — nothing published yet, which is the honest answer |
 
-A local Supabase stack (`supabase start`) would have let me exercise all of it, but it needs Docker,
-which is not installed on this machine.
+**Still not verified:** the Stripe checkout and webhook round trip, Resend delivery, and the
+storage upload path with the signed URLs the review queue uses. All three need the accounts above.
 
 **Before the first real payment**, run once end to end on test keys: sign up → build a campaign →
 pay with `4242 4242 4242 4242` → approve it in admin → confirm it appears in `/api/tiles` → reject

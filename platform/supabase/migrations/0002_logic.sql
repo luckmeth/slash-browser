@@ -70,8 +70,12 @@ begin
   -- whole hours makes them identical by construction. Mirrored in
   -- shared/src/pricing.ts.
   if hours <> trunc(hours) then
-    raise exception 'campaigns run for a whole number of hours (asked for %)',
-      round(hours, 2);
+    -- Six decimal places, not two. A window that is 24 hours minus three
+    -- milliseconds rounds to '24.00', and an error saying a 24.00-hour booking
+    -- is not a whole number of hours costs somebody an afternoon before they
+    -- think to look at the sub-second component.
+    raise exception 'campaigns run for a whole number of hours (this one is %)',
+      round(hours, 6);
   end if;
 
   if hours < tier.min_hours then

@@ -34,6 +34,7 @@ import { MemorySearchService } from './memory/MemorySearchService'
 import { ChromiumImporter } from './import/ChromiumImporter'
 import { MediaKeyService } from './media/MediaKeyService'
 import { AddressBook } from './addresses/AddressBook'
+import { RemoteConfigService } from './config/RemoteConfigService'
 import { AddressFiller } from './addresses/AddressFiller'
 import { PrintService } from './printing/PrintService'
 import { SyncService } from './sync/SyncService'
@@ -124,6 +125,7 @@ export class AppContext {
   readonly sync: SyncService
   readonly translation: TranslationService
   readonly addresses: AddressBook
+  readonly remoteConfig: RemoteConfigService
   readonly addressFiller = new AddressFiller()
   /** Set at launch from the base user-data path — see `applyProfile`. */
   profiles: ProfileRegistry | null = null
@@ -268,6 +270,9 @@ export class AppContext {
     this.injector = new ScriptletInjector(() => this.settings.getAll().allowPageScripts)
     this.translation = new TranslationService(this.providers, this.settings)
     this.addresses = new AddressBook(this.db)
+    this.remoteConfig = new RemoteConfigService(this.settings, (config) =>
+      this.broadcastAll('config:changed', config)
+    )
     this.sync = new SyncService(this.db, this.settings, () =>
       this.broadcastAll('sync:changed', this.sync.status())
     )
@@ -359,6 +364,10 @@ export class AppContext {
 
     // After settings load: it reads them to decide whether to register at all.
     this.mediaKeys.start()
+
+    // Inert unless a publisher configured an endpoint, so a default install
+    // makes no request here at all.
+    void this.remoteConfig.refresh()
 
     // Sync on a timer while the browser is open. Does nothing at all until the
     // user has enabled it, set an endpoint, and unlocked with a passphrase —

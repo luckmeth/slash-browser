@@ -236,6 +236,7 @@ export const INVOKE_CHANNELS = [
   // --- updates ---
   'updates:status',
   'updates:check',
+  'config:remote',
   'profiles:list',
   'profiles:create',
   'profiles:rename',
@@ -300,6 +301,7 @@ export const EVENT_CHANNELS = [
   'history:changed',
   'bookmarks:changed',
   'sync:changed',
+  'config:changed',
   'workspaces:snapshot',
   'performance:changed',
   /** Chrome → overlay, so the dropdown can render outside the chrome document. */

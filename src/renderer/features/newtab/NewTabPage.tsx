@@ -9,6 +9,7 @@ import { SlashSummary } from './SlashSummary'
 import { RecentlyClosed } from './RecentlyClosed'
 import { SponsoredTile } from './SponsoredTile'
 import { AdvertiseLink } from './AdvertiseLink'
+import { PublisherNotice } from './PublisherNotice'
 import { backgroundCss } from './backgrounds'
 
 /**
@@ -127,6 +128,7 @@ export function NewTabPage(): React.JSX.Element {
 
         <SlashSummary />
 
+        <PublisherNotice />
         <SponsoredTile />
         <AdvertiseLink />
 

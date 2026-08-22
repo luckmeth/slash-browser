@@ -25,6 +25,7 @@ import { RedirectChainSchema } from '../types/redirectChain'
 import { AiHubStatusSchema, AiProviderIdSchema } from '../types/aiHub'
 import { AiComparisonSchema, ComparePreviewSchema } from '../types/aiCompare'
 import { CrashReportSchema } from '../types/diagnostics'
+import { RemoteConfigSchema } from '../types/remoteConfig'
 import { SavedAddressSchema } from '../types/address'
 import { SyncStatusSchema } from '../types/sync'
 import { UpdateStatusSchema } from '../types/updates'
@@ -969,6 +970,14 @@ export const invokeContracts = {
 
   // --- profiles --------------------------------------------------------------
 
+  /**
+   * Configuration the publisher of this build controls.
+   *
+   * Always answers, immediately, from cache or defaults — the start page must
+   * never wait on a network call to draw itself.
+   */
+  'config:remote': { request: z.void(), response: RemoteConfigSchema },
+
   'profiles:list': {
     request: z.void(),
     response: z.object({
@@ -1219,6 +1228,8 @@ export const eventContracts = {
   'bookmarks:changed': z.array(BookmarkSchema),
   /** Sync state moved: unlocked, synced, failed, or reset. */
   'sync:changed': SyncStatusSchema,
+  /** The publisher's remote configuration changed since the last fetch. */
+  'config:changed': RemoteConfigSchema,
   'workspaces:snapshot': WorkspacesSnapshotSchema,
   'performance:changed': PerformanceSnapshotSchema,
   'omnibox:state': OmniboxStateSchema,

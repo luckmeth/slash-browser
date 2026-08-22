@@ -153,6 +153,15 @@ export const SettingsSchema = z.object({
    */
   advertisePortalUrl: z.string().default(''),
   /**
+   * Where the publisher's remote configuration lives, if anywhere.
+   *
+   * Empty by default, so a fresh install never asks anything how it should
+   * behave — a browser that phones home on launch is doing what this one is
+   * sold as not doing. Set by whoever builds the installer. The request carries
+   * no identifier and the response is identical for every caller.
+   */
+  remoteConfigEndpoint: z.string().default(''),
+  /**
    * Remapped keyboard shortcuts: command id → Electron accelerator.
    *
    * Only genuine differences are stored. A binding equal to the default is

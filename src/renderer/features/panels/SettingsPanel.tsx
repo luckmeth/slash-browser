@@ -14,6 +14,7 @@ import { SponsorSection } from './SponsorSection'
 import { ShortcutEditor } from './ShortcutEditor'
 import { AddressSection } from './AddressSection'
 import { ProfileSection } from './ProfileSection'
+import { PublisherSection } from './PublisherSection'
 import { SyncSection } from './SyncSection'
 import { ExtensionsSection } from './ExtensionsSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
@@ -302,6 +303,10 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Publisher configuration">
+        <PublisherSection />
+      </Group>
+
       <Group title="Profiles">
         <ProfileSection />
       </Group>
@@ -552,6 +557,10 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     keywords: 'chrome edge bookmarks history migrate transfer'
   },
   Updates: { category: 'About Slash', keywords: 'version upgrade release' },
+  'Publisher configuration': {
+    category: 'About Slash',
+    keywords: 'remote config operator managed enterprise notice flags rollout endpoint'
+  },
   'Crash reports': { category: 'About Slash', keywords: 'diagnostics minidump' },
   'Not built yet': { category: 'About Slash', keywords: 'roadmap missing planned' }
 }

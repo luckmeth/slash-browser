@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useBrowserStore } from '../../stores/browserStore'
 
 /**
@@ -14,6 +15,19 @@ import { useBrowserStore } from '../../stores/browserStore'
  */
 export function AdvertiseLink(): React.JSX.Element | null {
   const url = useBrowserStore((s) => s.settings?.advertisePortalUrl) ?? ''
+  // The publisher's switch, on top of the local address -- this is what makes
+  // the operations app's "Browser config" page control something. Defaults to
+  // shown, so an unreachable config server never silently removes the link.
+  const [allowed, setAllowed] = useState(true)
+
+  useEffect(() => {
+    void window.browser.invoke('config:remote', undefined).then((result) => {
+      if (result.ok) setAllowed(result.value.showAdvertiseCta)
+    })
+    return window.browser.on('config:changed', (config) => setAllowed(config.showAdvertiseCta))
+  }, [])
+
+  if (!allowed) return null
   if (url === '' || !/^https?:\/\//i.test(url)) return null
 
   return (
