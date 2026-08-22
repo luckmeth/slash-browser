@@ -21,7 +21,7 @@ Two artefacts land in `release/`:
 | `Slash Operations Setup 0.1.0.exe` | Installer. Start-menu entry, choose your own location, uninstaller |
 | `Slash Operations 0.1.0.exe` | Portable. One file, run it anywhere, leaves nothing behind but its settings |
 
-About 95 MB each — Chromium and Node, the same as any Electron application.
+About 108 MB each — Chromium and Node, the same as any Electron application.
 
 `npm start` runs it unpackaged, reusing the browser's own Electron rather than downloading a second
 copy of it.
@@ -57,6 +57,22 @@ The window runs with `contextIsolation`, `sandbox` and no Node integration — t
 browser takes with its own chrome. It loads a local server, but "local" is not a reason to hand a
 renderer Node. Links to anywhere else open in the real browser rather than inside an app holding a
 database key.
+
+## When it will not start
+
+It writes to `%APPDATA%/Slash Operations/operations.log`, including everything the embedded
+server printed. A packaged Electron app on Windows is not attached to a console, so without that
+file a failure leaves you with one red sentence and nowhere to look.
+
+Two failures worth knowing about, both found by building this:
+
+- **`Cannot find module next`** — the server tree lost its `node_modules`. electron-builder
+  strips those from `extraResources` whatever filter you give it, which is why the copy is done
+  by `scripts/after-pack.js` instead, and why that script asserts the dependencies arrived
+  rather than trusting the copy.
+- **A blank window and an empty log** — a syntax error in `main.js`. The app never loaded at
+  all. `npm run verify` (part of `npm run package`) parses both scripts first so this cannot
+  ship again.
 
 ## Signing
 

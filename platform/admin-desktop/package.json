@@ -9,7 +9,8 @@
     "build:server": "node scripts/prepare-server.mjs",
     "prebuild": "npm run build:server",
     "start": "node ../../node_modules/electron/cli.js .",
-    "package": "npm run build:server && electron-builder --win --config electron-builder.yml"
+    "package": "npm run verify && npm run build:server && electron-builder --win --config electron-builder.yml",
+    "verify": "node --check main.js && node --check preload.js"
   },
   "devDependencies": {
     "electron": "43.4.0",

@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, safeStorage, shell, dialog } = require('electron')
 const { fork } = require('node:child_process')
 const { createServer } = require('node:net')
-const { readFileSync, writeFileSync, existsSync, rmSync } = require('node:fs')
+const { appendFileSync, readFileSync, writeFileSync, existsSync, rmSync } = require('node:fs')
 const { join } = require('node:path')
 
 /**
@@ -45,6 +45,21 @@ function publicConfig() {
   }
 }
 
+/**
+ * Appends to a log beside the credentials.
+ *
+ * A packaged Electron app on Windows is not attached to a console, so its
+ * stdout goes nowhere. Without this, a failure to start leaves an operator
+ * with a red sentence and no way to find out any more than it says.
+ */
+function logLine(text) {
+  try {
+    appendFileSync(join(app.getPath('userData'), 'operations.log'), new Date().toISOString() + ' ' + text + String.fromCharCode(10))
+  } catch {
+    /* logging must never be the thing that breaks startup */
+  }
+}
+
 let serverProcess = null
 let window = null
 
@@ -84,9 +99,10 @@ function freePort() {
   })
 }
 
-async function waitForServer(port, timeoutMs = 30_000) {
+async function waitForServer(port, hasExited = () => false, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    if (hasExited()) return false
     try {
       const response = await fetch(`http://127.0.0.1:${port}/login`, { redirect: 'manual' })
       if (response.status > 0) return true
@@ -118,6 +134,14 @@ async function startServer(secret) {
     cwd: join(root, 'admin'),
     env: {
       ...process.env,
+      // Without this the child is a second copy of THIS APP.
+      //
+      // fork() launches process.execPath, which in a packaged build is
+      // electron.exe -- so it started another Electron instance that ignored
+      // server.js entirely, and the only symptom was a thirty-second wait
+      // ending in "did not start in time". ELECTRON_RUN_AS_NODE makes the
+      // same binary behave as plain Node, which is what the server needs.
+      ELECTRON_RUN_AS_NODE: '1',
       ...publicConfig(),
       SUPABASE_SERVICE_ROLE_KEY: secret,
       // Loopback only. Binding to 0.0.0.0 would put an app with a service-role
@@ -130,11 +154,30 @@ async function startServer(secret) {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc']
   })
 
-  serverProcess.stdout?.on('data', (chunk) => console.log(`[server] ${chunk}`.trimEnd()))
-  serverProcess.stderr?.on('data', (chunk) => console.error(`[server] ${chunk}`.trimEnd()))
+  // Kept so a failure can say what happened. A thirty-second wait ending in
+  // "did not start" tells the operator nothing they can act on.
+  let output = ''
+  const record = (chunk) => {
+    output += chunk
+    if (output.length > 4000) output = output.slice(-4000)
+  }
+  serverProcess.stdout?.on('data', (chunk) => { record(chunk); logLine('[server] ' + String(chunk).trimEnd()) })
+  serverProcess.stderr?.on('data', (chunk) => { record(chunk); logLine('[server:err] ' + String(chunk).trimEnd()) })
 
-  const ready = await waitForServer(port)
-  if (!ready) throw new Error('The embedded server did not start in time.')
+  // A child that exits immediately must not be waited on for thirty seconds.
+  let exited = null
+  serverProcess.on('exit', (code, signal) => { exited = { code, signal } })
+
+  const ready = await waitForServer(port, () => exited !== null)
+  if (!ready) {
+    const why = exited
+      ? `It stopped immediately (exit code ${exited.code}).`
+      : 'It did not answer in time.'
+    // The tail of whatever the server printed, verbatim. No line splitting:
+    // an operator needs the last thing it said, not a tidy summary of it.
+    const tail = output.trim().slice(-500)
+    throw new Error(why + (tail ? String.fromCharCode(10, 10) + tail : String()))
+  }
   return port
 }
 
