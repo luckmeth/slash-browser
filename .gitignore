@@ -12,3 +12,7 @@ Thumbs.db
 coverage/
 .eslintcache
 *.tsbuildinfo
+
+# Sponsor portal: local dependencies and its SQLite database.
+portal/node_modules/
+portal/data/
