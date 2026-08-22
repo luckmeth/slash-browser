@@ -4,7 +4,8 @@
   "workspaces": [
     "shared",
     "advertiser",
-    "admin"
+    "admin",
+    "admin-desktop"
   ],
   "scripts": {
     "test": "vitest run",
