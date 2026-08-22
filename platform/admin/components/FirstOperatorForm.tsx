@@ -1,25 +1,44 @@
 'use client'
 
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useActionState } from 'react'
 import { createFirstOperator, type BootstrapResult } from '@/app/login/bootstrap'
+import { AdminLoginForm } from './AdminLoginForm'
 
 /**
  * Shown only when `admin_users` is empty.
  *
- * Disappears the moment an operator exists, and the action behind it refuses
- * regardless of what this component decides to render.
+ * On success it renders the sign-in form **itself**, rather than telling the
+ * reader to look below for one that is not there. Which form this page shows is
+ * decided on the server, before submitting; the account existing does not, on
+ * its own, cause that decision to be made again. `router.refresh()` asks for
+ * that re-render, but the form is rendered here regardless — a message that
+ * points at something is worse than useless if the something takes a round trip
+ * to arrive.
  */
 export function FirstOperatorForm(): React.JSX.Element {
+  const router = useRouter()
   const [state, action, busy] = useActionState<BootstrapResult, FormData>(
     createFirstOperator,
     undefined
   )
+  const created = state !== undefined && 'ok' in state
 
-  if (state && 'ok' in state) {
+  useEffect(() => {
+    // So a reload, or anything else that re-reads this page, sees an operator
+    // now exists and stops offering to create one.
+    if (created) router.refresh()
+  }, [created, router])
+
+  if (created) {
     return (
-      <div className="card">
-        <p style={{ margin: 0, color: 'var(--good)' }}>{state.ok}</p>
-      </div>
+      <>
+        <p className="banner" style={{ borderColor: 'var(--good)', color: 'var(--good)' }}>
+          Operator created. Sign in with the email and password you just chose.
+        </p>
+        <AdminLoginForm />
+      </>
     )
   }
 
