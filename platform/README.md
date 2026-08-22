@@ -47,12 +47,18 @@ are not idempotent.
 
 ### 2. Make yourself an operator
 
-There is deliberately **no self-serve route** to becoming an admin — that would be a self-serve
-route to approving your own adverts. Sign up on the public site first, then in the SQL editor:
+Open the operations app. With no operator in the database it offers to create the first one --
+email and password, and you are in. The offer disappears the moment an operator exists, and the
+action behind it re-checks that rather than trusting what the page decided when it rendered.
+
+It is not an escalation path: reaching it at all needs the service-role key, and anybody holding
+that could already do this by hand.
+
+For any operator after the first, in the SQL editor:
 
 ```sql
 insert into admin_users (auth_user_id, role)
-select id, 'owner' from auth.users where email = 'you@yourdomain.com';
+select id, 'owner' from auth.users where email = 'them@yourdomain.com';
 ```
 
 ### 3. Environment

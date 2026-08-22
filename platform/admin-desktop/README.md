@@ -26,6 +26,15 @@ About 108 MB each — Chromium and Node, the same as any Electron application.
 `npm start` runs it unpackaged, reusing the browser's own Electron rather than downloading a second
 copy of it.
 
+## First run
+
+It asks for the database key (below), then -- if no operator exists yet -- offers to create one.
+That is deliberate: needing the *public advertiser website* running in a terminal, plus the
+Supabase SQL editor, just to make an account for this app was three applications for one task.
+
+The offer disappears once an operator exists, and the action behind it re-checks that at write
+time rather than trusting what the page decided when it rendered.
+
 ## The key it asks for, and why it is not in the file
 
 On first run it asks for your Supabase **service_role** key.
