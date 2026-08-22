@@ -121,7 +121,8 @@ export const OverlayStateSchema = z.object({
     'onboarding',
     'passwords',
     'command-palette',
-    'shortcuts'
+    'shortcuts',
+    'cleanup'
   ])
 })
 export type OverlayState = z.infer<typeof OverlayStateSchema>

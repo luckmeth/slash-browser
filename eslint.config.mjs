@@ -2,7 +2,14 @@ import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**'] },
+  {
+    // `portal/` is a separate Node application with its own package.json and
+    // its own dependency tree — nothing there is bundled into the browser. It
+    // runs on Node globals (`process`, `console`, `Buffer`) this config does
+    // not define, so linting it here reports six errors about code that is
+    // perfectly correct for where it runs.
+    ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**', 'portal/**']
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
