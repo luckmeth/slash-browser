@@ -46,6 +46,7 @@ import { PageInsightService } from './insight/PageInsightService'
 import { DownloadQueue } from './downloads/engine/DownloadQueue'
 import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
 import { MediaSniffer } from './media/MediaSniffer'
+import { DefaultBrowserService } from './system/DefaultBrowserService'
 import { AiEngine } from './ai/AiEngine'
 import { ProviderRegistry } from './ai/ProviderRegistry'
 import { AiComparisonService } from './ai/AiComparison'
@@ -147,6 +148,7 @@ export class AppContext {
   readonly downloadEngine: DownloadQueue
   readonly guardian: DownloadGuardian
   readonly mediaSniffer = new MediaSniffer()
+  readonly defaultBrowser: DefaultBrowserService
   readonly crashes: CrashReporting
   readonly updates: UpdateService
   readonly watch: PageWatchService
@@ -199,6 +201,7 @@ export class AppContext {
   constructor() {
     this.db = new Database(app.getPath('userData'))
     this.settings = new SettingsStore(this.db)
+    this.defaultBrowser = new DefaultBrowserService(this.settings)
     this.ipc = new IpcRegistry()
     this.history = new HistoryRepository(this.db)
     this.bookmarks = new BookmarkRepository(this.db)

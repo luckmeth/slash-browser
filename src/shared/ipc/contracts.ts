@@ -1163,6 +1163,35 @@ export const invokeContracts = {
   'guardian:scanMedia': { request: z.void(), response: MediaScanSchema },
   'media:detected': { request: z.void(), response: z.object({ count: z.number().int() }) },
 
+  /**
+   * Whether Slash is the system default browser, and whether to offer.
+   *
+   * `shouldOffer` is decided in main rather than the renderer because the
+   * cadence is a product rule with a record behind it, and a renderer that
+   * decides when to nag is a renderer that nags again after every reload.
+   */
+  'system:defaultBrowser': {
+    request: z.void(),
+    response: z.object({
+      isDefault: z.boolean(),
+      shouldOffer: z.boolean(),
+      supported: z.boolean()
+    })
+  },
+  /**
+   * Opens Windows' Default apps screen.
+   *
+   * Named for what it does. There is no channel that *makes* Slash the default,
+   * because Windows has not allowed that since Windows 8 and a channel called
+   * `system:makeDefault` would be a lie in the type system.
+   */
+  'system:openDefaultBrowserSettings': { request: z.void(), response: z.void() },
+  'system:dismissDefaultBrowser': {
+    /** `forever` is "don't ask again"; otherwise the offer is merely counted. */
+    request: z.object({ forever: z.boolean() }),
+    response: z.void()
+  },
+
   'history:search': {
     request: HistoryQuerySchema,
     response: z.array(HistoryEntrySchema)

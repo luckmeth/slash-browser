@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import type { Settings } from '@shared/types/settings'
 import { SEARCH_ENGINES } from '@shared/constants'
 import { SEMANTIC_MODEL_MB } from '@shared/types/semantic'
@@ -338,6 +338,10 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Default browser">
+        <DefaultBrowserField />
+      </Group>
+
       <Group title="Restore points">
         <Toggle
           label="Reopen tabs from the last session"
@@ -539,6 +543,10 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     keywords: 'keys keybinding hotkey accelerator remap rebind ctrl alt shift shortcut customise'
   },
   'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
+  'Default browser': {
+    category: 'Browsing',
+    keywords: 'default browser links open http https windows settings associations'
+  },
   'Browsing memory': {
     category: 'Browsing',
     keywords: 'index semantic embedding history pages search'
@@ -569,6 +577,68 @@ function groupMatches(title: string, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (q === '') return true
   return `${title} ${GROUP_META[title]?.keywords ?? ''}`.toLowerCase().includes(q)
+}
+
+/**
+ * Whether Slash is the default browser, and the one route to changing it.
+ *
+ * Deliberately not a switch. Windows has not let an application set itself as
+ * the default since Windows 8 — the association is signed against the user and
+ * the ProgId, and anything written from code is reverted without an error. A
+ * toggle here would appear to work and then quietly not have.
+ */
+function DefaultBrowserField(): React.JSX.Element {
+  const [status, setStatus] = useState<{ isDefault: boolean; supported: boolean } | null>(null)
+
+  const refresh = (): void => {
+    void window.browser.invoke('system:defaultBrowser', undefined).then((result) => {
+      if (result.ok) setStatus(result.value)
+    })
+  }
+  useEffect(refresh, [])
+
+  if (status?.supported === false) {
+    return (
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Setting the default browser is not available on this platform.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-[var(--color-text-muted)]">
+        {status === null
+          ? 'Checking…'
+          : status.isDefault
+            ? 'Slash is your default browser. Links from other applications open here.'
+            : 'Slash is not your default browser.'}
+      </p>
+
+      {status !== null && !status.isDefault && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              void window.browser
+                .invoke('system:openDefaultBrowserSettings', undefined)
+                // Re-checked on return rather than assumed: the user may not
+                // have gone through with it, and a screen that claims otherwise
+                // is worse than one that does not know.
+                .then(() => setTimeout(refresh, 4000))
+            }}
+            className="cursor-pointer rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          >
+            Open Windows settings
+          </button>
+          <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            Windows does not let an application make itself the default. This opens the Default apps
+            screen, where Slash can be chosen for http and https.
+          </p>
+        </>
+      )}
+    </div>
+  )
 }
 
 function Group({

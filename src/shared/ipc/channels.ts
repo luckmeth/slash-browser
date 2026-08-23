@@ -291,7 +291,12 @@ export const INVOKE_CHANNELS = [
   'guardian:scanDownloads',
   'guardian:scanMedia',
   /** How many downloadable files the active tab has been seen fetching. */
-  'media:detected'
+  'media:detected',
+
+  // --- default browser ---
+  'system:defaultBrowser',
+  'system:openDefaultBrowserSettings',
+  'system:dismissDefaultBrowser'
 ] as const
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number]

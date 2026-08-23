@@ -1513,6 +1513,23 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(await ctx.guardian.scanMedia(contents, ctx.mediaSniffer.forTab(contents)))
   })
 
+  ipc.handle('system:defaultBrowser', () => ok(ctx.defaultBrowser.status()))
+
+  ipc.handle('system:openDefaultBrowserSettings', async () => {
+    // Counted as an ask either way. Somebody who opened the screen and did not
+    // follow through has still been asked, and asking again next week would be
+    // the browser failing to notice.
+    ctx.defaultBrowser.recordAsked()
+    await ctx.defaultBrowser.openSystemSettings()
+    return ok(undefined)
+  })
+
+  ipc.handle('system:dismissDefaultBrowser', (request) => {
+    if (request.forever) ctx.defaultBrowser.suppress()
+    else ctx.defaultBrowser.recordAsked()
+    return ok(undefined)
+  })
+
   ipc.handle('media:detected', (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')

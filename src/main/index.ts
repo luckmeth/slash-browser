@@ -9,6 +9,7 @@ import { applyProfile, prepareUserDataPath } from './userData'
 import { profileFromArgv } from './profiles/profilePaths'
 import { ProfileRegistry } from './profiles/ProfileRegistry'
 import { CrashReporting } from './diagnostics/CrashReporting'
+import { openTargetFromArgv } from './system/defaultBrowserRules'
 
 const log = createLogger('main')
 
@@ -58,11 +59,22 @@ if (!app.requestSingleInstanceLock()) {
       return
     }
 
+    // Clicking a link in another application while Slash is already running
+    // starts a second process whose only content is the URL. Windows offers no
+    // event for this and no other route to the address — a default browser that
+    // ignores its own argv opens an empty window every time somebody clicks a
+    // link in their mail client.
+    const target = openTargetFromArgv(argv)
+
     const [existing] = BrowserWindow.getAllWindows()
     if (existing) {
       if (existing.isMinimized()) existing.restore()
       existing.focus()
     }
+
+    if (!target) return
+    const window = context.focusedWindow() ?? context.createWindow()
+    window.tabs.create({ url: target, background: false })
   })
 
   void app.whenReady().then(() => {
@@ -97,7 +109,17 @@ if (!app.requestSingleInstanceLock()) {
     // A first launch can itself carry the flag — clicking the jump list while
     // Slash is closed starts it fresh rather than reaching a running copy.
     const launchRequest = windowRequest(process.argv)
+    // Slash may be the default browser, in which case this launch exists only to
+    // open the URL Windows put on the command line.
+    const launchTarget = openTargetFromArgv(process.argv)
     const window = context.createWindow({ isPrivate: launchRequest === 'private' })
+    if (launchTarget) window.tabs.create({ url: launchTarget, background: false })
+
+    // Registers Slash as an eligible handler for http/https. Not a way of
+    // becoming the default — Windows does not permit that — but the entry has
+    // to exist before the user can pick it, and a development build or a copied
+    // folder never went through the installer that would have written it.
+    context.defaultBrowser.register()
 
     // Bring back what was open when the browser was last closed.
     //

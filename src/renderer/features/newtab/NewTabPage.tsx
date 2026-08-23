@@ -10,6 +10,7 @@ import { RecentlyClosed } from './RecentlyClosed'
 import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
 import { AdvertiseCard } from './AdvertiseCard'
+import { DefaultBrowserCard } from './DefaultBrowserCard'
 import { SponsoredBackground } from './SponsoredBackground'
 import { SponsoredBanner } from './SponsoredBanner'
 import { PublisherNotice } from './PublisherNotice'
@@ -165,6 +166,7 @@ export function NewTabPage(): React.JSX.Element {
         <PublisherNotice />
         {sponsoredBanner && <SponsoredBanner creative={sponsoredBanner} />}
         <SponsoredTile />
+        <DefaultBrowserCard />
         <AdvertiseCard />
 
         {topSites.length > 0 && (

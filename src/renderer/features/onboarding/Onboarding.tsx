@@ -21,9 +21,9 @@ import { Icon, type IconName } from '../../components/Icon'
  * product to smuggle in a default-on opt-in, so it deliberately has no power to.
  */
 
-type Step = 'welcome' | 'import' | 'search' | 'sleep'
+type Step = 'welcome' | 'import' | 'search' | 'sleep' | 'default'
 
-const ORDER: Step[] = ['welcome', 'import', 'search', 'sleep']
+const ORDER: Step[] = ['welcome', 'import', 'search', 'sleep', 'default']
 
 export function Onboarding(): React.JSX.Element {
   const [step, setStep] = useState<Step>('welcome')
@@ -65,6 +65,7 @@ export function Onboarding(): React.JSX.Element {
           />
         )}
         {step === 'sleep' && <SleepStep />}
+        {step === 'default' && <DefaultBrowserStep />}
 
         <div className="mt-7 flex items-center gap-3">
           <div className="flex gap-1.5" aria-hidden="true">
@@ -262,6 +263,76 @@ function SleepStep(): React.JSX.Element {
         Sleeping a tab frees real memory and Slash reports the measured figure. Sites cannot be made
         to restore anything they kept only in the page, so a half-finished form in a slept tab is
         the site&apos;s to remember, not ours.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The last screen: an offer to become the default browser.
+ *
+ * It opens Windows' own screen and says so. There is no button here that makes
+ * Slash the default, because Windows has not allowed an application to do that
+ * since Windows 8 — the association is signed against the user and the ProgId,
+ * and anything written from code is silently reverted. Every browser you have
+ * installed hits this wall; the ones that pretend otherwise are the ones that
+ * leave you wondering why nothing changed.
+ *
+ * Skipped entirely where it does not apply, or where Slash already is the
+ * default — a walkthrough screen offering something already done is worse than
+ * one screen fewer.
+ */
+function DefaultBrowserStep(): React.JSX.Element {
+  const [status, setStatus] = useState<{ isDefault: boolean; supported: boolean } | null>(null)
+  const [opened, setOpened] = useState(false)
+
+  useEffect(() => {
+    void window.browser.invoke('system:defaultBrowser', undefined).then((result) => {
+      if (result.ok) setStatus(result.value)
+    })
+  }, [])
+
+  if (status?.isDefault === true || status?.supported === false) {
+    return (
+      <div>
+        <StepIcon name="globe" />
+        <h1 className="mt-4 text-xl font-semibold tracking-tight">You are set up</h1>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-muted)]">
+          {status.isDefault
+            ? 'Slash is already your default browser, so links from other applications will open here.'
+            : 'Everything is ready. You can change any of this later in Settings.'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <StepIcon name="globe" />
+      <h1 className="mt-4 text-xl font-semibold tracking-tight">Make Slash your default</h1>
+      <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-muted)]">
+        Links you click in other applications — mail, chat, documents — will open here instead of
+        the browser you were using.
+      </p>
+
+      <button
+        type="button"
+        onClick={() => {
+          setOpened(true)
+          void window.browser.invoke('system:openDefaultBrowserSettings', undefined)
+        }}
+        className="mt-4 w-full cursor-pointer rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-black transition hover:opacity-90"
+      >
+        Open Windows settings
+      </button>
+
+      {/* Said before the click, not after it. The step that trips people up is
+          the one Windows owns, and finding that out afterwards feels like the
+          button did not work. */}
+      <p className="mt-3 rounded-xl border border-[var(--glass-edge)] bg-white/5 p-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
+        {opened
+          ? 'Windows should now be open. Find Slash in the list and set it for http and https — Windows requires that last step to happen there, not here.'
+          : 'Windows does not let an application make itself the default. This opens the Settings screen where you can choose Slash; the final click has to be yours.'}
       </p>
     </div>
   )

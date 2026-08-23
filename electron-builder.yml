@@ -125,6 +125,11 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Slash
+  # Registers Slash under StartMenuInternet and RegisteredApplications, which is
+  # what makes it appear in Settings → Default apps. Windows will not let an
+  # application make itself the default; this is what makes it *choosable*, and
+  # without it the in-app offer would open a list Slash is not in.
+  include: build/installer.nsh
 
 # Cross-platform targets are intentionally left unconfigured until the browser is
 # stable on Windows. Adding them is a config change, not a code change — nothing

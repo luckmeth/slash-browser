@@ -58,6 +58,21 @@ export const SettingsSchema = z.object({
    * declined is not an introduction, it is a nag.
    */
   onboardingCompleted: z.boolean().default(false),
+
+  // --- default browser -------------------------------------------------------
+  /**
+   * How many times Slash has offered to become the default browser.
+   *
+   * Capped at two by `PROMPT_LIMITS`. Windows cannot be told from code — the
+   * user has to pick Slash in the Default apps screen themselves — so the offer
+   * is a signpost, and a signpost shown a third time is a nag.
+   */
+  defaultBrowserAsks: z.number().int().default(0),
+  /** Epoch ms of the last offer, so the second one is a fortnight later. */
+  defaultBrowserAskedAt: z.number().int().default(0),
+  /** "Don't ask again", honoured permanently. */
+  defaultBrowserSuppressed: z.boolean().default(false),
+
   theme: z.enum(['system', 'light', 'dark']).default('system'),
 
   // --- personalisation -------------------------------------------------------
