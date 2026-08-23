@@ -1628,10 +1628,24 @@ export function registerHandlers(ctx: AppContext): void {
       return ok({ ok: false, reason: 'That option is no longer available. Try opening the list again.' })
     }
 
+    const filename = ctx.filenameForChoice(window.offeredTitle, choice)
+
+    // A picture-only stream is half a video. If there is audio alongside it and
+    // a muxer to join them, one entry downloads both and produces one file —
+    // "your video is in two pieces, here is a tool" is an implementation detail
+    // that should not reach somebody's downloads folder.
+    if (choice.hasVideo && !choice.hasAudio) {
+      const audio = options.choices.find((entry) => entry.hasAudio && !entry.hasVideo)
+      if (audio && ctx.downloadEngine.canJoin()) {
+        ctx.downloadEngine.enqueueJoined(request.url, audio.url, { filename })
+        return ok({ ok: true, reason: null })
+      }
+    }
+
     ctx.downloadEngine.enqueue(request.url, {
       priority: 'normal',
       startAfter: null,
-      filename: ctx.filenameForChoice(window.offeredTitle, choice)
+      filename
     })
     return ok({ ok: true, reason: null })
   })

@@ -82,7 +82,45 @@ The page's own format list is read instead — on the user's click, not on load.
 **Must not:** offer a row that downloads to an unplayable file, or say "nothing found" when the
 real reason is signed addresses.
 
-## 3b — Segmented delivery elsewhere
+## 3a — A stream, joined into one file
+
+The case that used to be refused outright. Any site with an HLS player will do — a news site with
+video, a sports replay, an embedded player that is not YouTube.
+
+1. Play the video, then open the picker.
+2. **Expect:** a row offering the stream, with **no size** — a playlist has no length of its own,
+   and a number invented from the manifest would simply be wrong.
+3. Save it. **Expect** the row shows *"Joining segment N of M"* while it works.
+4. **Expect** the finished file is named `.ts` or `.mp4` — never `.m3u8`, which Windows opens in a
+   text editor.
+5. **Open it. It must play from beginning to end, with sound.** Skip to the middle and the end.
+   Segments written out of order produce a file that plays for ten seconds and then corrupts, so
+   checking only the start proves nothing.
+
+## 3b — A live stream must be refused
+
+1. Open any live broadcast with an HLS player and try to download it.
+2. **Expect:** refused, saying it has no end to download.
+3. **Must not:** start, and produce a file that stops at an arbitrary moment. Downloading something
+   with no end is recording, which is a different feature.
+
+## 3c — Video and audio joined
+
+1. On a page offering resolutions above 720p, open the picker.
+2. **Expect:** high-resolution rows read **· sound added**, not **· no sound**.
+3. Save one. **Expect** the row shows *"Downloading video…"*, then *"Downloading audio…"*, then
+   *"Joining video and audio…"*.
+4. **Expect one file** in the downloads folder, not two.
+5. **Play it. It must have picture and sound.** This is the whole feature.
+6. Check the parts are gone — no `.video.part` or `.audio.part` left behind.
+
+### If ffmpeg was not fetched
+
+1. Move `resources/ffmpeg` aside and repackage.
+2. **Expect:** rows read **· no sound** again, and picking one saves a single silent stream.
+3. **Must not:** claim sound will be added and then not add it.
+
+## 3d — Segmented delivery elsewhere
 
 1. Open any YouTube video and let it play for ten seconds.
 2. Open the downloads panel and press **Find media** if the button did not appear.

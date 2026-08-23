@@ -213,9 +213,18 @@ describe('toDownloadable', () => {
     expect(first?.label).toBe('film.mp4 · 48 MB')
   })
 
-  it('offers nothing for a manifest or a protected stream', () => {
-    // A button that produces an unplayable file is worse than no button.
-    expect(toDownloadable([found({ kind: 'stream', media: null })])).toEqual([])
+  it('offers a stream, which is now joined on download', () => {
+    // Was refused until the segment assembler existed. It is offered without a
+    // size, because a playlist has no length of its own and guessing from the
+    // manifest's few kilobytes would be a number that is simply wrong.
+    const [first] = toDownloadable([found({ kind: 'stream', media: null, label: 'HLS stream' })])
+    expect(first?.sizeBytes).toBeNull()
+    expect(first?.label).toContain('joined on download')
+  })
+
+  it('still offers nothing for a protected stream', () => {
+    // The line that does not move. A button producing an unplayable file is
+    // worse than no button.
     expect(toDownloadable([found({ kind: 'protected', media: null })])).toEqual([])
   })
 
@@ -247,14 +256,13 @@ describe('sniffNote', () => {
     expect(sniffNote([one('protected')])).toContain('encrypted')
   })
 
-  it('names segmented delivery as the reason', () => {
-    expect(sniffNote([one('stream')])).toContain('adaptive stream')
+  it('has nothing to explain about a stream, now that streams download', () => {
+    expect(sniffNote([one('stream')])).toBeNull()
   })
 
-  it('prefers the encryption explanation, which is the harder limit', () => {
-    // A protected stream is also segmented; saying "segments" would imply the
-    // only obstacle is effort.
-    expect(sniffNote([one('stream'), one('protected')])).toContain('encrypted')
+  it('says nothing when a stream is on offer beside a protected one', () => {
+    // There is something downloadable here, so a refusal note would be wrong.
+    expect(sniffNote([one('stream'), one('protected')])).toBeNull()
   })
 })
 

@@ -61,6 +61,15 @@ extraResources:
   # them with plain fs, and a native file open cannot see through the archive.
   - from: resources/filters
     to: filters
+  # ffmpeg, for joining a video stream to its separate audio stream. ~88 MB, and
+  # the single largest thing in the installer — it is here because every site
+  # above 720p sends picture and sound separately, and without it those download
+  # as two files nobody asked for. Fetched by "npm run fetch:ffmpeg", which pins
+  # a checksum, rather than committed — git would carry every version for ever.
+  # A build without it still works: Muxer.available() is false, the picker
+  # offers the two streams, and the UI says why.
+  - from: resources/ffmpeg
+    to: ffmpeg
 
 asar: true
 asarUnpack:

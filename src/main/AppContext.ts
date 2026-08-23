@@ -930,10 +930,25 @@ export class AppContext {
     // there would replace a specific explanation with a vaguer one.
     const page = await this.pageMedia.extract(contents)
     if (page) {
+      // With a muxer and an audio stream present, a picture-only row is no
+      // longer half a video — it downloads as one file. Saying "no sound" then
+      // would be describing a limitation that no longer applies.
+      const canJoin = this.downloadEngine.canJoin()
+      const hasAudio = page.choices.some((choice) => choice.hasAudio && !choice.hasVideo)
+      const joinable = canJoin && hasAudio
+
       return {
         title: page.title,
-        choices: page.choices.map((choice) => ({ ...choice, sizeText: formatSize(choice.size) })),
-        note: page.note
+        choices: page.choices.map((choice) => ({
+          ...choice,
+          complete: choice.complete || (joinable && choice.hasVideo),
+          label:
+            joinable && choice.hasVideo && !choice.hasAudio
+              ? `${choice.label.replace(' · no sound', '')} · sound added`
+              : choice.label,
+          sizeText: formatSize(choice.size)
+        })),
+        note: joinable && page.note?.includes('does not combine') ? null : page.note
       }
     }
 

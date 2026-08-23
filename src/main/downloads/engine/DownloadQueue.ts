@@ -8,13 +8,15 @@ import type {
 } from '@shared/types/downloadEngine'
 import { hostOf } from '@shared/url'
 import { createLogger } from '../../logger'
+import { planStream, StreamDownload } from './StreamDownload'
+import { Muxer } from './Muxer'
 import { SegmentedDownload } from './SegmentedDownload'
 import {
   categorise,
   estimateSecondsRemaining,
   planConnections,
   retryDelayMs,
-  safeFilename
+  safeFilename, isStreamUrl, withExtension
 } from './planning'
 
 const log = createLogger('download')
@@ -29,7 +31,10 @@ const SPEED_WINDOW_MS = 2000
 const PRIORITY_ORDER: Record<DownloadPriority, number> = { high: 0, normal: 1, low: 2 }
 
 interface Live {
-  download: SegmentedDownload
+  /** Absent when the source is a stream, which downloads a different way. */
+  download?: SegmentedDownload
+  /** Set instead of `download` when the source is a stream rather than a file. */
+  stream?: StreamDownload
   capabilities: ServerCapabilities | null
   lastBytes: number
   lastSampleAt: number
@@ -51,6 +56,8 @@ interface Live {
 export class DownloadQueue {
   private readonly records = new Map<string, EngineDownload>()
   private readonly live = new Map<string, Live>()
+  /** Joins a video stream to its audio. Absent ffmpeg means it reports so. */
+  private readonly muxer = new Muxer()
   private scheduleTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
@@ -125,11 +132,59 @@ export class DownloadQueue {
     return id
   }
 
+  /**
+   * One download that is really two: a video stream and its separate audio.
+   *
+   * Every adaptive site above about 720p sends them apart. This keeps the fact
+   * out of the user's way — **one entry in the list**, one progress bar, one
+   * file at the end — because "your video is in two pieces, here is a tool" is
+   * an implementation detail leaking into somebody's downloads folder.
+   *
+   * Falls back to keeping both parts if the join fails or ffmpeg is absent, and
+   * says so. Two files that play beat one error where a download should be.
+   */
+  enqueueJoined(
+    videoUrl: string,
+    audioUrl: string,
+    options: { filename: string; priority?: DownloadPriority } = { filename: 'video.mp4' }
+  ): string {
+    const id = this.enqueue(videoUrl, {
+      priority: options.priority ?? 'normal',
+      startAfter: null,
+      filename: options.filename
+    })
+    this.pairs.set(id, audioUrl)
+    return id
+  }
+
+  /** Audio stream to join, for downloads that are two streams. */
+  private readonly pairs = new Map<string, string>()
+
+  /**
+   * Whether joining two streams is possible in this build.
+   *
+   * False when ffmpeg was not fetched before packaging. The picker asks before
+   * promising a single file, because offering one and delivering two is worse
+   * than offering two.
+   */
+  canJoin(): boolean {
+    return this.muxer.available()
+  }
+
   pause(id: string): void {
     const record = this.records.get(id)
     const live = this.live.get(id)
     if (!record || !live) return
-    live.download.pause()
+
+    // A stream cannot be paused and resumed: there is no byte offset to come
+    // back to, only a position in a list of segments and a part-written file
+    // that is not a valid video. Pausing one would offer a Resume that
+    // restarted it from nothing, so it is refused rather than mimed.
+    if (live.stream) {
+      this.patch(id, { connectionNote: 'A joined stream cannot be paused — cancel and start again.' })
+      return
+    }
+    live.download?.pause()
     this.patch(id, { state: 'paused', bytesPerSecond: 0, secondsRemaining: null })
     this.live.delete(id)
     this.pump()
@@ -152,7 +207,8 @@ export class DownloadQueue {
     const live = this.live.get(id)
     if (live) {
       if (live.retryTimer) clearTimeout(live.retryTimer)
-      live.download.cancel()
+      live.download?.cancel()
+      live.stream?.cancel()
       this.live.delete(id)
     }
     this.patch(id, { state: 'cancelled', bytesPerSecond: 0, secondsRemaining: null })
@@ -186,8 +242,14 @@ export class DownloadQueue {
     this.scheduleTimer = null
     for (const [id, live] of this.live) {
       if (live.retryTimer) clearTimeout(live.retryTimer)
-      live.download.pause()
-      if (this.records.has(id)) this.patch(id, { state: 'paused' })
+      live.download?.pause()
+      // A stream in flight is stopped rather than paused: there is nothing to
+      // resume from, and leaving it marked paused would offer a Resume that
+      // silently started again from nothing on the next launch.
+      live.stream?.cancel()
+      if (this.records.has(id)) {
+        this.patch(id, { state: live.stream ? 'cancelled' : 'paused' })
+      }
     }
     this.live.clear()
   }
@@ -240,6 +302,21 @@ export class DownloadQueue {
   private async begin(id: string): Promise<void> {
     const record = this.records.get(id)
     if (!record) return
+
+    // A stream is not a file and cannot be probed for a length or ranges. It
+    // takes an entirely different path — plan the playlist, then fetch and
+    // join the segments — and shares only this queue, its list entry and its
+    // controls, which is exactly as much sharing as it should have.
+    if (isStreamUrl(record.url)) {
+      await this.beginStream(id, record)
+      return
+    }
+
+    const audioUrl = this.pairs.get(id)
+    if (audioUrl !== undefined) {
+      await this.beginJoined(id, record, audioUrl)
+      return
+    }
 
     const download = new SegmentedDownload({
       url: record.url,
@@ -308,6 +385,160 @@ export class DownloadQueue {
         completedAt: Date.now()
       })
       log.info(`downloaded ${filename} from ${record.sourceHost}`)
+      this.live.delete(id)
+      this.pump()
+    } catch (error) {
+      this.live.delete(id)
+      this.fail(id, error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * Downloads a video stream and its audio, then joins them into one file.
+   *
+   * Sequential rather than parallel on purpose: they share a link, so running
+   * both at once halves each and finishes at the same moment, while making the
+   * progress bar meaningless. One after the other, with the bar spanning both,
+   * is the same wall-clock time and legible throughout.
+   */
+  private async beginJoined(id: string, record: EngineDownload, audioUrl: string): Promise<void> {
+    const finalPath = await this.uniquePath(join(this.defaultDirectory(), record.filename))
+    const videoPart = `${finalPath}.video.part`
+    const audioPart = `${finalPath}.audio.part`
+
+    this.patch(id, {
+      savePath: finalPath,
+      state: 'downloading',
+      attempts: record.attempts + 1,
+      error: null,
+      connectionNote: 'Downloading video…'
+    })
+
+    let videoBytes = 0
+    const fetchPart = async (url: string, destination: string, isVideo: boolean): Promise<number> => {
+      const download = new SegmentedDownload({
+        url,
+        destination,
+        connections: this.connectionsPerFile(),
+        bandwidthLimit: this.bandwidthLimit(),
+        onProgress: (received) => this.onProgress(id, isVideo ? received : videoBytes + received, [])
+      })
+      const live = this.live.get(id)
+      if (live) live.download = download
+
+      const capabilities = await download.probe()
+      const plan = planConnections(capabilities, this.connectionsPerFile())
+      await download.run(capabilities.totalBytes, plan.connections)
+      return capabilities.totalBytes ?? download.receivedBytes
+    }
+
+    this.live.set(id, {
+      capabilities: null,
+      lastBytes: 0,
+      lastSampleAt: Date.now(),
+      retryTimer: null
+    })
+
+    try {
+      videoBytes = await fetchPart(record.url, videoPart, true)
+      this.patch(id, { connectionNote: 'Downloading audio…' })
+      await fetchPart(audioUrl, audioPart, false)
+
+      this.patch(id, { connectionNote: 'Joining video and audio…', bytesPerSecond: 0 })
+      const joined = await this.muxer.join(videoPart, audioPart, finalPath)
+
+      this.patch(id, {
+        state: 'completed',
+        bytesPerSecond: 0,
+        secondsRemaining: 0,
+        completedAt: Date.now(),
+        connectionNote: joined
+          ? 'Video and audio joined into one file.'
+          : 'Saved as two files — they could not be joined, and both play on their own.'
+      })
+      log.info(joined ? `joined ${record.filename}` : `kept two parts for ${record.filename}`)
+      this.live.delete(id)
+      this.pairs.delete(id)
+      this.pump()
+    } catch (error) {
+      this.live.delete(id)
+      this.fail(id, error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * The stream path: plan the playlist, then fetch and join the segments.
+   *
+   * Kept separate from `begin` rather than folded into it with flags. The two
+   * share no step — no probe, no ranges, no resume — and a single function
+   * pretending otherwise would be a tangle of branches over two unrelated
+   * transfers.
+   */
+  private async beginStream(id: string, record: EngineDownload): Promise<void> {
+    this.patch(id, { state: 'probing', attempts: record.attempts + 1, error: null })
+
+    const planned = await planStream(record.url)
+    if (!planned.ok) {
+      // Not a retryable failure: an encrypted or live stream will still be
+      // encrypted or live in eight seconds. Failed outright, with the reason.
+      this.patch(id, {
+        state: 'failed',
+        error: planned.reason,
+        bytesPerSecond: 0,
+        secondsRemaining: null
+      })
+      this.pump()
+      return
+    }
+
+    const { plan } = planned
+    const filename = withExtension(record.filename, plan.container)
+    const savePath = await this.uniquePath(join(this.defaultDirectory(), filename))
+
+    const stream = new StreamDownload({
+      plan,
+      destination: savePath,
+      onProgress: (bytes, segmentsDone, segmentsTotal) => {
+        this.onProgress(id, bytes, [])
+        this.patch(id, {
+          connectionNote: `Joining segment ${segmentsDone} of ${segmentsTotal}`
+        })
+      }
+    })
+
+    const live: Live = {
+      stream,
+      capabilities: null,
+      lastBytes: 0,
+      lastSampleAt: Date.now(),
+      retryTimer: null
+    }
+    this.live.set(id, live)
+
+    this.patch(id, {
+      filename,
+      savePath,
+      category: categorise(filename, null),
+      // An estimate from the declared bitrate, and labelled as one. Segment
+      // sizes are not in the playlist, and asking the server for thousands of
+      // them before offering a button would take longer than the download.
+      totalBytes: plan.estimatedBytes,
+      connectionNote: `${plan.segments.length} segments${plan.quality ? ` · ${plan.quality}` : ''} · size is approximate`,
+      state: 'downloading'
+    })
+
+    try {
+      await stream.run()
+      const current = this.records.get(id)
+      if (!current || current.state === 'cancelled') return
+
+      this.patch(id, {
+        state: 'completed',
+        bytesPerSecond: 0,
+        secondsRemaining: 0,
+        completedAt: Date.now()
+      })
+      log.info(`joined stream ${filename} from ${record.sourceHost}`)
       this.live.delete(id)
       this.pump()
     } catch (error) {

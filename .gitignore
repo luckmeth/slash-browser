@@ -16,3 +16,7 @@ coverage/
 # Sponsor portal: local dependencies and its SQLite database.
 portal/node_modules/
 portal/data/
+
+# ffmpeg, fetched by "npm run fetch:ffmpeg". ~88 MB, and git would keep every
+# version of it for ever. Checksum-pinned in that script; see docs/DOWNLOAD-MANAGER.md.
+resources/ffmpeg/

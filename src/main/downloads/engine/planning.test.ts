@@ -9,7 +9,9 @@ import {
   readCapabilities,
   resumeIsSafe,
   retryDelayMs,
-  safeFilename
+  safeFilename,
+  isStreamUrl,
+  withExtension
 } from './planning'
 
 const caps = (over: Partial<ReturnType<typeof readCapabilities>> = {}) => ({
@@ -270,5 +272,50 @@ describe('estimateSecondsRemaining', () => {
   it('never goes negative once complete', () => {
     expect(estimateSecondsRemaining(1000, 1000, 100)).toBe(0)
     expect(estimateSecondsRemaining(1000, 1200, 100)).toBe(0)
+  })
+})
+
+describe('isStreamUrl', () => {
+  it('recognises an HLS playlist', () => {
+    expect(isStreamUrl('https://cdn.x.com/video/master.m3u8')).toBe(true)
+    expect(isStreamUrl('https://cdn.x.com/v/index.m3u')).toBe(true)
+  })
+
+  it('sees through a query string, which every video CDN uses', () => {
+    expect(isStreamUrl('https://cdn.x.com/master.m3u8?token=abc&e=1')).toBe(true)
+  })
+
+  it('does not mistake a file for a stream', () => {
+    // Being wrong this way sends a perfectly downloadable file down a path that
+    // cannot fetch it, which is much worse than the reverse.
+    expect(isStreamUrl('https://cdn.x.com/film.mp4')).toBe(false)
+    expect(isStreamUrl('https://cdn.x.com/notes-about-m3u8.pdf')).toBe(false)
+    expect(isStreamUrl('https://cdn.x.com/a?list=master.m3u8')).toBe(false)
+  })
+
+  it('says no rather than throwing on a non-URL', () => {
+    expect(isStreamUrl('')).toBe(false)
+  })
+})
+
+describe('withExtension', () => {
+  it('replaces a playlist extension with the real container', () => {
+    // Saving joined segments as master.m3u8 gives a video Windows opens in a
+    // text editor.
+    expect(withExtension('master.m3u8', 'ts')).toBe('master.ts')
+    expect(withExtension('index.m3u', 'mp4')).toBe('index.mp4')
+  })
+
+  it('replaces any other extension too', () => {
+    expect(withExtension('clip.bin', 'mp4')).toBe('clip.mp4')
+  })
+
+  it('adds one when there is none', () => {
+    expect(withExtension('playlist', 'ts')).toBe('playlist.ts')
+  })
+
+  it('never produces a nameless file', () => {
+    expect(withExtension('.m3u8', 'ts')).toBe('video.ts')
+    expect(withExtension('', 'mp4')).toBe('video.mp4')
   })
 })

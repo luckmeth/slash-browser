@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "package": "npm run build && electron-builder --win --publish never",
-    "logo": "node scripts/apply-logo.mjs"
+    "logo": "node scripts/apply-logo.mjs",
+    "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs"
   },
   "dependencies": {
     "@ghostery/adblocker": "^2.18.2",

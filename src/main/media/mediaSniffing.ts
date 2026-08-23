@@ -197,10 +197,13 @@ export function containerOf(url: string, contentType: string): string | null {
 /**
  * The shape the existing media panel already renders.
  *
- * Only complete files. A manifest is not offered because assembling one is work
- * this browser does not do, and a protected stream is not offered because it
- * cannot be — both are explained in `sniffNote` instead. A button that produces
- * an unplayable file is worse than a sentence saying why there is no button.
+ * Complete files and streams. A stream is offered without a size, because a
+ * playlist has no length of its own — the segments carry it, and they are not
+ * listed until the playlist is read. `StreamDownload` joins them on download.
+ *
+ * A **protected** stream is still not offered and never will be. That is the
+ * line: a button producing an unplayable file is worse than a sentence saying
+ * why there is no button, and `sniffNote` supplies the sentence.
  */
 export interface DownloadableMedia {
   url: string
@@ -213,15 +216,29 @@ export interface DownloadableMedia {
 
 export function toDownloadable(found: readonly SniffedMedia[]): DownloadableMedia[] {
   return rankCandidates(found)
-    .filter((item) => item.kind === 'file')
-    .map((item) => ({
-      url: item.url,
-      kind: item.media ?? 'video',
-      container: containerOf(item.url, item.contentType),
-      resolution: null,
-      sizeBytes: item.size,
-      label: `${suggestedFilename(item.url, 'file')} · ${formatSize(item.size)}`
-    }))
+    .filter((item) => item.kind === 'file' || item.kind === 'stream')
+    .map((item) =>
+      item.kind === 'stream'
+        ? {
+            url: item.url,
+            kind: 'video' as const,
+            container: 'stream',
+            resolution: null,
+            // A playlist has no length of its own — the size comes from the
+            // segments, which are not listed until it is read. Stated as
+            // unknown rather than guessed at from the manifest's few kilobytes.
+            sizeBytes: null,
+            label: `${item.label} · joined on download`
+          }
+        : {
+            url: item.url,
+            kind: item.media ?? 'video',
+            container: containerOf(item.url, item.contentType),
+            resolution: null,
+            sizeBytes: item.size,
+            label: `${suggestedFilename(item.url, 'file')} · ${formatSize(item.size)}`
+          }
+    )
 }
 
 /**
@@ -232,17 +249,11 @@ export function toDownloadable(found: readonly SniffedMedia[]): DownloadableMedi
  * broken and one whose limits are understood.
  */
 export function sniffNote(found: readonly SniffedMedia[]): string | null {
-  if (found.some((item) => item.kind === 'file')) return null
+  if (found.some((item) => item.kind === 'file' || item.kind === 'stream')) return null
   if (found.some((item) => item.kind === 'protected')) {
     return (
       'This video is encrypted by the site. Slash does not work around a service’s technical ' +
       'protections, so it cannot be downloaded here.'
-    )
-  }
-  if (found.some((item) => item.kind === 'stream')) {
-    return (
-      'This video is delivered as an adaptive stream — thousands of short segments rather than ' +
-      'one file. Slash does not reassemble those, so there is nothing here to download.'
     )
   }
   return null
