@@ -84,6 +84,21 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     return window.browser.on('shield:popupBlocked', setBlockedPopup)
   }, [])
+
+  // Media detection: pushed while the page plays, and re-asked on navigation.
+  // Both are needed — a video usually starts several seconds after the page
+  // settles, so asking once would miss it, and only listening would leave the
+  // button up after switching to a tab that has nothing.
+  const setDetectedMedia = useBrowserStore((s) => s.setDetectedMedia)
+  useEffect(() => {
+    return window.browser.on('media:found', ({ count }) => setDetectedMedia(count))
+  }, [setDetectedMedia])
+  useEffect(() => {
+    setDetectedMedia(0)
+    void window.browser.invoke('media:detected', undefined).then((result) => {
+      if (result.ok) setDetectedMedia(result.value.count)
+    })
+  }, [activeTab?.id, activeTab?.url, setDetectedMedia])
   useEffect(() => {
     return window.browser.on('shield:navigationBlocked', setBlockedNav)
   }, [])

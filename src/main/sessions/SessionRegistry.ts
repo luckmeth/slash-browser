@@ -81,15 +81,28 @@ export class SessionRegistry {
     this.redirectObserver = observer
   }
 
+  /**
+   * Watches every partition for media a page is streaming.
+   *
+   * Same reasoning as the two slots above: a workspace with its own partition is
+   * still a place somebody watches video, and one created through another path
+   * would silently offer nothing to download.
+   */
+  setMediaSniffer(sniffer: { install: (session: Session, label: string) => void }): void {
+    this.mediaSniffer = sniffer
+  }
+
   private blocker: { apply: (session: Session, label: string) => void } | null = null
   private redirectObserver: { attachToSession: (session: Session, label: string) => void } | null =
     null
+  private mediaSniffer: { install: (session: Session, label: string) => void } | null = null
 
   private harden(target: Session, key: string): Session {
     if (!this.hardened.has(key)) {
       this.hardening.apply(target, key)
       this.blocker?.apply(target, key)
       this.redirectObserver?.attachToSession(target, key)
+      this.mediaSniffer?.install(target, key)
       this.hardened.add(key)
     }
     return target

@@ -1506,7 +1506,17 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('guardian:scanMedia', async (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
-    return ok(await ctx.guardian.scanMedia(window.tabs.activeTab?.contents ?? null))
+    const contents = window.tabs.activeTab?.contents ?? null
+    // Both sources. The DOM scan finds a plain <video src>; the sniffer finds
+    // what the page actually fetched, which is the only view of a video loaded
+    // through Media Source Extensions — i.e. most of them.
+    return ok(await ctx.guardian.scanMedia(contents, ctx.mediaSniffer.forTab(contents)))
+  })
+
+  ipc.handle('media:detected', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok({ count: ctx.mediaSniffer.countFor(window.tabs.activeTab?.contents ?? null) })
   })
 
   ipc.handle('downloadEngine:clearFinished', () => {

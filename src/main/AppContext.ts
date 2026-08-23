@@ -45,6 +45,7 @@ import { CleanupService } from './cleanup/CleanupService'
 import { PageInsightService } from './insight/PageInsightService'
 import { DownloadQueue } from './downloads/engine/DownloadQueue'
 import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
+import { MediaSniffer } from './media/MediaSniffer'
 import { AiEngine } from './ai/AiEngine'
 import { ProviderRegistry } from './ai/ProviderRegistry'
 import { AiComparisonService } from './ai/AiComparison'
@@ -145,6 +146,7 @@ export class AppContext {
   readonly insight = new PageInsightService()
   readonly downloadEngine: DownloadQueue
   readonly guardian: DownloadGuardian
+  readonly mediaSniffer = new MediaSniffer()
   readonly crashes: CrashReporting
   readonly updates: UpdateService
   readonly watch: PageWatchService
@@ -323,6 +325,19 @@ export class AppContext {
     // acquired during start() — so they are remembered here and every window's
     // recorder is attached to all of them at construction. Iterating windows
     // alone would silently miss the default session and record no status codes.
+    // Media detection watches responses, which is the only view that sees a
+    // video loaded through Media Source Extensions. Registered before any
+    // session is acquired, for the same reason the blocker is.
+    this.sessions.setMediaSniffer(this.mediaSniffer)
+    // Only the window whose *active* tab found something is told. A video
+    // playing in a background tab is not a reason to put a button in front of
+    // somebody reading a different page.
+    this.mediaSniffer.onFound = (webContentsId, count) => {
+      for (const window of this.windows) {
+        if (window.tabs.activeTab?.contents?.id !== webContentsId) continue
+        this.ipc.broadcast('media:found', { count }, window.privilegedContents())
+      }
+    }
     this.sessions.setRedirectObserver({
       attachToSession: (session, label) => {
         this.observedSessions.push({ session, label })
@@ -705,6 +720,7 @@ export class AppContext {
         this.injector.observe(contents)
         this.cosmetics.observe(contents)
       },
+      observeMedia: (contents) => this.mediaSniffer.observe(contents),
       isKnownAdHost: (host) => this.blocker.engine.isKnownAdHost(host),
       onRedirectChain: (chain) => {
         // Only chains worth attention are pushed. Broadcasting every http→https

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { DownloadScan, LinkVerdict, MediaScan } from '@shared/types/downloadGuardian'
 import { Icon } from '../../components/Icon'
+import { useBrowserStore } from '../../stores/browserStore'
 
 const VERDICT_LABEL: Record<LinkVerdict, string> = {
   'likely-official': 'Likely official',
@@ -31,6 +32,7 @@ export function GuardianPanel(): React.JSX.Element {
   const [scan, setScan] = useState<DownloadScan | null>(null)
   const [media, setMedia] = useState<MediaScan | null>(null)
   const [busy, setBusy] = useState<'links' | 'media' | null>(null)
+  const detectedMedia = useBrowserStore((s) => s.detectedMedia)
 
   const scanLinks = (): void => {
     setBusy('links')
@@ -47,6 +49,19 @@ export function GuardianPanel(): React.JSX.Element {
       if (result.ok) setMedia(result.value)
     })
   }
+
+  // The toolbar's video button opens this panel, and arriving at an empty
+  // panel with a button to press is the feature not working. Only when
+  // something was actually detected — a scan on every open would inject a
+  // script into every page somebody looks at their downloads on.
+  useEffect(() => {
+    if (detectedMedia === 0) return
+    setBusy('media')
+    void window.browser.invoke('guardian:scanMedia', undefined).then((result) => {
+      setBusy(null)
+      if (result.ok) setMedia(result.value)
+    })
+  }, [detectedMedia])
 
   const download = (url: string): void => {
     void window.browser.invoke('downloadEngine:enqueue', {

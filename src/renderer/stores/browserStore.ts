@@ -67,10 +67,19 @@ interface BrowserState {
    * not re-run.
    */
   focusOmniboxToken: number
+  /**
+   * Downloadable files the active tab has been seen fetching.
+   *
+   * Drives one toolbar button, which is only shown when there is something to
+   * download. A permanent button that is usually useless teaches people to
+   * ignore it, and this one is only worth anything when it is a surprise.
+   */
+  detectedMedia: number
 
   activeTab: () => Tab | null
   activeWorkspace: () => Workspace | null
   setPanel: (panel: PanelId) => void
+  setDetectedMedia: (count: number) => void
   togglePanel: (panel: Exclude<PanelId, 'none'>) => void
   /**
    * Opens settings as a page, reusing an existing settings tab if one is open.
@@ -119,6 +128,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   findQuery: '',
   handoffDismissedHost: null,
   focusOmniboxToken: 0,
+  detectedMedia: 0,
 
   activeTab: () => {
     const { tabs, activeTabId } = get()
@@ -133,6 +143,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   // The workspace editor and the side panels share the same slot, so opening one
   // closes the other rather than stacking two things in the same strip.
   setPanel: (panel) => set({ panel, workspaceEditorId: null }),
+  setDetectedMedia: (detectedMedia) => set({ detectedMedia }),
 
   openSettings: () => {
     const existing = get().tabs.find((tab) => tab.url === SETTINGS_URL)

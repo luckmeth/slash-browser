@@ -4,6 +4,7 @@ import type { DownloadScan, MediaScan } from '@shared/types/downloadGuardian'
 import { hostOf } from '@shared/url'
 import { createLogger } from '../../logger'
 import { analyseLink, rankCandidates, summarise } from './linkAnalysis'
+import { sniffNote, toDownloadable, type SniffedMedia } from '../../media/mediaSniffing'
 import { buildScanScript } from './scanScript'
 
 const log = createLogger('guardian')
@@ -91,13 +92,41 @@ export class DownloadGuardian {
    * protections — which this browser does not do. Saying so plainly is the
    * feature; an empty list would read as a bug.
    */
-  async scanMedia(contents: WebContents | null): Promise<MediaScan> {
+  /**
+   * What is playable on this page, and downloadable.
+   *
+   * Two sources, because neither is enough alone. The DOM scan finds a plain
+   * `<video src>`, which is most of the web's incidental media. `sniffed` is
+   * what the network actually fetched, which is the only way to see a video a
+   * site loads through Media Source Extensions — where the element's `src` is a
+   * `blob:` URL that means nothing outside that page. Every serious video site
+   * works the second way, so a scan that only reads the DOM finds nothing on
+   * exactly the pages people ask about.
+   *
+   * Network-observed files come second in the list: the DOM scan knows the
+   * page's own resolution and labels, and a file the page is visibly playing is
+   * a better first answer than one it fetched for a reason we cannot see.
+   */
+  async scanMedia(contents: WebContents | null, sniffed: readonly SniffedMedia[] = []): Promise<MediaScan> {
     const raw = await this.scan(contents)
-    if (!raw) return { pageUrl: '', candidates: [], note: 'This page could not be scanned.' }
+    const fromNetwork = toDownloadable(sniffed)
 
-    if (raw.media.length > 0) {
-      return { pageUrl: raw.pageUrl, candidates: raw.media, note: null }
+    if (!raw) {
+      return fromNetwork.length > 0
+        ? { pageUrl: '', candidates: fromNetwork, note: null }
+        : { pageUrl: '', candidates: [], note: 'This page could not be scanned.' }
     }
+
+    const seen = new Set(raw.media.map((item) => item.url))
+    const merged = [...raw.media, ...fromNetwork.filter((item) => !seen.has(item.url))]
+    if (merged.length > 0) {
+      return { pageUrl: raw.pageUrl, candidates: merged, note: null }
+    }
+
+    // Nothing downloadable. Say which limit was hit — the network saw the
+    // stream even when the DOM showed nothing, so it usually knows why.
+    const networkNote = sniffNote(sniffed)
+    if (networkNote) return { pageUrl: raw.pageUrl, candidates: [], note: networkNote }
 
     if (raw.sawProtectedMedia) {
       return {

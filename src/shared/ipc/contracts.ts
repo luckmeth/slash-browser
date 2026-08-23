@@ -1161,6 +1161,7 @@ export const invokeContracts = {
 
   'guardian:scanDownloads': { request: z.void(), response: DownloadScanSchema },
   'guardian:scanMedia': { request: z.void(), response: MediaScanSchema },
+  'media:detected': { request: z.void(), response: z.object({ count: z.number().int() }) },
 
   'history:search': {
     request: HistoryQuerySchema,
@@ -1229,6 +1230,7 @@ export const eventContracts = {
   'overlay:stateChanged': OverlayStateSchema,
   'tabs:snapshot': TabsSnapshotSchema,
   'downloads:changed': z.array(DownloadItemSchema),
+  'media:found': z.object({ count: z.number().int() }),
   'history:changed': z.object({}),
   'bookmarks:changed': z.array(BookmarkSchema),
   /** Sync state moved: unlocked, synced, failed, or reset. */

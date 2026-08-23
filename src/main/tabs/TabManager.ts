@@ -57,6 +57,8 @@ export interface TabManagerHooks {
   installPageContextMenu: (contents: WebContents) => void
   /** Wires a new page view's navigation events into Redirect X-Ray. */
   observeRedirects?: (tabId: string, contents: WebContents) => void
+  /** Wires a new page view into media detection, so it can be offered for download. */
+  observeMedia?: (contents: WebContents) => void
   /**
    * A tab is gone or has navigated away.
    *
@@ -932,6 +934,7 @@ export class TabManager {
 
     this.hooks.installPageContextMenu(view.webContents)
     this.hooks.observeRedirects?.(tab.id, view.webContents)
+    this.hooks.observeMedia?.(view.webContents)
 
     if (tab.snapshot.isMuted) view.webContents.setAudioMuted(true)
 

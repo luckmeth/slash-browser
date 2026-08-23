@@ -18,6 +18,8 @@ export function Toolbar(): React.JSX.Element {
   const bookmarks = useBrowserStore((s) => s.bookmarks)
   const panel = useBrowserStore((s) => s.panel)
   const togglePanel = useBrowserStore((s) => s.togglePanel)
+  const setPanel = useBrowserStore((s) => s.setPanel)
+  const detectedMedia = useBrowserStore((s) => s.detectedMedia)
   // The `?? []` MUST stay outside the selector. Zustand compares what a
   // selector returns with Object.is, so a selector that builds a fresh array
   // every call never compares equal — it re-renders, re-selects, and loops
@@ -358,6 +360,20 @@ export function Toolbar(): React.JSX.Element {
           active={panel === 'downloads'}
           onClick={() => togglePanel('downloads')}
         />
+      )}
+      {/* Only while this tab actually has something downloadable. A permanent
+          button that is usually useless teaches people to ignore it, and this
+          one is only worth anything when it appears. */}
+      {detectedMedia > 0 && (
+        <button
+          type="button"
+          title={`Download video (${detectedMedia} found on this page)`}
+          aria-label={`Download video: ${detectedMedia} found on this page`}
+          onClick={() => setPanel('downloads')}
+          className="cursor-pointer rounded-md p-1.5 text-[var(--color-accent)] transition hover:bg-white/10"
+        >
+          <Icon name="video" />
+        </button>
       )}
       {shown('performance') && (
         <NavButton

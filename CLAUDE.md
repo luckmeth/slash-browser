@@ -57,6 +57,7 @@ These are not aspirations; they constrain the code.
 | Sync that a server operator could read | Nothing, technically — which is the problem. A sync that uploads readable bookmarks turns "local-first, nothing leaves the machine" into a slogan | End-to-end encrypted: scrypt from a passphrase that **never leaves the machine**, AES-256-GCM per item, and no derived key stored. The server holds ciphertext and a timestamp. The cost is stated before the switch is thrown — forget the passphrase and the data is unrecoverable, because nobody holds a spare. History is deliberately not synced |
 | An accessible combobox: omnibox + its suggestion popup | The suggestions render in the **overlay**, a separate `WebContentsView` with its own document. `aria-controls` and `aria-activedescendant` are id references, and an id cannot be resolved across documents — so the relationship was declared and silently resolved to nothing | `aria-autocomplete="list"` plus a `role="status"` live region **in the chrome document**, announcing how many suggestions there are. The overlay list keeps `role="listbox"`/`option` for its own document. The relationship is not faked with attributes that cannot work |
 | "Find any page by meaning" | Only the first ~8,000 characters of a page are embedded (10 passages), and MiniLM reads 256 word-pieces at a time | The cap is stated in the UI. A long page is matched on its opening, not its entirety |
+| Download any video the browser plays, like a download manager | Every serious video site streams through Media Source Extensions: the `<video>` element's `src` is a `blob:` URL meaningless outside that page, the real media arrives as thousands of encrypted or segmented responses, and DRM-protected streams cannot be assembled at all | `MediaSniffer` watches `onResponseStarted` (the free event — `onBeforeRequest` belongs to `ContentBlocker`, and Electron allows one listener each) and offers **complete files only**. Manifests and encrypted streams are recognised in order to be *excluded and explained*, never decrypted. A toolbar button appears only when there is genuinely something to download |
 
 ## Architecture rules
 
@@ -154,6 +155,11 @@ These are not aspirations; they constrain the code.
   read. Without that, "missing here" is indistinguishable from "new there" and every deleted item
   comes back on the next sync. Bookmarks carry a `guid` for the same reason: the AUTOINCREMENT
   primary key is unique on one machine and meaningless on any other.
+- **Media detection is a network observer, and a deliberately partial one.** `MediaSniffer`
+  lists only what it can hand to the download engine as a complete file. It recognises HLS/DASH
+  manifests and DRM licence traffic so `sniffNote` can say *why* there is nothing to download —
+  offering a button that produces an unplayable file is worse than a sentence. Reassembling
+  segments or touching encrypted streams is out of scope and must stay that way.
 - **Anything that reaches a page's fields goes through `insertText`, never script.** Passwords and
   addresses both: `preload/content.ts` reports which *kinds* of field exist and holds the element
   references, main asks it to focus one, then types the value through Chromium's own input pipeline.

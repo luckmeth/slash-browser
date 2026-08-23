@@ -56,6 +56,8 @@ export interface WindowDeps {
   fillAddress?: (contents: WebContents, id: number) => void
   /** Installs the YouTube ad-break filter on a new page view. */
   observeYouTube?: (contents: WebContents) => void
+  /** Follows a new page view's navigations for media detection. */
+  observeMedia?: (contents: WebContents) => void
   /** Shield's known ad/tracking host list, for classifying redirect chains. */
   isKnownAdHost?: (host: string) => boolean
   /** A redirect chain finished and is worth reporting to the user. */
@@ -252,6 +254,7 @@ export class BrowserWindowController {
           this.deps.observeYouTube?.(contents)
           this.observePageFullscreen(contents)
         },
+        observeMedia: (contents) => this.deps.observeMedia?.(contents),
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),

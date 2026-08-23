@@ -289,7 +289,9 @@ export const INVOKE_CHANNELS = [
 
   // --- download guardian / media detection ---
   'guardian:scanDownloads',
-  'guardian:scanMedia'
+  'guardian:scanMedia',
+  /** How many downloadable files the active tab has been seen fetching. */
+  'media:detected'
 ] as const
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number]
@@ -331,7 +333,15 @@ export const EVENT_CHANNELS = [
   'shield:popupBlocked',
   /** A top-level navigation was refused, or flagged and allowed. */
   'shield:navigationBlocked',
-  'shield:navigationWarned'
+  'shield:navigationWarned',
+  /**
+   * The active tab started playing something downloadable.
+   *
+   * Pushed rather than polled: a video usually starts seconds after the page
+   * settles, so asking once per navigation would miss it, and asking on every
+   * snapshot would put an IPC round-trip on the browsing path.
+   */
+  'media:found'
 ] as const
 
 export type EventChannel = (typeof EVENT_CHANNELS)[number]
