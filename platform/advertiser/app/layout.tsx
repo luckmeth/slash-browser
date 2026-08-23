@@ -3,11 +3,12 @@ import Link from 'next/link'
 import './globals.css'
 import { currentAdvertiser } from '@/lib/supabase/server'
 import { SignOutButton } from '@/components/SignOutButton'
+import { BrandMark } from '@/components/BrandMark'
 
 export const metadata: Metadata = {
   title: 'Advertise on Slash',
   description:
-    'Buy a clearly-labelled tile on the Slash browser start page, by the hour, with no targeting and no tracking.'
+    'Your brand on the start page of the Slash browser. Bought by the hour, no targeting, no tracking, no auction.'
 }
 
 export default async function RootLayout({
@@ -26,6 +27,7 @@ export default async function RootLayout({
         <header className="site">
           <div className="inner">
             <Link href="/" className="brand">
+              <BrandMark size={26} />
               Slash advertising
             </Link>
             <nav>

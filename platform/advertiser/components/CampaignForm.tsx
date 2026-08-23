@@ -6,6 +6,7 @@ import { MS_PER_HOUR, formatCents, quote, scheduleProblems, type Tier } from '@s
 import { supabaseBrowser } from '@/lib/supabase/browser'
 import { notifySubmitted } from '@/app/campaigns/new/actions'
 import { ImageUpload, type Chosen } from './ImageUpload'
+import { NewTabPreview } from './NewTabPreview'
 
 /**
  * The campaign builder.
@@ -22,6 +23,8 @@ interface Props {
   minLeadHours: number
   currency: string
   advertiserAuthId: string
+  /** Shown in the preview, where the reader would see it. */
+  companyName: string
 }
 
 /** `datetime-local` gives wall-clock text; this reads it in the browser's own zone. */
@@ -39,7 +42,8 @@ export function CampaignForm({
   tiers,
   minLeadHours,
   currency,
-  advertiserAuthId
+  advertiserAuthId,
+  companyName
 }: Props): React.JSX.Element {
   const router = useRouter()
   const [tierKey, setTierKey] = useState(tiers[0]?.placementTier ?? '')
@@ -193,6 +197,23 @@ export function CampaignForm({
           Must be https. Readers go straight there — the click is not routed through us, so there is
           no redirect collecting anything on the way.
         </p>
+      </div>
+
+      {/*
+        The advert, as it will actually appear, updating as they type. Somebody
+        about to spend money on a placement should be able to see it rather than
+        imagine it — and it catches a headline that is too long to fit long
+        before an operator has to reject it for that.
+      */}
+      <div>
+        <label>Preview</label>
+        <NewTabPreview
+          chromeless
+          headline={title.trim() === '' ? 'Your headline here' : title}
+          body={description}
+          sponsor={companyName}
+          image={image?.previewUrl ?? null}
+        />
       </div>
 
       <ImageUpload value={image} onChange={setImage} />
