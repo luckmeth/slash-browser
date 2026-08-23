@@ -433,6 +433,15 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Right-click menu">
+        <Toggle
+          label="Restore the menu on sites that block it"
+          hint="Some sites cancel the right-click event to stop you copying a link or saving an image. Every browser respects that, including Chrome — this makes Slash ignore it. The cost: a site with a genuinely useful menu of its own loses it, YouTube's player menu included."
+          checked={settings.restoreContextMenu}
+          onChange={(restoreContextMenu) => update({ restoreContextMenu })}
+        />
+      </Group>
+
       <Group title="Download acceleration">
         <Toggle
           label="Download large files with several connections"
@@ -658,6 +667,10 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     keywords: 'keys keybinding hotkey accelerator remap rebind ctrl alt shift shortcut customise'
   },
   'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
+  'Right-click menu': {
+    category: 'Browsing',
+    keywords: 'right click context menu blocked copy link save image restore'
+  },
   'Download acceleration': {
     category: 'Browsing',
     keywords: 'download accelerate connections speed limit bandwidth parallel segments idm manager fast'

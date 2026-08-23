@@ -48,6 +48,7 @@ import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
 import { MediaSniffer } from './media/MediaSniffer'
 import { formatSize, suggestedFilename, toDownloadable } from './media/mediaSniffing'
 import { PageMediaExtractor } from './media/PageMediaExtractor'
+import { buildContextMenuScript } from './shield/inject/contextMenuScript'
 import { extensionFor, sniffNoteFor, type MediaChoice } from './media/pageFormats'
 import { DefaultBrowserService } from './system/DefaultBrowserService'
 import { AiEngine } from './ai/AiEngine'
@@ -302,6 +303,11 @@ export class AppContext {
       enabled: () =>
         this.settings.getAll().blockAds && this.settings.getAll().blockYouTubeVideoAds,
       source: buildYouTubeAdScript
+    })
+    this.injector.register({
+      id: 'context-menu',
+      enabled: () => this.settings.getAll().restoreContextMenu,
+      source: buildContextMenuScript
     })
     this.injector.register({
       id: 'popup-defuser',

@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises'
+import type { ContextMenuDeps } from '../menus/ContextMenus'
 import { app, desktopCapturer } from 'electron'
 import type { BrowserWindowController } from '../windows/BrowserWindowController'
 import type { CreateWorkspaceInput } from '../db/repositories/WorkspaceRepository'
@@ -4156,5 +4157,133 @@ export async function runSettingsCapture(window: BrowserWindowController): Promi
     `window.browser.invoke('settings:update', { accentColor: 'default' })`
   )
   await delay(400)
+  app.quit()
+}
+
+/**
+ * Does right-click actually produce a menu?
+ *
+ * Written because the answer was reported as "no" and reading the code said
+ * "yes", which is the point at which guessing has to stop. Two separate things
+ * can fail and look identical from the outside:
+ *
+ *  1. Chromium never fires `context-menu` — because the page cancelled the
+ *     event, which is normal and correct, and is what YouTube's player does.
+ *  2. It fires and building the menu throws, so nothing pops and nothing is
+ *     logged. That one is our bug.
+ *
+ * This tells them apart on a page we control, then on one that suppresses the
+ * event, so the difference is visible rather than inferred.
+ */
+export async function runContextMenuCapture(
+  window: BrowserWindowController,
+  hooks: { deps: () => ContextMenuDeps }
+): Promise<void> {
+  const { buildPageMenu } = await import('../menus/ContextMenus')
+  const activeId = await waitForActiveTab(window)
+  if (!activeId) {
+    app.quit()
+    return
+  }
+
+  /**
+   * A real http page, served locally.
+   *
+   * Two reasons it cannot be a `data:` URL or a site on the internet.
+   * `ScriptletInjector` refuses anything that is not `http(s)`, so a `data:`
+   * page would test the menu *without* the script that defends it and report a
+   * pass for the case the user actually hits. And reaching for a real site
+   * makes the probe fail whenever the network does, which is a test that
+   * reports on the wrong thing.
+   */
+  const http = await import('node:http')
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end(
+      `<a href="https://example.com/file.zip" style="font-size:40px">a link</a>
+       <p style="font-size:30px">some selectable text</p>`
+    )
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  const port = typeof address === 'object' && address ? address.port : 0
+  const PAGE = `http://127.0.0.1:${port}/`
+
+  /** Blocking added after load, which is the harder case for us to win. */
+  const BLOCK_BY_LISTENER =
+    `document.addEventListener('contextmenu', (e) => e.preventDefault()); undefined;`
+  /** The property form, which `stopImmediatePropagation` cannot reach. */
+  // `undefined;` on the end is not decoration: the value of an assignment is
+  // what it assigned, and a function cannot be structured-cloned back to main —
+  // which failed the third case with "An object could not be cloned".
+  const BLOCK_BY_PROPERTY = `document.oncontextmenu = () => false; undefined;`
+
+  for (const [name, block] of [
+    ['ordinary page', null],
+    ['page that cancels contextmenu', BLOCK_BY_LISTENER],
+    ['page with an inline oncontextmenu', BLOCK_BY_PROPERTY]
+  ] as const) {
+    window.tabs.activate(activeId)
+    window.tabs.navigate(activeId, PAGE)
+
+    const contents = window.tabs.findById(activeId)?.contents
+    if (!contents) {
+      log.error('context menu probe: no page')
+      continue
+    }
+
+    // Waited for rather than slept past. A fixed delay made this probe report
+    // fired=false on a run where nothing was wrong — the click simply landed
+    // before the document existed, which is a test lying about the code.
+    await new Promise<void>((resolve) => {
+      if (!contents.isLoading()) {
+        resolve()
+        return
+      }
+      contents.once('did-finish-load', () => resolve())
+      setTimeout(resolve, 8000)
+    })
+    await delay(400)
+
+    let fired = false
+    let built = -1
+    let threw: string | null = null
+
+    const listener = (_event: unknown, params: Electron.ContextMenuParams): void => {
+      fired = true
+      try {
+        built = buildPageMenu(contents, params, hooks.deps()).length
+      } catch (error) {
+        threw = error instanceof Error ? error.message : String(error)
+      }
+    }
+    // The real handler is removed first, and this is load-bearing: `Menu.popup`
+    // on Windows enters a modal message loop, so a menu nothing dismisses
+    // freezes the main process and the probe never finishes. Discovered by
+    // hanging. What is under test is whether the *event* reaches us, not
+    // whether Windows can draw a menu.
+    contents.removeAllListeners('context-menu')
+    contents.on('context-menu', listener)
+
+    // Applied after load on purpose: a capture-phase listener installed at
+    // document start still wins against one added later, and that is the claim
+    // being tested.
+    if (block) await contents.executeJavaScript(block, true)
+
+    contents.sendInputEvent({ type: 'mouseDown', x: 200, y: 120, button: 'right', clickCount: 1 })
+    contents.sendInputEvent({ type: 'mouseUp', x: 200, y: 120, button: 'right', clickCount: 1 })
+    await delay(900)
+    contents.off('context-menu', listener)
+
+    log.info(
+      `context menu probe [${name}]: event fired=${fired}, items built=${built}, threw=${threw ?? 'no'}`
+    )
+  }
+
+  log.info(
+    'context menu probe: with restoreContextMenu on, fired=true is expected on all three. ' +
+      'A false on either blocking page means the restorer did not beat the site to it.'
+  )
+  server.close()
   app.quit()
 }

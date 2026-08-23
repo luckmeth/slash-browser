@@ -71,6 +71,15 @@ export const SettingsSchema = z.object({
    * cost in place would not be a switch.
    */
   detectPageMedia: z.boolean().default(true),
+  /**
+   * Whether to restore the right-click menu on sites that block it.
+   *
+   * On. A page cancelling `contextmenu` is usually there to stop people copying
+   * a link or saving an image, and the browser is the user's software rather
+   * than the site's. The cost is real and stated in the UI: a site with a
+   * genuinely useful custom menu loses it, YouTube's player menu included.
+   */
+  restoreContextMenu: z.boolean().default(true),
   /** Whether the floating download button may appear over a playing video. */
   mediaOverlayButton: z.boolean().default(true),
 

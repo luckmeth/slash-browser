@@ -237,6 +237,12 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_CONTEXTMENU_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runContextMenuCapture }) =>
+        runContextMenuCapture(window, { deps: () => window.contextMenuDeps() })
+      )
+    }
+
     if (process.env['SLASH_UNSAVED_PROBE']) {
       void import('./dev/spikeCapture').then(({ runUnsavedInputCapture }) =>
         runUnsavedInputCapture(window)

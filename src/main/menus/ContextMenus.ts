@@ -13,6 +13,9 @@ import { SEARCH_ENGINES, type SearchEngineId } from '@shared/constants'
 import { isInternalUrl } from '@shared/types/tab'
 import type { TabManager } from '../tabs/TabManager'
 import type { WorkspaceRepository } from '../db/repositories/WorkspaceRepository'
+import { createLogger } from '../logger'
+
+const log = createLogger('context-menu')
 
 export interface ContextMenuDeps {
   tabs: TabManager
@@ -45,13 +48,35 @@ export interface ContextMenuDeps {
  */
 export function installPageContextMenu(contents: WebContents, deps: ContextMenuDeps): void {
   contents.on('context-menu', (_event, params) => {
-    const template = buildPageMenu(contents, params, deps)
-    if (template.length === 0) return
-    Menu.buildFromTemplate(template).popup({ window: deps.window })
+    try {
+      const template = buildPageMenu(contents, params, deps)
+      if (template.length === 0) {
+        log.warn('context menu built empty — nothing would have been shown')
+        return
+      }
+
+      Menu.buildFromTemplate(template).popup({
+        window: deps.window,
+        // Chromium reports where the click happened; without these the menu
+        // opens at wherever the OS thinks the pointer is, which on a multi-view
+        // window is not reliably the same place.
+        x: params.x,
+        y: params.y,
+        // Documented as needed for OS-level features to attach to the right
+        // frame. Harmless when absent, and the menu is correct either way.
+        ...(params.frame ? { frame: params.frame } : {})
+      })
+    } catch (error) {
+      // Previously this threw into the event handler and vanished: the user saw
+      // no menu, and nothing anywhere said why. One malformed template entry —
+      // an undefined label from a setting nobody anticipated — was enough.
+      log.error('context menu failed to open', error)
+    }
   })
 }
 
-function buildPageMenu(
+/** Exported for `SLASH_CONTEXTMENU_PROBE`, which builds it without popping it. */
+export function buildPageMenu(
   contents: WebContents,
   params: ContextMenuParams,
   deps: ContextMenuDeps
