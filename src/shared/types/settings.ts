@@ -59,6 +59,22 @@ export const SettingsSchema = z.object({
    */
   onboardingCompleted: z.boolean().default(false),
 
+  // --- docked assistant ------------------------------------------------------
+  /**
+   * Which AI assistant docks beside a page.
+   *
+   * A website, opened in a pane, that the user signs into themselves. Not an
+   * API integration and not the AI action layer: no page content is sent
+   * anywhere, and this setting turns nothing on that reads a page. Whether the
+   * subscription works is between the user and that site, which is the whole
+   * reason it is the real site rather than a key field.
+   */
+  assistantId: z
+    .enum(['claude', 'chatgpt', 'gemini', 'perplexity', 'mistral', 'custom'])
+    .default('claude'),
+  /** Used only when `assistantId` is `custom`. https only. */
+  assistantCustomUrl: z.string().default(''),
+
   // --- default browser -------------------------------------------------------
   /**
    * How many times Slash has offered to become the default browser.

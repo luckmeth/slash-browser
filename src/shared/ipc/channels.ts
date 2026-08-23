@@ -293,6 +293,9 @@ export const INVOKE_CHANNELS = [
   /** How many downloadable files the active tab has been seen fetching. */
   'media:detected',
 
+  /** Docks the chosen AI assistant beside the page, or puts it away. */
+  'assistant:toggle',
+
   // --- default browser ---
   'system:defaultBrowser',
   'system:openDefaultBrowserSettings',

@@ -20,6 +20,7 @@ export function Toolbar(): React.JSX.Element {
   const togglePanel = useBrowserStore((s) => s.togglePanel)
   const setPanel = useBrowserStore((s) => s.setPanel)
   const detectedMedia = useBrowserStore((s) => s.detectedMedia)
+  const [assistantNote, setAssistantNote] = useState<string | null>(null)
   // The `?? []` MUST stay outside the selector. Zustand compares what a
   // selector returns with Object.is, so a selector that builds a fresh array
   // every call never compares equal — it re-renders, re-selects, and loops
@@ -352,6 +353,33 @@ export function Toolbar(): React.JSX.Element {
           active={panel === 'history'}
           onClick={() => togglePanel('history')}
         />
+      )}
+      {shown('assistant') && (
+        <NavButton
+          icon="sparkle"
+          label="Assistant beside page (Ctrl+Shift+L)"
+          onClick={() => {
+            void window.browser.invoke('assistant:toggle', undefined).then((result) => {
+              // A window too narrow for two panes is the one real failure here,
+              // and silence would get the button reported as broken.
+              if (result.ok && !result.value.ok && result.value.reason) {
+                setAssistantNote(result.value.reason)
+                setTimeout(() => setAssistantNote(null), 5000)
+              }
+            })
+          }}
+        />
+      )}
+      {/* Inline rather than a floating toast: a notice drawn under the
+          toolbar would sit beneath the page view, which is a native layer, and
+          be invisible exactly when it matters. */}
+      {assistantNote !== null && (
+        <span
+          role="status"
+          className="max-w-[18rem] truncate rounded-md bg-white/10 px-2 py-1 text-[11px] text-[var(--color-text-muted)]"
+        >
+          {assistantNote}
+        </span>
       )}
       {shown('downloads') && (
         <NavButton

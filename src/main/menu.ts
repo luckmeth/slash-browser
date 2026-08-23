@@ -1,3 +1,4 @@
+import { assistantUrlFor, isAssistantUrl } from './assistant/assistants'
 import { Menu, app, shell, type MenuItemConstructorOptions } from 'electron'
 import type { UiCommand } from '@shared/ipc/contracts'
 import type { AppContext } from './AppContext'
@@ -224,6 +225,23 @@ export function buildApplicationMenu(ctx: AppContext): void {
             const partner = visible[index + 1] ?? visible[index - 1]
             if (partner) tabs.setSplit(partner.id)
           })
+        },
+        {
+          // Beside Split View because it *is* split view, pointed at one page.
+          // The assistant is a website the user signs into, not an integration:
+          // there is no key to enter, and nothing here sends the page anywhere.
+          label: 'Assistant Beside Page',
+          accelerator: 'CommandOrControl+Shift+L',
+          click: () => {
+            const window = ctx.focusedWindow()
+            if (!window) return
+            const settings = ctx.settings.getAll()
+            const url = assistantUrlFor(settings.assistantId, settings.assistantCustomUrl)
+            if (!url) return
+            window.tabs.openAssistant(url, (candidate) =>
+              isAssistantUrl(candidate, settings.assistantId, settings.assistantCustomUrl)
+            )
+          }
         },
         {
           label: 'Swap Split Panes',

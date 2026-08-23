@@ -854,6 +854,46 @@ export class TabManager {
     return true
   }
 
+  /**
+   * Docks an AI assistant beside the current page, or undocks it.
+   *
+   * Built on split view rather than a new native surface, because the assistant
+   * *is* a web page — the whole approach is that the user signs into the real
+   * site with the subscription they already pay for, rather than Slash asking
+   * for an API key it would bill again. A second pane is exactly what that
+   * needs, and it already exists, tested.
+   *
+   * An assistant tab already open is reused rather than duplicated: it usually
+   * holds a conversation somebody is in the middle of, and opening a second one
+   * would strand it.
+   *
+   * Returns false when the window is too narrow for two usable panes. The
+   * caller says so; silently doing nothing is how a shortcut gets reported as
+   * broken.
+   */
+  openAssistant(url: string, isAssistant: (url: string) => boolean): boolean {
+    // Already docked: this is a toggle, so put it away.
+    const docked = this.splitId
+    if (docked !== null && isAssistant(this.findById(docked)?.snapshot.url ?? '')) {
+      return this.setSplit(null)
+    }
+
+    if (!canSplit(this.pageBounds, this.splitOrientation)) return false
+
+    const existing = this.tabs.find(
+      (tab) =>
+        tab.snapshot.workspaceId === this.activeWorkspaceId &&
+        tab.id !== this.activeId &&
+        isAssistant(tab.snapshot.url)
+    )
+    if (existing) return this.setSplit(existing.id)
+
+    // Background, so focus stays on the page being read. The assistant is
+    // beside the work, not instead of it.
+    const created = this.create({ url, background: true })
+    return this.setSplit(created.id)
+  }
+
   /** Drag the divider. Clamped by `splitRects`, so any value is safe here. */
   setSplitFraction(fraction: number): void {
     if (!Number.isFinite(fraction)) return

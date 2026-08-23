@@ -11,6 +11,7 @@ import { useBrowserStore } from '../../stores/browserStore'
  */
 const BUTTONS: readonly { id: string; label: string; shortcut: string }[] = [
   { id: 'external', label: 'Open in default browser', shortcut: '' },
+  { id: 'assistant', label: 'Assistant beside page', shortcut: 'Ctrl+Shift+L' },
   { id: 'reading', label: 'Reading list', shortcut: 'Ctrl+Shift+D saves' },
   { id: 'bookmarks', label: 'Bookmarks', shortcut: 'Ctrl+Shift+O' },
   { id: 'history', label: 'History', shortcut: 'Ctrl+H' },

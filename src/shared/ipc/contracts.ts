@@ -1164,6 +1164,18 @@ export const invokeContracts = {
   'media:detected': { request: z.void(), response: z.object({ count: z.number().int() }) },
 
   /**
+   * Docks the AI assistant beside the current page, or undocks it.
+   *
+   * `ok: false` with a reason rather than silence — the window can simply be
+   * too narrow for two usable panes, and a shortcut that appears to do nothing
+   * gets reported as broken.
+   */
+  'assistant:toggle': {
+    request: z.void(),
+    response: z.object({ ok: z.boolean(), reason: z.string().nullable() })
+  },
+
+  /**
    * Whether Slash is the system default browser, and whether to offer.
    *
    * `shouldOffer` is decided in main rather than the renderer because the

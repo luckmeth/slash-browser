@@ -23,6 +23,7 @@ import { normaliseHost } from '../passwords/PasswordVault'
 import { ActionExecutor } from '../ai/ActionExecutor'
 import { ContextBuilder } from '../ai/ContextBuilder'
 import type { BrowserWindowController } from '../windows/BrowserWindowController'
+import { assistantUrlFor, isAssistantUrl } from '../assistant/assistants'
 import { createLogger } from '../logger'
 
 const log = createLogger('ipc')
@@ -1511,6 +1512,28 @@ export function registerHandlers(ctx: AppContext): void {
     // what the page actually fetched, which is the only view of a video loaded
     // through Media Source Extensions — i.e. most of them.
     return ok(await ctx.guardian.scanMedia(contents, ctx.mediaSniffer.forTab(contents)))
+  })
+
+  ipc.handle('assistant:toggle', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const settings = ctx.settings.getAll()
+    const url = assistantUrlFor(settings.assistantId, settings.assistantCustomUrl)
+    if (!url) {
+      return ok({
+        ok: false,
+        reason: 'No assistant address is set. Choose one in Settings → Assistant.'
+      })
+    }
+
+    const docked = window.tabs.openAssistant(url, (candidate) =>
+      isAssistantUrl(candidate, settings.assistantId, settings.assistantCustomUrl)
+    )
+    return ok({
+      ok: docked,
+      reason: docked ? null : 'This window is too narrow to show two pages side by side.'
+    })
   })
 
   ipc.handle('system:defaultBrowser', () => ok(ctx.defaultBrowser.status()))

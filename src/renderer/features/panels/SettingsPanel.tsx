@@ -338,6 +338,48 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Assistant">
+        <Field label="Docked beside the page">
+          <select
+            value={settings.assistantId}
+            onChange={(event) =>
+              update({ assistantId: event.target.value as Settings['assistantId'] })
+            }
+            className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="claude">Claude</option>
+            <option value="chatgpt">ChatGPT</option>
+            <option value="gemini">Gemini</option>
+            <option value="perplexity">Perplexity</option>
+            <option value="mistral">Le Chat</option>
+            <option value="custom">Another address…</option>
+          </select>
+        </Field>
+
+        {settings.assistantId === 'custom' && (
+          <Field label="Address">
+            <input
+              type="url"
+              value={settings.assistantCustomUrl}
+              placeholder="https://"
+              onChange={(event) => update({ assistantCustomUrl: event.target.value })}
+              className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+            />
+          </Field>
+        )}
+
+        {/* The claim that matters, stated where somebody might otherwise assume
+            the opposite. This is a website in a pane, not an integration: no key
+            to enter, and the page you are reading is not sent anywhere. */}
+        <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          Ctrl+Shift+L opens this beside the page you are reading. It is the real site, signed in
+          the way you normally sign in — so a subscription you already pay for works, and there is
+          no API key to enter. Slash does not read the page or send anything to it; what reaches
+          the assistant is what you type. Sending page content to an AI provider is a separate
+          feature with its own switch.
+        </p>
+      </Group>
+
       <Group title="Default browser">
         <DefaultBrowserField />
       </Group>
@@ -543,6 +585,10 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     keywords: 'keys keybinding hotkey accelerator remap rebind ctrl alt shift shortcut customise'
   },
   'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
+  Assistant: {
+    category: 'Browsing',
+    keywords: 'ai assistant claude chatgpt gemini perplexity chat sidebar split pane subscription'
+  },
   'Default browser': {
     category: 'Browsing',
     keywords: 'default browser links open http https windows settings associations'
