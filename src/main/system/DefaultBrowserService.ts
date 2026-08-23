@@ -1,7 +1,12 @@
+import { execFile } from 'node:child_process'
 import { app, shell } from 'electron'
 import type { SettingsStore } from '../settings/SettingsStore'
-import { shouldOfferDefault } from './defaultBrowserRules'
+import { isSlashProgId, parseUserChoiceProgId, shouldOfferDefault } from './defaultBrowserRules'
 import { createLogger } from '../logger'
+
+/** Where Windows records the choice the user made in Settings. */
+const USER_CHOICE_KEY =
+  'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice'
 
 const log = createLogger('default-browser')
 
@@ -34,38 +39,50 @@ export interface DefaultBrowserStatus {
  *     Slash is not in — worse than not offering.
  *  2. This opens that screen, deep-linked to Slash's own page on Windows 11.
  *
- * `app.setAsDefaultProtocolClient` is still called, because it registers the
- * per-user protocol handler that makes the entry complete. It does not change
- * the default, and no copy here claims it does.
+ * **Slash deliberately does not call `app.setAsDefaultProtocolClient`.** It
+ * writes `HKCU\Software\Classes\http`, which does not change the default — and
+ * a check that reads those keys then answers "yes, you are the default" purely
+ * because we registered. That made the offer never appear, on every machine,
+ * with nothing logged: a failure indistinguishable from the feature having been
+ * forgotten. The registration belongs to the installer, and the question is
+ * asked of `UserChoice`, which is the key Windows itself consults and the one
+ * key nothing we run can write.
  */
 export class DefaultBrowserService {
   constructor(private readonly settings: SettingsStore) {}
 
   /**
-   * Registers Slash as a handler for `http`/`https`.
+   * Refreshes the cached answer to "is Slash the default".
    *
-   * Called at startup, not only when the user asks: a browser installed by
-   * copying a folder, or run from a development build, was never through the
-   * installer and would otherwise be invisible to the whole mechanism.
-   *
-   * Explicitly **not** a way of becoming the default. It only makes Slash
-   * eligible to be chosen.
+   * Called at startup and after the user visits the Windows screen. Asynchronous
+   * because it shells out to `reg`, and cached because `status()` is called from
+   * the start page and the settings panel, which must answer immediately.
    */
-  register(): void {
-    if (process.platform !== 'win32') return
-    for (const scheme of ['http', 'https']) {
-      if (!app.setAsDefaultProtocolClient(scheme)) {
-        log.debug(`could not register as a handler for ${scheme}`)
-      }
+  async refresh(): Promise<boolean> {
+    if (process.platform !== 'win32') return false
+
+    const progId = await readUserChoiceProgId()
+    if (progId !== null) {
+      this.cachedIsDefault = isSlashProgId(progId)
+      log.debug(`http UserChoice is ${progId} — Slash ${this.cachedIsDefault ? 'is' : 'is not'} default`)
+      return this.cachedIsDefault
     }
+
+    // No UserChoice key at all: a machine where nothing has ever been chosen.
+    // Electron's own check is the fallback and is not wrong here, because
+    // nothing has contaminated it — Slash no longer writes those keys itself.
+    this.cachedIsDefault = app.isDefaultProtocolClient('http')
+    return this.cachedIsDefault
   }
+
+  private cachedIsDefault = false
 
   status(now = Date.now()): DefaultBrowserStatus {
     if (process.platform !== 'win32') {
       return { isDefault: false, shouldOffer: false, supported: false }
     }
 
-    const isDefault = app.isDefaultProtocolClient('http')
+    const isDefault = this.cachedIsDefault
     const settings = this.settings.getAll()
     return {
       isDefault,
@@ -112,4 +129,32 @@ export class DefaultBrowserService {
       await shell.openExternal('ms-settings:defaultapps')
     }
   }
+}
+
+/**
+ * Reads `UserChoice\ProgId` for `http`, or null if the key is not there.
+ *
+ * `reg.exe` rather than a native registry module: this project cannot add a
+ * module that needs compiling (node-gyp refuses paths containing a space), and
+ * one 40ms subprocess at startup is a fair price for the only answer Windows
+ * actually honours.
+ *
+ * Never throws. A missing key, a locked registry, or `reg` being absent all
+ * mean "we do not know", and the caller falls back rather than failing.
+ */
+function readUserChoiceProgId(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'reg',
+      ['query', USER_CHOICE_KEY, '/v', 'ProgId'],
+      { timeout: 4000, windowsHide: true },
+      (error, stdout) => {
+        if (error && !stdout) {
+          resolve(null)
+          return
+        }
+        resolve(parseUserChoiceProgId(stdout))
+      }
+    )
+  })
 }

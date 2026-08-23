@@ -14,6 +14,7 @@ import { CleanupPanel } from './features/cleanup/CleanupPanel'
 import { NoticeToast } from './features/notice/NoticeToast'
 import { PrintPreview } from './features/print/PrintPreview'
 import { SponsorNotice } from './features/sponsor/SponsorNotice'
+import { MediaOfferChip } from './features/media/MediaOfferChip'
 
 /**
  * Root of the overlay document.
@@ -70,6 +71,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <PrintPreview />
     case 'sponsor-notice':
       return <SponsorNotice />
+    case 'media-offer':
+      return <MediaOfferChip />
     case 'spike':
       return <SpikeReport />
     case 'none':

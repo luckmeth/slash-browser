@@ -15,12 +15,34 @@ recognised so the panel can say why there is nothing to download.
 If a check below says "no button, with a reason", that is a pass. A button that downloads four
 seconds of unplayable video is the failure.
 
+## 0 — It must not cost anything on ordinary pages
+
+The listener runs in the main process for every response it is registered for, so this check comes
+first. A feature that makes browsing feel heavy is not worth having.
+
+1. Settings → Browsing → **Video downloads** → confirm both switches are on.
+2. Open three or four heavy, image-and-script pages — a news front page, a shopping site.
+3. **Expect:** scrolling and tab switching feel exactly as they did before. No stutter on load.
+4. Turn **Find downloadable video and audio on pages** off and repeat.
+5. **Expect:** no perceptible difference. If there *is* one, the filter or the callback has
+   regressed — the listener is registered for `media`/`xhr`/`object` only, and switching it off
+   removes it entirely rather than skipping its body.
+6. Turn it back on.
+
 ## 1 — A plain progressive file
 
 1. Open a page with a direct `<video src="…mp4">` — e.g. any `.mp4` link opened directly, or
    <https://test-videos.co.uk/bigbuckbunny/mp4-h264>.
-2. **Expect:** within a second or two of playback starting, a video icon appears in the toolbar,
-   right of the downloads button, in the accent colour.
+2. **Expect:** within a second or two of playback starting, **a small panel appears in the top-right
+   corner of the page** with the filename, the size and a Download button — and a video icon
+   appears in the toolbar, right of the downloads button.
+3. Click somewhere on the video *underneath* the panel. **Expect:** the click reaches the page. The
+   panel is not modal, and a chip that made the player inert would be worse than no chip.
+4. Press **Download** on the panel. **Expect:** the panel goes, and the file appears under
+   *Managed downloads*. Open it — **it must play**.
+5. Reload, then press the panel's **×**. **Expect:** it goes and does not come back for this page.
+   Navigate elsewhere and back — **expect** it offers again. Dismissing one video is not a
+   statement about every video.
 3. Hover it. **Expect:** "Download video (N found on this page)".
 4. Click it. **Expect:** the downloads panel opens and the media list is **already populated** — no
    second button to press.
@@ -53,6 +75,22 @@ Ranking is by kind then size, so a short advert can only be first while it is th
 4. **Must not:** offer any row. If one appears, the classifier's protection hints have drifted and
    that is a release blocker, not a cosmetic bug.
 
+## 4b — The panel must never steal the overlay
+
+The chip and every dialog share one overlay view, so this is the failure mode to watch for.
+
+1. With the panel showing over a video, press **Ctrl+K** (command palette).
+2. **Expect:** the palette opens normally. The panel gives way.
+3. Press Escape. **Expect:** the palette closes **and the panel comes back**.
+4. Repeat with the reader (Ctrl+Shift+R) and the shortcut sheet.
+5. **Must not:** the palette flickering, failing to open, or the panel winning.
+
+## 4c — The panel follows the video, not the page
+
+1. On YouTube, with the panel showing, click a suggested video.
+2. **Expect:** the panel updates to the new file rather than continuing to offer the previous one.
+   Showing the right chip for the wrong video is worse than no chip.
+
 ## 5 — The button belongs to one tab
 
 1. Start a video in tab A. Confirm the button is there.
@@ -79,6 +117,14 @@ second listener for one event silently replaces the first, so this check is not 
 
 1. Start a video in tab A, switch to tab B and stay there.
 2. **Expect:** no video button appears in B while A keeps playing.
+
+## 9 — Switching the panel off
+
+1. Settings → Browsing → Video downloads → **Show a download button over the video** off.
+2. Play a video. **Expect:** no floating panel, but the toolbar button still appears and the
+   Downloads panel still finds the file.
+3. Turn **Find downloadable video and audio on pages** off. **Expect:** the second switch greys out,
+   and neither the panel nor the toolbar button appears.
 
 ## Regression
 

@@ -4,6 +4,8 @@ import {
   shouldOfferDefault,
   toFileUrl,
   PROMPT_LIMITS,
+  parseUserChoiceProgId,
+  isSlashProgId,
   type PromptState
 } from './defaultBrowserRules'
 
@@ -98,5 +100,37 @@ describe('toFileUrl', () => {
 
   it('keeps the drive colon readable', () => {
     expect(toFileUrl('D:/x.html')).toBe('file:///D:/x.html')
+  })
+})
+
+describe('parseUserChoiceProgId', () => {
+  const output = [
+    '',
+    String.raw`HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice`,
+    '    Hash    REG_SZ    3vN0BxK7Xt0=',
+    '    ProgId    REG_SZ    ChromeHTML',
+    ''
+  ].join('\r\n')
+
+  it('reads the ProgId Windows will actually use', () => {
+    expect(parseUserChoiceProgId(output)).toBe('ChromeHTML')
+  })
+
+  it('is not confused by the Hash line above it', () => {
+    expect(parseUserChoiceProgId(output)).not.toContain('=')
+  })
+
+  it('says nothing when the key does not exist', () => {
+    // A machine that has never had a default set. Not an error.
+    expect(parseUserChoiceProgId('ERROR: The system was unable to find the specified registry key')).toBeNull()
+    expect(parseUserChoiceProgId('')).toBeNull()
+  })
+
+  it('recognises Slash, and only Slash', () => {
+    expect(isSlashProgId('SlashHTM')).toBe(true)
+    expect(isSlashProgId('slashhtm')).toBe(true)
+    expect(isSlashProgId('ChromeHTML')).toBe(false)
+    expect(isSlashProgId('SlashHTMX')).toBe(false)
+    expect(isSlashProgId(null)).toBe(false)
   })
 })

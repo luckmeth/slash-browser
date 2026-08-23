@@ -321,3 +321,50 @@ describe('MediaLedger', () => {
     expect(ledger.forTab(1)).toEqual([])
   })
 })
+
+describe('MediaLedger — the cost of a playing video', () => {
+  const item = (url: string, size: number | null = 1000): SniffedMedia => ({
+    url,
+    kind: 'file',
+    media: 'video',
+    label: 'Video file',
+    size,
+    contentType: 'video/mp4'
+  })
+
+  it('reports a genuinely new file as a change', () => {
+    expect(new MediaLedger().record(1, item('https://x.com/a.mp4'))).toBe(true)
+  })
+
+  it('reports the same URL again as no change', () => {
+    // Byte-range requests are how seeking and buffering work: the same URL
+    // arrives many times a second. Treating each as news would mean a full
+    // re-rank and an IPC broadcast per request, for a button already on screen.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4'))
+    expect(ledger.record(1, item('https://x.com/a.mp4'))).toBe(false)
+  })
+
+  it('does not grow when the same URL repeats', () => {
+    const ledger = new MediaLedger()
+    for (let i = 0; i < 500; i += 1) ledger.record(1, item('https://x.com/a.mp4'))
+    expect(ledger.forTab(1)).toHaveLength(1)
+  })
+
+  it('still learns the size from a later response', () => {
+    // The first range request reports no length; a later one does. The entry is
+    // updated even though this is not a change worth broadcasting.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4', null))
+    ledger.record(1, item('https://x.com/a.mp4', 900_000))
+    expect(ledger.forTab(1)[0]?.size).toBe(900_000)
+  })
+
+  it('treats the same URL on a new document as new', () => {
+    // Reloading a page really is a fresh offer, and the chip has to reappear.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4'))
+    ledger.advance(1)
+    expect(ledger.record(1, item('https://x.com/a.mp4'))).toBe(true)
+  })
+})

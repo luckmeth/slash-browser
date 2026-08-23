@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import type { SponsoredTile } from '@shared/types/sponsor'
+import type { InvokeResponse } from '@shared/ipc/contracts'
 import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'electron'
 import {
   VIEW_KIND,
@@ -10,6 +11,9 @@ import {
 } from '@shared/constants'
 import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
+
+/** The one file the floating chip offers. Mirrors the media:offer response. */
+export type MediaOffer = NonNullable<InvokeResponse<'media:offer'>>
 import type { OmniboxState } from '@shared/types/omnibox'
 import type { PermissionRequest } from '@shared/types/permission'
 import type { TabGroup } from '@shared/types/tabGroup'
@@ -58,6 +62,14 @@ export interface WindowDeps {
   observeYouTube?: (contents: WebContents) => void
   /** Follows a new page view's navigations for media detection. */
   observeMedia?: (contents: WebContents) => void
+  /**
+   * What the floating download chip should offer for this window, if anything.
+   *
+   * Injected rather than reached for, because the sniffer is application-wide
+   * and the window must not know about it — the window knows only that
+   * something may want to float over its page.
+   */
+  mediaOffer?: (window: BrowserWindowController) => MediaOffer | null
   /** Shield's known ad/tracking host list, for classifying redirect chains. */
   isKnownAdHost?: (host: string) => boolean
   /** A redirect chain finished and is worth reporting to the user. */
@@ -234,6 +246,9 @@ export class BrowserWindowController {
         onSnapshot: (snapshot) => {
           this.deps.ipc.broadcast('tabs:snapshot', snapshot, this.privilegedContents())
           this.syncWindowTitle(snapshot)
+          // Switching tabs changes what is playing. `refreshMediaOffer` is
+          // idempotent, so calling it from the snapshot costs a comparison.
+          this.refreshMediaOffer()
         },
         onNavigated: (url, title, faviconUrl) => {
           // A private window writes no history, regardless of the setting. This
@@ -511,6 +526,18 @@ export class BrowserWindowController {
     this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
   }
 
+  /**
+   * Hides whatever the overlay is showing, then lets the passive chip return.
+   *
+   * The chip is the only surface that appears without being asked for, so it is
+   * also the only one that has to be *restored* rather than merely not shown.
+   */
+  closeOverlaySurface(): void {
+    const state = this.overlay.hide()
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+    this.refreshMediaOffer()
+  }
+
   dismissPermissionPrompt(requestId: string): void {
     if (this.pendingPermission?.requestId !== requestId) return
     this.pendingPermission = null
@@ -685,6 +712,85 @@ export class BrowserWindowController {
   }
 
   private notice: { message: string; tone: 'info' | 'warn' } = { message: '', tone: 'info' }
+
+  /**
+   * Shows or hides the floating "download this video" chip.
+   *
+   * The affordance a download manager is recognised by: something appears over
+   * the video, and one click saves it. It has to be the overlay — the page is a
+   * native view composited above the chrome document, so a chip drawn in React
+   * would be behind the video it is pointing at.
+   *
+   * **Passive by construction.** It never takes the overlay from a surface the
+   * user opened: if a dialog, the palette or the reader is up, this does
+   * nothing and tries again when that closes. The alternative is a browser
+   * where opening the command palette over a video makes the palette vanish.
+   *
+   * Idempotent, because it is called from three places — detection, tab
+   * activation, and the overlay becoming free — and re-showing an identical
+   * chip would flicker it on every snapshot.
+   */
+  refreshMediaOffer(): void {
+    const wanted = this.deps.mediaOffer?.(this) ?? null
+    const showing = this.overlay.current.surface === 'media-offer'
+
+    const suppressed =
+      wanted === null ||
+      this.mediaOfferDismissed === (this.tabs.activeTab?.contents?.id ?? -1) ||
+      // Somebody else owns the overlay. Not an error — try again when it frees.
+      (this.overlay.current.visible && !showing)
+
+    if (suppressed) {
+      if (showing) {
+        const state = this.overlay.hide()
+        this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+      }
+      this.mediaOffer = null
+      return
+    }
+
+    const unchanged = showing && this.mediaOffer?.url === wanted.url
+    this.mediaOffer = wanted
+    if (unchanged) return
+
+    const { width, height } = this.window.getContentBounds()
+    const page = this.layout.compute(width, height).page
+    const chipWidth = Math.min(340, Math.max(240, page.width - 32))
+    const chipHeight = 96
+
+    const state = this.overlay.show(
+      'media-offer',
+      {
+        // Top-right of the page area, where a player's own controls are not.
+        x: Math.max(page.x, page.x + page.width - chipWidth - 16),
+        y: page.y + 16,
+        width: chipWidth,
+        height: chipHeight
+      },
+      { modal: false, takeFocus: false }
+    )
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /** What `media:offer` answers with. */
+  currentMediaOffer(): MediaOffer | null {
+    return this.mediaOffer
+  }
+
+  /**
+   * Puts the chip away until this page changes.
+   *
+   * Keyed on the webContents rather than a flag, so navigating — or switching to
+   * another tab that has a video — offers again. Dismissing one video is not a
+   * statement about every video.
+   */
+  dismissMediaOffer(): void {
+    this.mediaOfferDismissed = this.tabs.activeTab?.contents?.id ?? -1
+    this.refreshMediaOffer()
+  }
+
+  private mediaOffer: MediaOffer | null = null
+  private mediaOfferDismissed = -1
 
   /** Full content rect, for modal overlay surfaces. */
   fullBounds() {

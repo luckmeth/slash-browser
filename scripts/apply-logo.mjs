@@ -21,7 +21,15 @@ import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const source = resolve(process.argv[2] ?? join(root, 'build', 'logo-source.png'))
+/**
+ * Default source: the SVG the mark is actually authored in.
+ *
+ * An SVG rather than a PNG because sharp rasterises it at whatever size is
+ * asked for, so the 16px icon is *rendered* at 16px rather than downsampled
+ * from 1024 — which is the difference between a legible mark and a grey smear
+ * in the taskbar. A PNG passed on the command line still works.
+ */
+const source = resolve(process.argv[2] ?? join(root, 'build', 'logo.svg'))
 
 /**
  * Sizes Windows actually asks for.
@@ -46,6 +54,7 @@ if (!existsSync(source)) {
 }
 
 const input = readFileSync(source)
+const isVector = source.toLowerCase().endsWith('.svg')
 const meta = await sharp(input).metadata()
 
 if (!meta.width || !meta.height) {
@@ -60,16 +69,29 @@ if (Math.abs(meta.width - meta.height) > 2) {
       `but an app icon wants the mark on its own, not a wordmark.`
   )
 }
-if (meta.width < 256) {
+if (!isVector && meta.width < 256) {
   console.warn(`Warning: ${meta.width}px source. Upscaling to ${APP_ICON_SIZE} will look soft.`)
 }
 
-/** Square, transparent-padded, at one size. */
-const render = (size) =>
-  sharp(input)
+/**
+ * Square, transparent-padded, at one size.
+ *
+ * A vector source is re-rasterised per size rather than downsampled from one
+ * big bitmap. `density` is DPI against a 96-DPI baseline and the SVG declares
+ * its own 1024px box, so this asks for four times the target and resizes down —
+ * supersampling, which is what keeps the diagonal edges of the mark clean at
+ * 16px instead of aliasing into a grey smear.
+ *
+ * Four times, not twelve: density is applied to the declared size, so a large
+ * multiplier at 1024 asks for a bitmap big enough to trip sharp's pixel limit.
+ */
+const render = (size) => {
+  const options = isVector ? { density: Math.max(8, Math.ceil((size / 1024) * 96 * 4)) } : {}
+  return sharp(input, options)
     .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png({ compressionLevel: 9 })
     .toBuffer()
+}
 
 /**
  * A multi-size .ico.

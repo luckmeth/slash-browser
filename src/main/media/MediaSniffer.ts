@@ -5,6 +5,25 @@ import { createLogger } from '../logger'
 const log = createLogger('media')
 
 /**
+ * Resource types that can carry media, and no others.
+ *
+ * This is the whole performance story. A `webRequest` listener registered
+ * without a filter is a main-process callback for **every response on every
+ * page** — scripts, stylesheets, fonts, every image — and Slash already spends
+ * one of those on `onBeforeRequest` for the content blocker. Doubling it made
+ * ordinary browsing measurably heavier for a feature that only ever cares about
+ * a handful of responses.
+ *
+ * `media` is a `<video>`/`<audio>` element's own fetches. `xhr` covers `fetch()`
+ * and XMLHttpRequest, which is how Media Source Extensions pulls segments and
+ * how most players request a manifest. `object` catches the legacy embed path.
+ * Everything else is excluded before the callback exists, which is where the
+ * cost actually is — by the time a listener runs, the headers have already been
+ * marshalled across.
+ */
+const MEDIA_RESOURCE_TYPES = ['media', 'xhr', 'object'] as const
+
+/**
  * Finds the video a page is playing, from the requests it makes.
  *
  * This is the half of media detection the DOM cannot provide. Every serious
@@ -31,13 +50,20 @@ export class MediaSniffer {
   /**
    * A tab now has something downloadable that it did not have a moment ago.
    *
-   * Fires on the change, not on every matching response: a video is thousands
-   * of requests, and a callback per request would be a broadcast storm behind a
-   * button that only needs to appear once.
+   * Fires on the change, not on every matching response: a playing video
+   * re-requests the same URL several times a second, and a callback per
+   * request would be a broadcast storm behind a button already on screen.
    */
   onFound: ((webContentsId: number, count: number) => void) | null = null
 
   private readonly lastCount = new Map<number, number>()
+  /** Every session being watched, so the setting can be applied to all of them. */
+  private readonly watched = new Map<string, Session>()
+  private enabled = true
+
+  constructor(enabled = true) {
+    this.enabled = enabled
+  }
 
   /**
    * Watches one session.
@@ -46,25 +72,63 @@ export class MediaSniffer {
    * with its own session is still a place somebody watches video.
    */
   install(session: Session, label: string): void {
-    session.webRequest.onResponseStarted((details) => {
-      const id = details.webContentsId
-      if (typeof id !== 'number') return
+    this.watched.set(label, session)
+    this.apply(session)
+    log.debug(`media detection ${this.enabled ? 'watching' : 'idle on'} ${label}`)
+  }
 
-      const headers = details.responseHeaders ?? {}
-      const declared = Number(headerValue(headers, 'content-length'))
-      const size = Number.isFinite(declared) && declared > 0 ? declared : null
+  /**
+   * Turns detection off, and genuinely off.
+   *
+   * The listener is *removed* rather than left in place behind a boolean. A
+   * registered listener costs a main-process callback per response whether or
+   * not it does anything, so a switch that only skipped the body would leave
+   * the cost the user turned it off to avoid.
+   */
+  setEnabled(enabled: boolean): void {
+    if (enabled === this.enabled) return
+    this.enabled = enabled
+    for (const session of this.watched.values()) this.apply(session)
+    if (enabled) return
 
-      const found = classifyMedia(details.url, headerValue(headers, 'content-type'), size)
-      if (!found) return
-      this.ledger.record(id, found)
+    // Switched off means forgotten, not paused. Leaving a list of what somebody
+    // watched before turning detection off is the opposite of what they asked
+    // for, and it would reappear the moment they turned it back on.
+    for (const id of this.lastCount.keys()) this.ledger.forget(id)
+    this.lastCount.clear()
+  }
 
-      const count = toDownloadable(this.ledger.forTab(id)).length
-      if (count === (this.lastCount.get(id) ?? 0)) return
-      this.lastCount.set(id, count)
-      this.onFound?.(id, count)
-    })
+  private apply(session: Session): void {
+    if (!this.enabled) {
+      session.webRequest.onResponseStarted(null)
+      return
+    }
 
-    log.debug(`media detection watching ${label}`)
+    session.webRequest.onResponseStarted(
+      { urls: ['<all_urls>'], types: [...MEDIA_RESOURCE_TYPES] },
+      (details) => {
+        const id = details.webContentsId
+        if (typeof id !== 'number') return
+
+        const headers = details.responseHeaders ?? {}
+        const declared = Number(headerValue(headers, 'content-length'))
+        const size = Number.isFinite(declared) && declared > 0 ? declared : null
+
+        const found = classifyMedia(details.url, headerValue(headers, 'content-type'), size)
+        if (!found) return
+
+        // Already seen this URL on this document — the common case while a video
+        // plays, and not news.
+        if (!this.ledger.record(id, found)) return
+        // Only a complete file can change the count behind the button.
+        if (found.kind !== 'file') return
+
+        const count = toDownloadable(this.ledger.forTab(id)).length
+        if (count === (this.lastCount.get(id) ?? 0)) return
+        this.lastCount.set(id, count)
+        this.onFound?.(id, count)
+      }
+    )
   }
 
   /**
@@ -78,9 +142,12 @@ export class MediaSniffer {
   observe(contents: WebContents): void {
     const advance = (): void => {
       this.ledger.advance(contents.id)
-      // The count is about to be recomputed against a new document, so the old
-      // one must not suppress the callback that makes the button reappear.
-      this.lastCount.delete(contents.id)
+      // Recomputed against the new document. Kept in `lastCount` rather than
+      // merely cleared, because that map is also the cheap answer to "does this
+      // tab have anything" — and that question is asked on every tab snapshot.
+      const count = this.countFor(contents)
+      this.lastCount.set(contents.id, count)
+      this.onFound?.(contents.id, count)
     }
     contents.on('did-start-navigation', (details) => {
       // Subframe navigations are constant on video sites and mean nothing here.
@@ -104,6 +171,19 @@ export class MediaSniffer {
   /** How many complete files this tab has, for the toolbar indicator. */
   countFor(contents: WebContents | null): number {
     return toDownloadable(this.forTab(contents)).length
+  }
+
+  /**
+   * The memoised count, without ranking anything.
+   *
+   * Exists because "should the chip be up" is asked on **every tab snapshot**,
+   * which is often. Answering it by re-ranking sixty entries each time would be
+   * a small cost paid constantly — the shape of slowness that never shows up in
+   * a profile as one expensive thing.
+   */
+  knownCount(contents: WebContents | null): number {
+    if (!contents || contents.isDestroyed()) return 0
+    return this.lastCount.get(contents.id) ?? 0
   }
 }
 

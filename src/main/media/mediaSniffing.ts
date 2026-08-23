@@ -269,10 +269,31 @@ export class MediaLedger {
   private readonly entries = new Map<number, { generation: number; item: SniffedMedia }[]>()
   private readonly generations = new Map<number, number>()
 
-  record(tabId: number, item: SniffedMedia): void {
+  /**
+   * Records one response.
+   *
+   * Returns whether this changed anything, so the caller can skip recomputing
+   * and broadcasting. A playing video re-requests the same URL constantly —
+   * byte-range requests are how seeking and buffering work — and every one of
+   * those arrives here. Treating each as news would mean a full re-rank and an
+   * IPC broadcast several times a second for a button that is already showing.
+   */
+  record(tabId: number, item: SniffedMedia): boolean {
     const generation = this.generations.get(tabId) ?? 0
     const existing = this.entries.get(tabId) ?? []
+
+    const already = existing.find(
+      (entry) => entry.generation === generation && entry.item.url === item.url
+    )
+    if (already) {
+      // A range request reports no length; a later one may. Keep whichever
+      // knows, but this is still not a change worth telling anybody about.
+      if (already.item.size === null && item.size !== null) already.item = item
+      return false
+    }
+
     this.entries.set(tabId, [{ generation, item }, ...existing].slice(0, MediaLedger.MAX_PER_TAB))
+    return true
   }
 
   /** A navigation happened — same document or not. */

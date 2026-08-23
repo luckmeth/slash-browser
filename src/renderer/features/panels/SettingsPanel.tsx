@@ -433,6 +433,29 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Video downloads">
+        <Toggle
+          label="Find downloadable video and audio on pages"
+          hint="Watches what a page fetches, so a video can be saved even when the page offers no link. This is the one feature that costs something on every page — switching it off removes the check entirely, not just its result."
+          checked={settings.detectPageMedia}
+          onChange={(detectPageMedia) => update({ detectPageMedia })}
+        />
+        <Toggle
+          label="Show a download button over the video"
+          hint="A small panel in the corner of the page while something downloadable is playing. Off leaves the toolbar button and the Downloads panel, which find the same files."
+          checked={settings.mediaOverlayButton}
+          disabled={!settings.detectPageMedia}
+          onChange={(mediaOverlayButton) => update({ mediaOverlayButton })}
+        />
+        {/* The limit, stated where somebody would otherwise conclude the
+            feature is broken on the site they tried it on. */}
+        <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          Complete files only. Video delivered as an adaptive stream — thousands of short segments —
+          is not reassembled, and video protected by DRM cannot be downloaded at all. Slash says
+          which of those it found rather than offering a file that will not play.
+        </p>
+      </Group>
+
       {/*
         Capabilities that genuinely are not built are listed as such rather than
         shown as controls, so nothing on this screen implies something the build
@@ -585,6 +608,10 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     keywords: 'keys keybinding hotkey accelerator remap rebind ctrl alt shift shortcut customise'
   },
   'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
+  'Video downloads': {
+    category: 'Browsing',
+    keywords: 'video download media detect stream mp4 save youtube idm audio'
+  },
   Assistant: {
     category: 'Browsing',
     keywords: 'ai assistant claude chatgpt gemini perplexity chat sidebar split pane subscription'
@@ -668,10 +695,18 @@ function DefaultBrowserField(): React.JSX.Element {
             onClick={() => {
               void window.browser
                 .invoke('system:openDefaultBrowserSettings', undefined)
-                // Re-checked on return rather than assumed: the user may not
-                // have gone through with it, and a screen that claims otherwise
-                // is worse than one that does not know.
-                .then(() => setTimeout(refresh, 4000))
+                // Re-read from the registry rather than assumed: the user may
+                // not have gone through with it, and a screen claiming
+                // otherwise is worse than one that does not know.
+                .then(() =>
+                  setTimeout(() => {
+                    void window.browser
+                      .invoke('system:refreshDefaultBrowser', undefined)
+                      .then((result) => {
+                        if (result.ok) setStatus(result.value)
+                      })
+                  }, 4000)
+                )
             }}
             className="cursor-pointer rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >

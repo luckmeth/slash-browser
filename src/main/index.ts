@@ -115,11 +115,12 @@ if (!app.requestSingleInstanceLock()) {
     const window = context.createWindow({ isPrivate: launchRequest === 'private' })
     if (launchTarget) window.tabs.create({ url: launchTarget, background: false })
 
-    // Registers Slash as an eligible handler for http/https. Not a way of
-    // becoming the default — Windows does not permit that — but the entry has
-    // to exist before the user can pick it, and a development build or a copied
-    // folder never went through the installer that would have written it.
-    context.defaultBrowser.register()
+    // Asks Windows, once, whether Slash is the default — by reading the
+    // UserChoice key Windows itself consults. Deliberately *not* by registering
+    // as a handler first and then checking: that writes the very keys a naive
+    // check reads, so Slash would report itself as default on every machine and
+    // the offer would never appear.
+    void context.defaultBrowser.refresh()
 
     // Bring back what was open when the browser was last closed.
     //

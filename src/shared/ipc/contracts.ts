@@ -132,6 +132,18 @@ export const OverlayStateSchema = z.object({
     /** A sponsored notice, in the browser's own chrome. Never inside a page. */
     'sponsor-notice',
     /**
+     * "There is a video here you can download", floating over the page.
+     *
+     * The one surface that appears without being asked for and stays. Sized to a
+     * chip in the corner rather than the window, because an overlay swallows
+     * every click inside its bounds — a full-window one would make the video it
+     * is pointing at unclickable, which is a special kind of useless.
+     *
+     * Passive: it never takes the overlay from a surface the user opened, and it
+     * comes back on its own when that surface closes.
+     */
+    'media-offer',
+    /**
      * A transient message: what happened, when the answer is "nothing".
      *
      * In the overlay because it has to be readable over a web page, and sized to
@@ -1162,6 +1174,28 @@ export const invokeContracts = {
   'guardian:scanDownloads': { request: z.void(), response: DownloadScanSchema },
   'guardian:scanMedia': { request: z.void(), response: MediaScanSchema },
   'media:detected': { request: z.void(), response: z.object({ count: z.number().int() }) },
+  /**
+   * What the floating chip should say, or null when there is nothing to offer.
+   *
+   * One candidate, not a list. The chip is a single-click affordance over a
+   * playing video — anybody who wants to choose between four files opens the
+   * panel, and a menu floating over the page they are watching is worse than
+   * the button they wanted.
+   */
+  'media:offer': {
+    request: z.void(),
+    response: z
+      .object({
+        url: z.string(),
+        filename: z.string(),
+        sizeText: z.string(),
+        /** How many others there are, so the chip can point at the panel. */
+        others: z.number().int()
+      })
+      .nullable()
+  },
+  'media:download': { request: z.object({ url: z.string() }), response: z.void() },
+  'media:dismissOffer': { request: z.void(), response: z.void() },
 
   /**
    * Docks the AI assistant beside the current page, or undocks it.
@@ -1198,6 +1232,21 @@ export const invokeContracts = {
    * `system:makeDefault` would be a lie in the type system.
    */
   'system:openDefaultBrowserSettings': { request: z.void(), response: z.void() },
+  /**
+   * Re-reads the association and answers with the fresh status.
+   *
+   * Separate from `system:defaultBrowser` because that one must answer
+   * instantly from cache — it is called while the start page paints — and this
+   * one shells out to the registry.
+   */
+  'system:refreshDefaultBrowser': {
+    request: z.void(),
+    response: z.object({
+      isDefault: z.boolean(),
+      shouldOffer: z.boolean(),
+      supported: z.boolean()
+    })
+  },
   'system:dismissDefaultBrowser': {
     /** `forever` is "don't ask again"; otherwise the offer is merely counted. */
     request: z.object({ forever: z.boolean() }),

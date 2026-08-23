@@ -95,3 +95,37 @@ export function toFileUrl(path: string): string {
   const withRoot = normalised.startsWith('/') ? normalised : `/${normalised}`
   return `file://${withRoot.split('/').map(encodeURIComponent).join('/').replace(/%3A/gi, ':')}`
 }
+
+/**
+ * The ProgId Windows will actually use for a scheme.
+ *
+ * Parsed from `reg query` output, which looks like:
+ *
+ * ```
+ * HKEY_CURRENT_USER\...\UrlAssociations\http\UserChoice
+ *     Hash    REG_SZ    3vN0BxK7Xt0=
+ *     ProgId    REG_SZ    ChromeHTML
+ * ```
+ *
+ * This is read rather than `app.isDefaultProtocolClient` because that asks a
+ * question we have contaminated: registering as a *handler* writes keys under
+ * `HKCU\Software\Classes`, and a check that reads those can answer "yes, you
+ * are the default" purely because we registered. The offer then never appears,
+ * on every machine, with nothing logged — the failure looks exactly like the
+ * feature having been forgotten.
+ *
+ * `UserChoice` is the key Windows itself consults, and nothing we do can write
+ * it. Whatever is here is the truth.
+ */
+export function parseUserChoiceProgId(regOutput: string): string | null {
+  for (const line of regOutput.split(/\r?\n/)) {
+    const match = /^\s*ProgId\s+REG_SZ\s+(.+?)\s*$/i.exec(line)
+    if (match?.[1]) return match[1]
+  }
+  return null
+}
+
+/** Whether that ProgId is ours. */
+export function isSlashProgId(progId: string | null): boolean {
+  return progId !== null && progId.trim().toLowerCase() === SLASH_PROGID.toLowerCase()
+}

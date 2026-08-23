@@ -194,6 +194,13 @@ export function registerHandlers(ctx: AppContext): void {
     // stored value and the engine's view of it drift apart.
     ctx.blocker.refreshAllowedSites()
 
+    // Media detection is a webRequest listener, so switching it off has to
+    // remove it now. Left until next launch, the cost the user turned it off to
+    // avoid stays for the rest of the session.
+    if (patch.detectPageMedia !== undefined) {
+      ctx.mediaSniffer.setEnabled(patch.detectPageMedia)
+    }
+
     // Media keys must be released *now*, not at next launch. They are global
     // shortcuts, so until released they keep taking presses from whatever else
     // the user is listening to — which is exactly what switching them off means.
@@ -1538,6 +1545,11 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('system:defaultBrowser', () => ok(ctx.defaultBrowser.status()))
 
+  ipc.handle('system:refreshDefaultBrowser', async () => {
+    await ctx.defaultBrowser.refresh()
+    return ok(ctx.defaultBrowser.status())
+  })
+
   ipc.handle('system:openDefaultBrowserSettings', async () => {
     // Counted as an ask either way. Somebody who opened the screen and did not
     // follow through has still been asked, and asking again next week would be
@@ -1550,6 +1562,41 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('system:dismissDefaultBrowser', (request) => {
     if (request.forever) ctx.defaultBrowser.suppress()
     else ctx.defaultBrowser.recordAsked()
+    return ok(undefined)
+  })
+
+  ipc.handle('media:offer', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(window.currentMediaOffer())
+  })
+
+  ipc.handle('media:dismissOffer', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.dismissMediaOffer()
+    return ok(undefined)
+  })
+
+  ipc.handle('media:download', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    // The URL is checked against what this tab was actually seen fetching. The
+    // renderer sending a URL it was given back is fine; the renderer sending
+    // *any* URL and having the browser download it is not.
+    const contents = window.tabs.activeTab?.contents ?? null
+    const known = ctx.mediaSniffer.forTab(contents).some((item) => item.url === request.url)
+    if (!known) return err('NOT_FOUND', 'That file was not detected on this page')
+
+    // Same guard as the engine's own channel: it writes whatever it fetches to
+    // disk, so a non-http URL here would be an arbitrary local file copy.
+    if (!/^https?:\/\//i.test(request.url)) {
+      return err('FORBIDDEN', 'Only http and https downloads are supported')
+    }
+
+    ctx.downloadEngine.enqueue(request.url, { priority: 'normal', startAfter: null })
+    window.dismissMediaOffer()
     return ok(undefined)
   })
 

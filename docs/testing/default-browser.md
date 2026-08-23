@@ -16,6 +16,27 @@ list on request, and says clearly that the final click is the user's.**
 
 Any screen implying Slash set the default itself is a failure, not a nicety.
 
+## 0 — The detection must not answer from its own writing
+
+The bug this replaced: Slash registered itself as an `http` handler at startup, which writes
+`HKCUSoftwareClasseshttp`, and then asked a question that reads those keys. It answered "yes,
+you are the default" on every machine, so the offer never appeared and nothing was logged.
+
+Slash now reads `UserChoiceProgId` — the key Windows itself consults, and the one key nothing an
+application runs can write.
+
+1. On a machine where Slash is **not** the default, launch it.
+2. Check the log for `http UserChoice is <something>`. **Expect:** the name of your actual browser
+   (`ChromeHTML`, `MSEdgeHTM`, `FirefoxURL`…), followed by "Slash is not default".
+3. **Must not:** report `SlashHTM` unless you genuinely set it.
+4. Confirm from a terminal:
+
+   ```bash
+   reg query "HKCUSoftwareMicrosoftWindowsShellAssociationsUrlAssociationshttpUserChoice" /v ProgId
+   ```
+
+   Slash's answer must match that value.
+
 ## 1 — The installer registers Slash
 
 1. `npm run package`, then install from `release/`.
@@ -58,6 +79,17 @@ path or URL shape is one of the cases in `defaultBrowserRules.test.ts`.
 1. Run `npm run dev` (Electron is launched as `electron .`).
 2. **Expect:** the usual start page. **Must not:** open the project directory as a page.
 3. Launch with `--new-private-window`. **Expect:** a private window, and no extra tab.
+
+## 4d — Installing over an existing profile
+
+The commonest real case, and the one that has no walkthrough to fall back on.
+
+1. With a profile that has already completed onboarding, install the new build.
+2. Launch and open a **new tab**.
+3. **Expect:** the "Make Slash your default browser" card on the start page.
+
+If it is absent, check step 0 — a detection that wrongly reports Slash as default suppresses both
+the card and the walkthrough step, and looks identical to the feature not existing.
 
 ## 5 — The card on the start page
 

@@ -59,6 +59,7 @@ These are not aspirations; they constrain the code.
 | "Find any page by meaning" | Only the first ~8,000 characters of a page are embedded (10 passages), and MiniLM reads 256 word-pieces at a time | The cap is stated in the UI. A long page is matched on its opening, not its entirety |
 | Sign in with a Claude Pro/Max subscription and use it from the browser | There is no public OAuth that grants a third-party app someone's subscription. The API is billed separately; the only other route is lifting a session cookie out of a browser profile | The assistant is **the real website in a pane** — split view, pointed at claude.ai. The user signs in as they always do, so the subscription works, there is no key to enter, and Slash reads nothing. Sending page content to a provider stays a separate feature behind `aiMayReadPageContent` |
 | Set Slash as the default browser from inside Slash | Windows has not permitted it since Windows 8: the association is a `UserChoice` key signed against the user and the ProgId, and anything written from code is reverted with no error | The installer registers Slash under `StartMenuInternet`/`RegisteredApplications` so it *appears* in Default apps; the app opens that screen and says the final click is the user's. No `system:makeDefault` channel exists, because the name would be a lie. Slash also had to learn to open URLs from its own argv — that is the entire mechanism by which a default browser receives a click |
+| A floating "download this video" panel, like IDM | Anything drawn over a page has to be a native view: the page is a `WebContentsView` composited above the chrome document, so a React chip renders *behind* the video it points at — visible on the new tab page, invisible on YouTube | The chip is an overlay surface (`media-offer`) sized to a corner, non-modal so the player stays clickable. **Passive**: it never takes the overlay from a surface the user opened, and returns when that closes |
 | Download any video the browser plays, like a download manager | Every serious video site streams through Media Source Extensions: the `<video>` element's `src` is a `blob:` URL meaningless outside that page, the real media arrives as thousands of encrypted or segmented responses, and DRM-protected streams cannot be assembled at all | `MediaSniffer` watches `onResponseStarted` (the free event — `onBeforeRequest` belongs to `ContentBlocker`, and Electron allows one listener each) and offers **complete files only**. Manifests and encrypted streams are recognised in order to be *excluded and explained*, never decrypted. A toolbar button appears only when there is genuinely something to download |
 
 ## Architecture rules
@@ -162,6 +163,14 @@ These are not aspirations; they constrain the code.
   manifests and DRM licence traffic so `sniffNote` can say *why* there is nothing to download —
   offering a button that produces an unplayable file is worse than a sentence. Reassembling
   segments or touching encrypted streams is out of scope and must stay that way.
+- **A `webRequest` listener must be filtered, and its callback must do almost nothing.** An
+  unfiltered listener is a main-process callback for *every response on every page*, and
+  `ContentBlocker` already spends one. Media detection filters to `media`/`xhr`/`object` at
+  registration — the exclusion has to happen before the callback exists, because by the time it
+  runs the headers have already been marshalled across. The callback then dedupes by URL, because a
+  playing video re-requests the same file several times a second and re-ranking on each would be a
+  cost paid constantly. `detectPageMedia` **removes** the listener rather than skipping its body.
+  This is principle 1, and it was learned by shipping the unfiltered version.
 - **Anything that reaches a page's fields goes through `insertText`, never script.** Passwords and
   addresses both: `preload/content.ts` reports which *kinds* of field exist and holds the element
   references, main asks it to focus one, then types the value through Chromium's own input pipeline.

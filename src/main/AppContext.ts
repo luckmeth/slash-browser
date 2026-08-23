@@ -46,6 +46,7 @@ import { PageInsightService } from './insight/PageInsightService'
 import { DownloadQueue } from './downloads/engine/DownloadQueue'
 import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
 import { MediaSniffer } from './media/MediaSniffer'
+import { formatSize, suggestedFilename, toDownloadable } from './media/mediaSniffing'
 import { DefaultBrowserService } from './system/DefaultBrowserService'
 import { AiEngine } from './ai/AiEngine'
 import { ProviderRegistry } from './ai/ProviderRegistry'
@@ -60,6 +61,7 @@ import { buildYouTubeAdScript } from './shield/youtubeAdScript'
 import { buildPopupDefuserScript } from './shield/inject/popupDefuserScript'
 import { registerHandlers } from './ipc/handlers'
 import { BrowserWindowController } from './windows/BrowserWindowController'
+import type { MediaOffer } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
 import { UpdateService } from './updates/UpdateService'
 import { PageWatchService } from './snapshots/PageWatchService'
@@ -147,7 +149,7 @@ export class AppContext {
   readonly insight = new PageInsightService()
   readonly downloadEngine: DownloadQueue
   readonly guardian: DownloadGuardian
-  readonly mediaSniffer = new MediaSniffer()
+  readonly mediaSniffer: MediaSniffer
   readonly defaultBrowser: DefaultBrowserService
   readonly crashes: CrashReporting
   readonly updates: UpdateService
@@ -202,6 +204,10 @@ export class AppContext {
     this.db = new Database(app.getPath('userData'))
     this.settings = new SettingsStore(this.db)
     this.defaultBrowser = new DefaultBrowserService(this.settings)
+    // Constructed with the stored value rather than switched off afterwards:
+    // installing the listener and removing it a moment later would still have
+    // registered it for the first page load.
+    this.mediaSniffer = new MediaSniffer(this.settings.getAll().detectPageMedia)
     this.ipc = new IpcRegistry()
     this.history = new HistoryRepository(this.db)
     this.bookmarks = new BookmarkRepository(this.db)
@@ -339,6 +345,9 @@ export class AppContext {
       for (const window of this.windows) {
         if (window.tabs.activeTab?.contents?.id !== webContentsId) continue
         this.ipc.broadcast('media:found', { count }, window.privilegedContents())
+        // The toolbar button and the floating chip are two views of the same
+        // fact, and both have to move together or one of them is lying.
+        window.refreshMediaOffer()
       }
     }
     this.sessions.setRedirectObserver({
@@ -724,6 +733,7 @@ export class AppContext {
         this.cosmetics.observe(contents)
       },
       observeMedia: (contents) => this.mediaSniffer.observe(contents),
+      mediaOffer: (window) => this.mediaOfferFor(window),
       isKnownAdHost: (host) => this.blocker.engine.isKnownAdHost(host),
       onRedirectChain: (chain) => {
         // Only chains worth attention are pushed. Broadcasting every http→https
@@ -842,6 +852,37 @@ export class AppContext {
    * contract — the previous hand-listed union needed a `never` cast, which meant
    * a mismatched payload would have compiled.
    */
+  /**
+   * The one file the floating chip should offer for a window, or null.
+   *
+   * Lives here rather than in the window because the sniffer is
+   * application-wide. The window is told what to float; it does not go looking.
+   *
+   * Returns null unless the *active* tab has a complete file. A video playing
+   * in a background tab is not a reason to put a chip over the page somebody is
+   * reading, and a manifest or an encrypted stream is not something a chip can
+   * honestly offer — those get the panel's sentence instead.
+   */
+  private mediaOfferFor(window: BrowserWindowController): MediaOffer | null {
+    if (!this.settings.getAll().mediaOverlayButton) return null
+
+    const contents = window.tabs.activeTab?.contents ?? null
+    // Cheap gate first. This runs on every tab snapshot, and the common case is
+    // a page with no video at all.
+    if (this.mediaSniffer.knownCount(contents) === 0) return null
+
+    const files = toDownloadable(this.mediaSniffer.forTab(contents))
+    const best = files[0]
+    if (!best) return null
+
+    return {
+      url: best.url,
+      filename: suggestedFilename(best.url, 'file'),
+      sizeText: formatSize(best.sizeBytes),
+      others: files.length - 1
+    }
+  }
+
   private broadcastAll<C extends EventChannel>(channel: C, payload: EventPayload<C>): void {
     for (const window of this.windows) {
       this.ipc.broadcast(channel, payload, window.privilegedContents())

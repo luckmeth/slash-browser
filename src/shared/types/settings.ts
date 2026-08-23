@@ -59,6 +59,21 @@ export const SettingsSchema = z.object({
    */
   onboardingCompleted: z.boolean().default(false),
 
+  // --- media detection -------------------------------------------------------
+  /**
+   * Whether Slash watches responses for downloadable video and audio.
+   *
+   * On, because it is a feature people install a browser for. Switchable
+   * because it is the one part of the browser that costs something on every
+   * page: a `webRequest` listener is a main-process callback per response, and
+   * principle 1 says no feature may add latency to the browsing path. Off
+   * removes the listener rather than skipping its body — a switch that left the
+   * cost in place would not be a switch.
+   */
+  detectPageMedia: z.boolean().default(true),
+  /** Whether the floating download button may appear over a playing video. */
+  mediaOverlayButton: z.boolean().default(true),
+
   // --- docked assistant ------------------------------------------------------
   /**
    * Which AI assistant docks beside a page.

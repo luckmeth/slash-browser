@@ -319,7 +319,17 @@ function DefaultBrowserStep(): React.JSX.Element {
         type="button"
         onClick={() => {
           setOpened(true)
-          void window.browser.invoke('system:openDefaultBrowserSettings', undefined)
+          void window.browser
+            .invoke('system:openDefaultBrowserSettings', undefined)
+            .then(() =>
+              setTimeout(() => {
+                void window.browser
+                  .invoke('system:refreshDefaultBrowser', undefined)
+                  .then((result) => {
+                    if (result.ok) setStatus(result.value)
+                  })
+              }, 5000)
+            )
         }}
         className="mt-4 w-full cursor-pointer rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-black transition hover:opacity-90"
       >

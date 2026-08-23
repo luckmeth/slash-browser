@@ -292,6 +292,12 @@ export const INVOKE_CHANNELS = [
   'guardian:scanMedia',
   /** How many downloadable files the active tab has been seen fetching. */
   'media:detected',
+  /** What the floating chip over the page should say. */
+  'media:offer',
+  /** Downloads one detected file, by URL, from the chip. */
+  'media:download',
+  /** Puts the chip away for this page. */
+  'media:dismissOffer',
 
   /** Docks the chosen AI assistant beside the page, or puts it away. */
   'assistant:toggle',
@@ -299,6 +305,8 @@ export const INVOKE_CHANNELS = [
   // --- default browser ---
   'system:defaultBrowser',
   'system:openDefaultBrowserSettings',
+  /** Re-reads the registry after the user has been to the Windows screen. */
+  'system:refreshDefaultBrowser',
   'system:dismissDefaultBrowser'
 ] as const
 

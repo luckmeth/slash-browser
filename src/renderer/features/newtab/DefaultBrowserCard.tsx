@@ -43,7 +43,19 @@ export function DefaultBrowserCard(): React.JSX.Element | null {
               type="button"
               onClick={() => {
                 setOpened(true)
-                void window.browser.invoke('system:openDefaultBrowserSettings', undefined)
+                void window.browser
+                  .invoke('system:openDefaultBrowserSettings', undefined)
+                  // Re-read after a few seconds. If they did set it, the card
+                  // should stop asking without waiting for a relaunch.
+                  .then(() =>
+                    setTimeout(() => {
+                      void window.browser
+                        .invoke('system:refreshDefaultBrowser', undefined)
+                        .then((result) => {
+                          if (result.ok && result.value.isDefault) setOffer(false)
+                        })
+                    }, 5000)
+                  )
               }}
               className="cursor-pointer rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-black transition hover:opacity-90"
             >

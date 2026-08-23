@@ -124,6 +124,11 @@ export class OverlayController {
     return this.state
   }
 
+  /** Which surface is up, so a passive one can refuse to steal the overlay. */
+  get current(): OverlayState {
+    return this.state
+  }
+
   get webContents() {
     return this.view?.webContents ?? null
   }
