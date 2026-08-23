@@ -13,6 +13,16 @@ export default tseslint.config(
     // of failures about globals and JSX settings that do not apply to them.
     ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**', 'portal/**', 'platform/**']
   },
+  {
+    // Build-time scripts. They run on plain Node — `process`, `console` and
+    // `Buffer` are exactly what they are for — and never reach the application
+    // bundle, so the browser config's assumption that Node globals are absent
+    // does not hold here.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly', Buffer: 'readonly' }
+    }
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
