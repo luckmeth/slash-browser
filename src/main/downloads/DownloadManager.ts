@@ -3,6 +3,7 @@ import { app, dialog, shell, type BaseWindow, type Session, type DownloadItem as
 import { isDangerousFilename, type DownloadItem, type DownloadState } from '@shared/types/browsing'
 import type { DownloadRepository } from '../db/repositories/DownloadRepository'
 import type { SettingsStore } from '../settings/SettingsStore'
+import { shouldTakeOver } from './takeover'
 import { createLogger } from '../logger'
 
 const log = createLogger('downloads')
@@ -18,6 +19,15 @@ export interface DownloadHooks {
   onChanged: (items: DownloadItem[]) => void
   /** Window used to parent modal dialogs. */
   getWindow: () => BaseWindow | null
+  /**
+   * Hands a download to the accelerated engine instead of Chromium.
+   *
+   * Injected rather than imported: this class knows about Chromium's downloads
+   * and nothing else, and the engine knows nothing about `will-download`. The
+   * decision to hand over is `shouldTakeOver`'s, and it is deliberately
+   * conservative — see the note there about second requests.
+   */
+  accelerate?: (url: string, filename: string) => void
 }
 
 export class DownloadManager {
@@ -55,6 +65,27 @@ export class DownloadManager {
 
   attachToSession(target: Session): void {
     target.on('will-download', (_event, electronItem, webContents) => {
+      const settings0 = this.settings.getAll()
+      const verdict = shouldTakeOver({
+        url: electronItem.getURL(),
+        totalBytes: electronItem.getTotalBytes(),
+        enabled: settings0.accelerateDownloads && this.hooks.accelerate !== undefined,
+        askWhereToSave: settings0.askWhereToSaveDownloads
+      })
+
+      if (verdict.take) {
+        // Cancelled *before* any record is created, so a taken-over download
+        // never appears in the list as a cancelled one. There is exactly one
+        // entry for it, in the engine.
+        const url = electronItem.getURL()
+        const filename = electronItem.getFilename()
+        electronItem.cancel()
+        log.info(`accelerating ${filename} (${electronItem.getTotalBytes()} bytes)`)
+        this.hooks.accelerate?.(url, filename)
+        return
+      }
+      log.debug(`chromium keeps this download: ${verdict.because}`)
+
       counter += 1
       const id = `dl-${Date.now().toString(36)}-${counter.toString(36)}`
       const filename = electronItem.getFilename()

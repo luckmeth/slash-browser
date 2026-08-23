@@ -311,6 +311,16 @@ export const SettingsSchema = z.object({
   downloadConnections: z.number().int().min(1).max(8).default(4),
   /** Ceiling in bytes per second across all downloads. 0 = unlimited. */
   downloadBandwidthLimit: z.number().int().min(0).default(0),
+  /**
+   * Whether Slash takes large downloads from Chromium and accelerates them.
+   *
+   * On, because a download manager nothing reaches is not a feature. Taking over
+   * means cancelling Chromium's transfer and requesting the URL again, which is
+   * how every download manager works and is why `shouldTakeOver` refuses
+   * anything small, anything of unknown length, and anything that is not a plain
+   * web address — see the note there.
+   */
+  accelerateDownloads: z.boolean().default(true),
 
   // --- content blocking ------------------------------------------------------
   /**

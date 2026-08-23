@@ -433,6 +433,56 @@ export function SettingsPanel(): React.JSX.Element {
         />
       </Group>
 
+      <Group title="Download acceleration">
+        <Toggle
+          label="Download large files with several connections"
+          hint="Slash takes downloads over 4 MB from Chromium and fetches them in parallel. Smaller ones are left alone: splitting saves less than the extra request costs, and a small download is often a form result that cannot be asked for twice."
+          checked={settings.accelerateDownloads}
+          onChange={(accelerateDownloads) => update({ accelerateDownloads })}
+        />
+
+        <Field label={`Connections per file — ${settings.downloadConnections}`}>
+          <input
+            type="range"
+            min={1}
+            max={8}
+            step={1}
+            value={settings.downloadConnections}
+            onChange={(event) => update({ downloadConnections: Number(event.target.value) })}
+            className="w-full accent-[var(--color-accent)]"
+          />
+          {/* Said plainly, because more is not always better and servers
+              disagree about it. */}
+          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            More connections help on a fast link and a server that allows them. Some servers refuse
+            or throttle several at once, and a few count them against a per-user limit — if
+            downloads from a particular site get slower, lower this.
+          </p>
+        </Field>
+
+        <Field label="Speed limit">
+          <select
+            value={String(settings.downloadBandwidthLimit)}
+            onChange={(event) =>
+              update({ downloadBandwidthLimit: Number(event.target.value) })
+            }
+            className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="0">No limit</option>
+            <option value="262144">256 KB/s</option>
+            <option value="524288">512 KB/s</option>
+            <option value="1048576">1 MB/s</option>
+            <option value="2097152">2 MB/s</option>
+            <option value="5242880">5 MB/s</option>
+            <option value="10485760">10 MB/s</option>
+          </select>
+          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            Across all downloads at once. Useful when a large file is making a call or a game
+            unusable.
+          </p>
+        </Field>
+      </Group>
+
       <Group title="Video downloads">
         <Toggle
           label="Find downloadable video and audio on pages"
@@ -608,6 +658,10 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     keywords: 'keys keybinding hotkey accelerator remap rebind ctrl alt shift shortcut customise'
   },
   'Restore points': { category: 'Browsing', keywords: 'session snapshot restore tabs startup' },
+  'Download acceleration': {
+    category: 'Browsing',
+    keywords: 'download accelerate connections speed limit bandwidth parallel segments idm manager fast'
+  },
   'Video downloads': {
     category: 'Browsing',
     keywords: 'video download media detect stream mp4 save youtube idm audio'

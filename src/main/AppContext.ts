@@ -361,6 +361,12 @@ export class AppContext {
     })
     this.downloads = new DownloadManager(this.downloadRepository, this.settings, {
       onChanged: (items) => this.broadcastAll('downloads:changed', items),
+      // The engine has existed since Phase 6 and nothing outside our own UI ever
+      // reached it. This is the wire that makes clicking a link on a page use
+      // several connections instead of one.
+      accelerate: (url, filename) => {
+        this.downloadEngine.enqueue(url, { priority: 'normal', startAfter: null, filename })
+      },
       getWindow: () => this.focusedWindow()?.browserWindow ?? null
     })
   }

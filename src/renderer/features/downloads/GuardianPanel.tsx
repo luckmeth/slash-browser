@@ -28,14 +28,29 @@ const VERDICT_TONE: Record<LinkVerdict, string> = {
  * like it belongs to the site and can say a link sits in an ad slot; it cannot
  * say a file is safe, and it never does.
  */
+/**
+ * Which links "Download all" actually takes.
+ *
+ * Everything the scan did not flag. Queueing the one link on the page that was
+ * trying to trick you is a bad outcome for a button whose whole appeal is not
+ * having to look at the list — and nobody unticks twenty checkboxes.
+ */
+function batchable(candidates: DownloadScan['candidates']): DownloadScan['candidates'] {
+  return candidates.filter(
+    (candidate) => candidate.verdict !== 'advertisement' && candidate.verdict !== 'suspicious'
+  )
+}
+
 export function GuardianPanel(): React.JSX.Element {
   const [scan, setScan] = useState<DownloadScan | null>(null)
   const [media, setMedia] = useState<MediaScan | null>(null)
   const [busy, setBusy] = useState<'links' | 'media' | null>(null)
+  const [batched, setBatched] = useState<number | null>(null)
   const detectedMedia = useBrowserStore((s) => s.detectedMedia)
 
   const scanLinks = (): void => {
     setBusy('links')
+    setBatched(null)
     void window.browser.invoke('guardian:scanDownloads', undefined).then((result) => {
       setBusy(null)
       if (result.ok) setScan(result.value)
@@ -96,6 +111,34 @@ export function GuardianPanel(): React.JSX.Element {
         <section>
           {scan.note && (
             <p className="mb-2 text-xs text-[var(--color-text-muted)]">{scan.note}</p>
+          )}
+
+          {/*
+            Batch download — the thing people install a download manager to do
+            on a page of files. Deliberately excludes anything the scan flagged
+            as an advert or as suspicious: "download everything" should not be a
+            way to queue up the one link on the page that was trying to trick
+            you, and unticking them one by one is not a thing anybody does.
+          */}
+          {scan.candidates.length > 1 && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] p-2">
+              <p className="min-w-0 flex-1 text-[11px] text-[var(--color-text-muted)]">
+                {batchable(scan.candidates).length} of {scan.candidates.length} look like ordinary
+                files
+              </p>
+              <button
+                type="button"
+                disabled={batched !== null}
+                onClick={() => {
+                  const targets = batchable(scan.candidates)
+                  for (const candidate of targets) download(candidate.url)
+                  setBatched(targets.length)
+                }}
+                className="shrink-0 cursor-pointer rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[10px] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+              >
+                {batched === null ? 'Download all' : `Queued ${batched}`}
+              </button>
+            </div>
           )}
           <ul className="space-y-2">
             {scan.candidates.map((candidate) => (
