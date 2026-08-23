@@ -58,7 +58,31 @@ first. A feature that makes browsing feel heavy is not worth having.
 
 Ranking is by kind then size, so a short advert can only be first while it is the only thing seen.
 
-## 3 — YouTube: the segmented case
+## 3 — YouTube
+
+The site this feature is judged on, and the one a network observer alone cannot serve: media
+arrives as byte ranges of `videoplayback`, so watching responses sees fragments and never a file.
+The page's own format list is read instead — on the user's click, not on load.
+
+1. Open a YouTube video and let it play a moment.
+2. **Expect:** the chip appears in the top-right of the page, reading the video title and
+   *"Choose a quality"*.
+3. Click **Download**. **Expect:** the picker opens, listing qualities with sizes.
+4. **Expect** the entries that play on their own are at the top. Rows that are picture-only say
+   **· no sound** on the row itself, not in a footnote.
+5. Pick a complete one. **Expect:** it appears under *Managed downloads*, completes, and **plays
+   with sound**.
+6. **Expect** the saved file is named after the video and its quality — not `videoplayback`,
+   which is what every YouTube URL is called and a name nobody ever finds again.
+7. If the picker is empty, read what it says. Both outcomes are correct behaviour, not bugs:
+   - *"signed addresses"* — this video's formats need the site's own signature code to build
+     their URLs. Slash does not run it.
+   - *"adaptive stream"* / *"encrypted"* — the older refusals, still correct.
+
+**Must not:** offer a row that downloads to an unplayable file, or say "nothing found" when the
+real reason is signed addresses.
+
+## 3b — Segmented delivery elsewhere
 
 1. Open any YouTube video and let it play for ten seconds.
 2. Open the downloads panel and press **Find media** if the button did not appear.

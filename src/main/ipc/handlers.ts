@@ -1577,31 +1577,68 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(window.currentMediaOffer())
   })
 
-  ipc.handle('media:dismissOffer', (_req, context) => {
+  ipc.handle('media:openPicker', (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
-    window.dismissMediaOffer()
+    window.showMediaPicker()
     return ok(undefined)
   })
 
-  ipc.handle('media:download', (request, context) => {
+  ipc.handle('media:options', async (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
 
-    // The URL is checked against what this tab was actually seen fetching. The
-    // renderer sending a URL it was given back is fine; the renderer sending
-    // *any* URL and having the browser download it is not.
-    const contents = window.tabs.activeTab?.contents ?? null
-    const known = ctx.mediaSniffer.forTab(contents).some((item) => item.url === request.url)
-    if (!known) return err('NOT_FOUND', 'That file was not detected on this page')
+    const options = await ctx.mediaOptionsFor(window)
+    // Remembered so a download can be checked against what was actually shown.
+    // Otherwise the renderer could send any URL and have the browser fetch it,
+    // which is a much larger capability than "save the video on this page".
+    window.rememberMediaChoices(
+      options.choices.map((choice) => choice.url),
+      options.title
+    )
 
-    // Same guard as the engine's own channel: it writes whatever it fetches to
-    // disk, so a non-http URL here would be an arbitrary local file copy.
+    return ok({
+      title: options.title,
+      note: options.note,
+      choices: options.choices.map((choice) => ({
+        url: choice.url,
+        label: choice.label,
+        sizeText: choice.sizeText,
+        complete: choice.complete,
+        hasVideo: choice.hasVideo,
+        hasAudio: choice.hasAudio
+      }))
+    })
+  })
+
+  ipc.handle('media:downloadChoice', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    if (!window.wasOffered(request.url)) {
+      return ok({ ok: false, reason: 'That option is no longer available. Try opening the list again.' })
+    }
     if (!/^https?:\/\//i.test(request.url)) {
-      return err('FORBIDDEN', 'Only http and https downloads are supported')
+      return ok({ ok: false, reason: 'Only http and https downloads are supported.' })
     }
 
-    ctx.downloadEngine.enqueue(request.url, { priority: 'normal', startAfter: null })
+    const options = await ctx.mediaOptionsFor(window)
+    const choice = options.choices.find((entry) => entry.url === request.url)
+    if (!choice) {
+      return ok({ ok: false, reason: 'That option is no longer available. Try opening the list again.' })
+    }
+
+    ctx.downloadEngine.enqueue(request.url, {
+      priority: 'normal',
+      startAfter: null,
+      filename: ctx.filenameForChoice(window.offeredTitle, choice)
+    })
+    return ok({ ok: true, reason: null })
+  })
+
+  ipc.handle('media:dismissOffer', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
     window.dismissMediaOffer()
     return ok(undefined)
   })

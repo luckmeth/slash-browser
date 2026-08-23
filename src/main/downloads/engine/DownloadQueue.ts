@@ -74,10 +74,26 @@ export class DownloadQueue {
    */
   enqueue(
     url: string,
-    options: { priority?: DownloadPriority; directory?: string; startAfter?: number | null } = {}
+    options: {
+      priority?: DownloadPriority
+      directory?: string
+      startAfter?: number | null
+      /**
+       * What to call the file, when the caller knows better than the URL does.
+       *
+       * A media URL is very often named after the endpoint rather than the
+       * video — every YouTube stream is called `videoplayback` — so deriving
+       * the name from the path produces a downloads folder full of identical
+       * entries nobody can tell apart.
+       */
+      filename?: string
+    } = {}
   ): string {
     const id = randomUUID()
-    const fallbackName = safeFilename(decodeURIComponent(new URL(url).pathname.split('/').pop() ?? ''))
+    const fromUrl = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '')
+    const fallbackName = safeFilename(
+      options.filename !== undefined && options.filename.trim() !== '' ? options.filename : fromUrl
+    )
     const directory = options.directory ?? this.defaultDirectory()
 
     this.records.set(id, {

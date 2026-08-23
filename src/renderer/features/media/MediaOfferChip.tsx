@@ -61,16 +61,23 @@ export function MediaOfferChip(): React.JSX.Element | null {
             </p>
           </div>
 
+          {/*
+            Opens the picker rather than downloading blind. On a page that lists
+            several qualities there is no single right answer, and on YouTube
+            there is no file at all until the page has been read — so one button
+            labelled "Download" would have been a promise about something the
+            browser had not looked at yet.
+          */}
           <button
             type="button"
             disabled={saving}
             onClick={() => {
               setSaving(true)
-              void window.browser.invoke('media:download', { url: offer.url })
+              void window.browser.invoke('media:openPicker', undefined)
             }}
             className="shrink-0 cursor-pointer rounded-lg bg-[var(--color-accent)] px-2.5 py-1.5 text-[11px] font-medium text-black transition hover:opacity-90 disabled:opacity-60"
           >
-            {saving ? 'Saving…' : 'Download'}
+            {saving ? 'Opening…' : 'Download'}
           </button>
 
           {/* Dismissal is per page, not forever — see `dismissMediaOffer`.

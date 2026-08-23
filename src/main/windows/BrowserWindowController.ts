@@ -737,7 +737,13 @@ export class BrowserWindowController {
       return
     }
 
-    const unchanged = showing && this.mediaOffer?.url === wanted.url
+    // Compared on the label too, not only the URL. A page that lists its own
+    // formats has no single URL yet, so every YouTube video would have compared
+    // equal and the chip would have kept the previous video's title.
+    const unchanged =
+      showing &&
+      this.mediaOffer?.url === wanted.url &&
+      this.mediaOffer?.filename === wanted.filename
     this.mediaOffer = wanted
     if (unchanged) return
 
@@ -764,6 +770,44 @@ export class BrowserWindowController {
   currentMediaOffer(): MediaOffer | null {
     return this.mediaOffer
   }
+
+  /**
+   * Opens the picker over the page.
+   *
+   * Modal, unlike the chip that opens it. The chip is passive and must not take
+   * a click away from the video; the picker is a direct answer to one, so
+   * covering the page is right and the list needs the room.
+   */
+  showMediaPicker(): void {
+    const state = this.overlay.show('media-picker', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
+   * Remembers what the picker was shown, so a download can be checked against it.
+   *
+   * The renderer sends back a URL it was given. Without this it could send any
+   * URL and have the browser fetch it, which is a different and much larger
+   * capability than "save the video on this page".
+   */
+  rememberMediaChoices(urls: readonly string[], title: string): void {
+    this.offeredMediaUrls = new Set(urls)
+    this.offeredMediaTitle = title
+  }
+
+  wasOffered(url: string): boolean {
+    return this.offeredMediaUrls.has(url)
+  }
+
+  get offeredTitle(): string {
+    return this.offeredMediaTitle
+  }
+
+  private offeredMediaUrls = new Set<string>()
+  private offeredMediaTitle = ''
 
   /**
    * Puts the chip away until this page changes.

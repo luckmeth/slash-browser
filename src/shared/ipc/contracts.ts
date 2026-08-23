@@ -132,6 +132,14 @@ export const OverlayStateSchema = z.object({
     /** A sponsored notice, in the browser's own chrome. Never inside a page. */
     'sponsor-notice',
     /**
+     * The download picker: every format this page can be saved as.
+     *
+     * Modal, unlike the chip that opens it. By this point the user has asked a
+     * question and is choosing an answer, so covering the page is correct —
+     * and the list needs room the chip does not have.
+     */
+    'media-picker',
+    /**
      * "There is a video here you can download", floating over the page.
      *
      * The one surface that appears without being asked for and stays. Sized to a
@@ -1194,7 +1202,38 @@ export const invokeContracts = {
       })
       .nullable()
   },
-  'media:download': { request: z.object({ url: z.string() }), response: z.void() },
+  'media:openPicker': { request: z.void(), response: z.void() },
+  /**
+   * Everything the active page can be downloaded as.
+   *
+   * Two sources merged: what the network observer saw, and what the page itself
+   * lists. The second is the only one that finds anything on YouTube, where
+   * media arrives as byte ranges of a transport format rather than as a file.
+   */
+  'media:options': {
+    request: z.void(),
+    response: z.object({
+      /** For the filenames, and the picker's heading. */
+      title: z.string(),
+      /** Empty means nothing downloadable — `note` says why. */
+      choices: z.array(
+        z.object({
+          url: z.string(),
+          label: z.string(),
+          sizeText: z.string(),
+          /** False means it is one half of a pair: video without sound, or sound alone. */
+          complete: z.boolean(),
+          hasVideo: z.boolean(),
+          hasAudio: z.boolean()
+        })
+      ),
+      note: z.string().nullable()
+    })
+  },
+  'media:downloadChoice': {
+    request: z.object({ url: z.string() }),
+    response: z.object({ ok: z.boolean(), reason: z.string().nullable() })
+  },
   'media:dismissOffer': { request: z.void(), response: z.void() },
 
   /**

@@ -47,6 +47,8 @@ import { DownloadQueue } from './downloads/engine/DownloadQueue'
 import { DownloadGuardian } from './downloads/guardian/DownloadGuardian'
 import { MediaSniffer } from './media/MediaSniffer'
 import { formatSize, suggestedFilename, toDownloadable } from './media/mediaSniffing'
+import { PageMediaExtractor } from './media/PageMediaExtractor'
+import { extensionFor, sniffNoteFor, type MediaChoice } from './media/pageFormats'
 import { DefaultBrowserService } from './system/DefaultBrowserService'
 import { AiEngine } from './ai/AiEngine'
 import { ProviderRegistry } from './ai/ProviderRegistry'
@@ -150,6 +152,7 @@ export class AppContext {
   readonly downloadEngine: DownloadQueue
   readonly guardian: DownloadGuardian
   readonly mediaSniffer: MediaSniffer
+  readonly pageMedia = new PageMediaExtractor()
   readonly defaultBrowser: DefaultBrowserService
   readonly crashes: CrashReporting
   readonly updates: UpdateService
@@ -867,8 +870,22 @@ export class AppContext {
     if (!this.settings.getAll().mediaOverlayButton) return null
 
     const contents = window.tabs.activeTab?.contents ?? null
-    // Cheap gate first. This runs on every tab snapshot, and the common case is
-    // a page with no video at all.
+
+    // A page that lists its own formats always has something to offer, and it
+    // is the only thing that works on YouTube — where the network observer sees
+    // byte ranges of a transport format rather than a file, which is exactly
+    // why the chip never appeared there.
+    if (this.pageMedia.canExtract(contents)) {
+      return {
+        url: '',
+        filename: contents?.getTitle() ?? 'This video',
+        sizeText: 'Choose a quality',
+        others: 0
+      }
+    }
+
+    // Cheap gate. This runs on every tab snapshot, and the common case is a
+    // page with no video at all.
     if (this.mediaSniffer.knownCount(contents) === 0) return null
 
     const files = toDownloadable(this.mediaSniffer.forTab(contents))
@@ -881,6 +898,56 @@ export class AppContext {
       sizeText: formatSize(best.sizeBytes),
       others: files.length - 1
     }
+  }
+
+  /**
+   * Everything the active page can be saved as, from both sources.
+   *
+   * The page's own list first when it has one: it knows the real resolutions and
+   * byte lengths, where the network observer only knows what it happened to see.
+   */
+  async mediaOptionsFor(window: BrowserWindowController): Promise<{
+    title: string
+    choices: (MediaChoice & { sizeText: string })[]
+    note: string | null
+  }> {
+    const contents = window.tabs.activeTab?.contents ?? null
+
+    // The page's own list wins when it has one — including when that list is
+    // empty for a reason worth stating. Falling through to the network observer
+    // there would replace a specific explanation with a vaguer one.
+    const page = await this.pageMedia.extract(contents)
+    if (page) {
+      return {
+        title: page.title,
+        choices: page.choices.map((choice) => ({ ...choice, sizeText: formatSize(choice.size) })),
+        note: page.note
+      }
+    }
+
+    const sniffed = this.mediaSniffer.forTab(contents)
+    const files = toDownloadable(sniffed)
+    return {
+      title: contents?.getTitle() ?? '',
+      choices: files.map((file) => ({
+        url: file.url,
+        label: file.label,
+        size: file.sizeBytes,
+        mimeType: file.container === null ? '' : `video/${file.container}`,
+        hasVideo: file.kind === 'video',
+        hasAudio: file.kind === 'audio',
+        complete: true,
+        sizeText: formatSize(file.sizeBytes)
+      })),
+      note: files.length > 0 ? null : sniffNoteFor(sniffed)
+    }
+  }
+
+  /** Names a chosen file after the page, not after the endpoint it came from. */
+  filenameForChoice(title: string, choice: { label: string; mimeType: string; hasVideo: boolean }): string {
+    const quality = choice.label.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')
+    const base = title.trim() === '' ? 'video' : title
+    return `${base}${quality === '' ? '' : ` (${quality})`}.${extensionFor(choice.mimeType, choice.hasVideo)}`
   }
 
   private broadcastAll<C extends EventChannel>(channel: C, payload: EventPayload<C>): void {

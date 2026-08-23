@@ -294,10 +294,14 @@ export const INVOKE_CHANNELS = [
   'media:detected',
   /** What the floating chip over the page should say. */
   'media:offer',
-  /** Downloads one detected file, by URL, from the chip. */
-  'media:download',
   /** Puts the chip away for this page. */
   'media:dismissOffer',
+  /** Opens the picker: everything this page can be downloaded as. */
+  'media:openPicker',
+  /** What the picker shows — asked by the picker itself once it is up. */
+  'media:options',
+  /** Downloads one of the options the picker listed. */
+  'media:downloadChoice',
 
   /** Docks the chosen AI assistant beside the page, or puts it away. */
   'assistant:toggle',

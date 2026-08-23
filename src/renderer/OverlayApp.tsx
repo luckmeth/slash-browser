@@ -15,6 +15,7 @@ import { NoticeToast } from './features/notice/NoticeToast'
 import { PrintPreview } from './features/print/PrintPreview'
 import { SponsorNotice } from './features/sponsor/SponsorNotice'
 import { MediaOfferChip } from './features/media/MediaOfferChip'
+import { MediaPicker } from './features/media/MediaPicker'
 
 /**
  * Root of the overlay document.
@@ -73,6 +74,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <SponsorNotice />
     case 'media-offer':
       return <MediaOfferChip />
+    case 'media-picker':
+      return <MediaPicker />
     case 'spike':
       return <SpikeReport />
     case 'none':

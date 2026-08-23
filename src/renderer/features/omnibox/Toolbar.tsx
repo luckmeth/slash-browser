@@ -18,7 +18,6 @@ export function Toolbar(): React.JSX.Element {
   const bookmarks = useBrowserStore((s) => s.bookmarks)
   const panel = useBrowserStore((s) => s.panel)
   const togglePanel = useBrowserStore((s) => s.togglePanel)
-  const setPanel = useBrowserStore((s) => s.setPanel)
   const detectedMedia = useBrowserStore((s) => s.detectedMedia)
   const [assistantNote, setAssistantNote] = useState<string | null>(null)
   // The `?? []` MUST stay outside the selector. Zustand compares what a
@@ -397,7 +396,7 @@ export function Toolbar(): React.JSX.Element {
           type="button"
           title={`Download video (${detectedMedia} found on this page)`}
           aria-label={`Download video: ${detectedMedia} found on this page`}
-          onClick={() => setPanel('downloads')}
+          onClick={() => void window.browser.invoke('media:openPicker', undefined)}
           className="cursor-pointer rounded-md p-1.5 text-[var(--color-accent)] transition hover:bg-white/10"
         >
           <Icon name="video" />
