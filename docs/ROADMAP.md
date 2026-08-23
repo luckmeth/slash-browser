@@ -109,6 +109,27 @@ development work in the usual sense:
 | 4 | **Stand up the ad platform** | Four accounts and the RLS check in `platform/README.md`. Test row-level security first, with two real advertiser accounts |
 | 5 | A search partnership | Still worth more than the ad platform at your current size. `docs/LAUNCH.md` |
 
+## Ad-free subscription — deliberately not built yet
+
+The intent is on record: adverts appear for everyone, and a paid subscription removes them.
+
+**Not started, and it should not be, until the ad platform has run for a while with real
+advertisers.** The reason is not effort. A subscription is a promise made monthly, and the pieces it
+needs do not exist:
+
+| Piece | State |
+|---|---|
+| Recurring billing | Stripe **Checkout** is wired for one-off campaign payments. Subscriptions are a different object, with dunning, proration, cancellation and tax handling behind them |
+| Entitlement the browser can check | The browser is local-first and fetches a batch of adverts anonymously — deliberately so, since a per-user entitlement check is a request that identifies the user every few hours. Signed offline licence tokens are the only shape that fits, and there is no key infrastructure |
+| A refund story | People pay for a year and the company changes. That is a commitment, not a feature |
+
+What *is* already true, and is the honest half of it: every advert placement is a settings switch,
+so an entitlement check has exactly one place to land — `SponsorService.livePlacement()` and
+`SponsorNoticeService`. Nothing needs restructuring when this is built.
+
+The thing to avoid is shipping a payment for a promise the architecture cannot keep. See
+`docs/ADVERTISING.md` for how the advert side actually works today.
+
 ## Keeping this file honest
 
 Before adding an entry, grep for it. Before trusting one, grep for it. The QA pass that found the
