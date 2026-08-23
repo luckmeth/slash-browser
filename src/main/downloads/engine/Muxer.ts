@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { app } from 'electron'
+import { bundledResource } from '../../bundledResources'
 import { createLogger } from '../../logger'
 
 const log = createLogger('muxer')
@@ -44,9 +43,7 @@ export class Muxer {
    * puts it in the same place `resources/models/` goes, for the same reason.
    */
   private get binary(): string {
-    return app.isPackaged
-      ? join(process.resourcesPath, 'ffmpeg', 'ffmpeg.exe')
-      : join(app.getAppPath(), 'resources', 'ffmpeg', 'ffmpeg.exe')
+    return bundledResource('ffmpeg', 'ffmpeg.exe')
   }
 
   available(): boolean {

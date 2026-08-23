@@ -166,6 +166,17 @@ These are not aspirations; they constrain the code.
   manifests and DRM licence traffic so `sniffNote` can say *why* there is nothing to download —
   offering a button that produces an unplayable file is worse than a sentence. Reassembling
   segments or touching encrypted streams is out of scope and must stay that way.
+- **Anything the queue starts must claim its slot before its first `await`.** `pump` starts
+  whatever is queued and not already live, so a `begin*` method that awaits before calling
+  `this.live.set` leaves a window for a second pump to start the same download again. The two runs
+  then race over the same part files and the download **completes**, silently, having produced only
+  half the video. `beginJoined` shipped with exactly that bug and it was invisible to typecheck,
+  lint and 854 unit tests — only `SLASH_STREAM_PROBE` caught it.
+- **A download path is not verified until a probe has run it and read the file back.** "State =
+  completed" means the code finished, not that the file is right. `SLASH_STREAM_PROBE` generates a
+  real video with the bundled ffmpeg, segments it into real HLS, serves it from a real server, runs
+  the real `DownloadQueue`, and checks the **duration and stream count** of the result — because a
+  stream assembled out of order still produces a file that opens and plays for a few seconds.
 - **A page script that is a string needs its own test.** `EXTRACT_SCRIPT` is evaluated in the page's
   own world, so a syntax error or a typo'd property fails no build, no typecheck, and no runtime
   check anybody sees — `extract` catches it and the feature reports "nothing to download" for ever.

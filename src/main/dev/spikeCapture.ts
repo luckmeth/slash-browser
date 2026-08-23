@@ -4287,3 +4287,138 @@ export async function runContextMenuCapture(
   server.close()
   app.quit()
 }
+
+/**
+ * Does a stream actually download, and does the file play?
+ *
+ * Written because "it typechecks" and "it works" are different claims, and this
+ * download path had only ever been the first. Nothing here is mocked: ffmpeg
+ * makes a real video, segments it into a real HLS stream, a real server serves
+ * it, the real `DownloadQueue` fetches it, and ffmpeg reads the result back.
+ *
+ * The thing being checked is not "did a file appear". A stream assembled with
+ * its segments out of order produces a file that opens, plays for a few
+ * seconds, and then falls apart — so the check is the **duration and stream
+ * count of the finished file**, which only come out right if every segment
+ * landed in its place.
+ */
+export async function runStreamCapture(
+  _window: BrowserWindowController,
+  hooks: {
+    enqueue: (url: string) => string
+    enqueueJoined: (video: string, audio: string, filename: string) => string
+    list: () => { id: string; state: string; savePath: string; error: string | null }[]
+    canJoin: () => boolean
+  }
+): Promise<void> {
+  const http = await import('node:http')
+  const { execFileSync } = await import('node:child_process')
+  const { mkdtempSync, existsSync, statSync, readFileSync: read } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const path = await import('node:path')
+
+  const { bundledResource } = await import('../bundledResources')
+  const ffmpeg = bundledResource('ffmpeg', 'ffmpeg.exe')
+  if (!existsSync(ffmpeg)) {
+    log.error('stream probe: no ffmpeg — run npm run fetch:ffmpeg')
+    app.quit()
+    return
+  }
+
+  const work = mkdtempSync(path.join(tmpdir(), 'slash-stream-'))
+  const run = (args: string[]): void => {
+    execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { windowsHide: true })
+  }
+
+  // A 12-second clip with a tone, long enough to become several segments — one
+  // segment would pass a test that ordering could never fail.
+  const source = path.join(work, 'source.mp4')
+  run([
+    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=15:duration=12',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=12',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', source
+  ])
+  run(['-i', source, '-c', 'copy', '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod',
+       '-hls_segment_filename', path.join(work, 'seg%03d.ts'), path.join(work, 'index.m3u8')])
+
+  // Separate tracks, for the join.
+  const videoOnly = path.join(work, 'video.mp4')
+  const audioOnly = path.join(work, 'audio.m4a')
+  run(['-i', source, '-an', '-c:v', 'copy', videoOnly])
+  run(['-i', source, '-vn', '-c:a', 'copy', audioOnly])
+
+  const server = http.createServer((req, res) => {
+    const name = (req.url ?? '/').split('?')[0]?.slice(1) ?? ''
+    const file = path.join(work, name)
+    if (!existsSync(file)) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/octet-stream' })
+    res.end(read(file))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  const port = typeof address === 'object' && address ? address.port : 0
+  const origin = `http://127.0.0.1:${port}`
+
+  /** Waits for a download to leave the queue, however it leaves it. */
+  const settle = async (id: string): Promise<{ state: string; savePath: string; error: string | null }> => {
+    for (let tick = 0; tick < 120; tick += 1) {
+      const found = hooks.list().find((entry) => entry.id === id)
+      if (found && ['completed', 'failed', 'cancelled'].includes(found.state)) return found
+      await delay(500)
+    }
+    return { state: 'timed out', savePath: '', error: null }
+  }
+
+  /**
+   * What ffmpeg says the finished file actually is.
+   *
+   * `-i` with no output is the idiom: ffmpeg prints what it found and exits
+   * non-zero complaining there is nowhere to write it. Reading stderr *only* on
+   * failure was this probe's own first bug — a valid file made ffmpeg exit
+   * zero, the inspector reported nothing, and the check silently proved
+   * nothing while looking like it had run.
+   */
+  const inspect = (file: string): string => {
+    if (!existsSync(file)) return 'MISSING'
+    let text = ''
+    try {
+      execFileSync(ffmpeg, ['-hide_banner', '-i', file], { windowsHide: true, stdio: 'pipe' })
+    } catch (error) {
+      text = String((error as { stderr?: Buffer }).stderr ?? '')
+    }
+    if (text === '') return 'ffmpeg said nothing — this is probably not media'
+
+    const duration = /Duration: (\d+:\d+:\d+\.\d+)/.exec(text)?.[1] ?? 'unknown'
+    const video = /Video: (\w+)/.exec(text)?.[1] ?? 'NONE'
+    const audio = /Audio: (\w+)/.exec(text)?.[1] ?? 'NONE'
+    return `duration=${duration} video=${video} audio=${audio} bytes=${statSync(file).size}`
+  }
+
+  // --- 1. A stream, assembled ------------------------------------------------
+  const streamId = hooks.enqueue(`${origin}/index.m3u8`)
+  const stream = await settle(streamId)
+  log.info(`stream probe [assemble]: state=${stream.state} error=${stream.error ?? 'none'}`)
+  log.info(`stream probe [assemble]: file → ${inspect(stream.savePath)}`)
+  log.info('stream probe [assemble]: source was 12s, video h264, audio aac. Anything else is a fail.')
+
+  // --- 2. Video and audio, joined -------------------------------------------
+  if (!hooks.canJoin()) {
+    log.error('stream probe [join]: no muxer available — skipping')
+  } else {
+    const joinId = hooks.enqueueJoined(`${origin}/video.mp4`, `${origin}/audio.m4a`, 'joined-probe.mp4')
+    const joined = await settle(joinId)
+    log.info(`stream probe [join]: state=${joined.state} error=${joined.error ?? 'none'}`)
+    log.info(`stream probe [join]: file → ${inspect(joined.savePath)}`)
+    log.info(
+      `stream probe [join]: parts left behind? ` +
+        `${existsSync(`${joined.savePath}.video.part`) || existsSync(`${joined.savePath}.audio.part`)}`
+    )
+  }
+
+  server.close()
+  app.quit()
+}

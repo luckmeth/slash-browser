@@ -237,6 +237,18 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_STREAM_PROBE']) {
+      void import('./dev/spikeCapture').then(({ runStreamCapture }) =>
+        runStreamCapture(window, {
+          enqueue: (url) => context.downloadEngine.enqueue(url, { priority: 'normal', startAfter: null }),
+          enqueueJoined: (video, audio, filename) =>
+            context.downloadEngine.enqueueJoined(video, audio, { filename }),
+          list: () => context.downloadEngine.list(),
+          canJoin: () => context.downloadEngine.canJoin()
+        })
+      )
+    }
+
     if (process.env['SLASH_CONTEXTMENU_PROBE']) {
       void import('./dev/spikeCapture').then(({ runContextMenuCapture }) =>
         runContextMenuCapture(window, { deps: () => window.contextMenuDeps() })

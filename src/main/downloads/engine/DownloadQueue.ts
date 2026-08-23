@@ -94,6 +94,16 @@ export class DownloadQueue {
        * entries nobody can tell apart.
        */
       filename?: string
+      /**
+       * Audio stream to join to this one when it finishes.
+       *
+       * Taken here rather than registered by the caller afterwards, and that is
+       * not a style choice: `enqueue` ends with `pump()`, which can reach
+       * `begin` synchronously — so a pairing recorded on the line *after*
+       * enqueue arrives too late, and the download runs as a plain single file.
+       * It downloads, it completes, and the video is silent. Found by running it.
+       */
+      joinWith?: string
     } = {}
   ): string {
     const id = randomUUID()
@@ -127,6 +137,9 @@ export class DownloadQueue {
       completedAt: null
     })
 
+    // Before pump(), which may start the download immediately.
+    if (options.joinWith !== undefined) this.pairs.set(id, options.joinWith)
+
     this.emit()
     this.pump()
     return id
@@ -148,13 +161,12 @@ export class DownloadQueue {
     audioUrl: string,
     options: { filename: string; priority?: DownloadPriority } = { filename: 'video.mp4' }
   ): string {
-    const id = this.enqueue(videoUrl, {
+    return this.enqueue(videoUrl, {
       priority: options.priority ?? 'normal',
       startAfter: null,
-      filename: options.filename
+      filename: options.filename,
+      joinWith: audioUrl
     })
-    this.pairs.set(id, audioUrl)
-    return id
   }
 
   /** Audio stream to join, for downloads that are two streams. */
@@ -402,17 +414,29 @@ export class DownloadQueue {
    * is the same wall-clock time and legible throughout.
    */
   private async beginJoined(id: string, record: EngineDownload, audioUrl: string): Promise<void> {
-    const finalPath = await this.uniquePath(join(this.defaultDirectory(), record.filename))
-    const videoPart = `${finalPath}.video.part`
-    const audioPart = `${finalPath}.audio.part`
-
+    // Claimed **before the first await**, and this is load-bearing. `pump` starts
+    // anything queued that is not already live; awaiting a unique path first
+    // left a window in which a second pump saw this still queued and started it
+    // again. Two runs then raced over the same part files — one deleted what
+    // the other was about to read — and the download completed, silently, with
+    // the video only. Found by running it, not by reading it.
+    this.live.set(id, {
+      capabilities: null,
+      lastBytes: 0,
+      lastSampleAt: Date.now(),
+      retryTimer: null
+    })
     this.patch(id, {
-      savePath: finalPath,
       state: 'downloading',
       attempts: record.attempts + 1,
       error: null,
       connectionNote: 'Downloading video…'
     })
+
+    const finalPath = await this.uniquePath(join(this.defaultDirectory(), record.filename))
+    const videoPart = `${finalPath}.video.part`
+    const audioPart = `${finalPath}.audio.part`
+    this.patch(id, { savePath: finalPath })
 
     let videoBytes = 0
     const fetchPart = async (url: string, destination: string, isVideo: boolean): Promise<number> => {
@@ -431,13 +455,6 @@ export class DownloadQueue {
       await download.run(capabilities.totalBytes, plan.connections)
       return capabilities.totalBytes ?? download.receivedBytes
     }
-
-    this.live.set(id, {
-      capabilities: null,
-      lastBytes: 0,
-      lastSampleAt: Date.now(),
-      retryTimer: null
-    })
 
     try {
       videoBytes = await fetchPart(record.url, videoPart, true)
