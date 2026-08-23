@@ -19,6 +19,7 @@ interface TileRow {
   body: string
   image: string
   click_url: string
+  placement: string
   starts_at: number | null
   ends_at: number | null
 }
@@ -77,7 +78,17 @@ export class SponsorService {
     return {
       enabled: this.settings.getAll().sponsoredTilesEnabled,
       configured: this.endpoint !== '',
-      tile: this.active ? this.currentTile(cached) : null,
+      tile: this.active ? this.currentTile(cached.filter((t) => t.placement === 'tile')) : null,
+      // No rotation: the backdrop is sold exclusively, so at most one campaign
+      // can be live at a time and picking "the first one due" is the whole of
+      // the decision.
+      background: this.active
+        ? selectLive(
+            cached.filter((creative) => creative.placement === 'background'),
+            0,
+            Date.now()
+          )
+        : null,
       cached: cached.length,
       pendingReports: this.pendingCount()
     }
@@ -116,7 +127,7 @@ export class SponsorService {
     const now = Date.now()
     return this.db.connection
       .prepare<[number], TileRow>(
-        `SELECT id, sponsor, headline, body, image, click_url, starts_at, ends_at
+        `SELECT id, sponsor, headline, body, image, click_url, placement, starts_at, ends_at
            FROM sponsored_tiles WHERE expires_at > ? ORDER BY id`
       )
       .all(now)
@@ -127,6 +138,7 @@ export class SponsorService {
         body: row.body,
         image: row.image,
         clickUrl: row.click_url,
+        placement: row.placement === 'background' ? 'background' : 'tile',
         startsAt: row.starts_at,
         endsAt: row.ends_at
       }))
@@ -246,8 +258,8 @@ export class SponsorService {
         const insert = this.db.connection.prepare(
           `INSERT INTO sponsored_tiles
              (id, sponsor, headline, body, image, click_url, fetched_at, expires_at,
-              starts_at, ends_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              starts_at, ends_at, placement)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         for (const tile of accepted) {
           insert.run(
@@ -260,7 +272,8 @@ export class SponsorService {
             Date.now(),
             expiresAt,
             tile.startsAt,
-            tile.endsAt
+            tile.endsAt,
+            tile.placement
           )
         }
       })

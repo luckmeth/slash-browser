@@ -317,6 +317,7 @@ th.num {
   color: var(--good);
   border-color: color-mix(in srgb, var(--good) 45%, transparent);
 }
+.pill.approved_unpaid,
 .pill.pending_review,
 .pill.pending_payment,
 .pill.scheduled,

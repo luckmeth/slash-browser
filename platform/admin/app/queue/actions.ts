@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { embedded } from '@slash/ad-shared'
+import { embedded, formatCents } from '@slash/ad-shared'
 import { currentAdmin } from '@/lib/supabase/server'
 import { supabaseService } from '@/lib/supabase/service'
 import { stripe } from '@/lib/stripe'
@@ -65,19 +65,33 @@ export async function approve(_prev: Decision, formData: FormData): Promise<Deci
     }
   }
 
-  // 'scheduled' rather than 'active', even if the window has already opened.
-  // advance_campaign_states() owns that transition, and having one writer for
-  // it is what makes "when did this go live?" answerable.
-  const { error } = await supabase
+  const { data: approved, error } = await supabase
     .from('campaigns')
-    .update({ status: 'scheduled', review_note: null, updated_at: new Date().toISOString() })
+    .update({ status: 'approved_unpaid', review_note: null, updated_at: new Date().toISOString() })
     .eq('id', id)
     .eq('status', 'pending_review')
+    .select('id, title, total_cost, starts_at, advertisers ( contact_email )')
+    .maybeSingle()
 
   if (error) return { error: error.message }
 
+  // They cannot pay until they know they may. This email is the only thing
+  // that tells them.
+  const to = embedded<{ contact_email: string }>(approved?.advertisers)?.contact_email
+  if (approved && to) {
+    await sendEmail({
+      to,
+      campaignId: approved.id,
+      ...emails.approvedPayNow(
+        approved.title,
+        formatCents(Math.round(Number(approved.total_cost) * 100)),
+        new Date(approved.starts_at).toUTCString()
+      )
+    })
+  }
+
   revalidatePath('/queue')
-  return { ok: 'Approved. It will go live at its start time.' }
+  return { ok: 'Approved. They have been emailed and can now pay.' }
 }
 
 export async function reject(_prev: Decision, formData: FormData): Promise<Decision> {
@@ -88,7 +102,7 @@ export async function reject(_prev: Decision, formData: FormData): Promise<Decis
   if (note === '') {
     // A rejection with no reason is one the advertiser cannot act on, so they
     // resubmit the same thing and it lands back in this queue.
-    return { error: 'Give a reason — it goes to the advertiser, who has paid.' }
+    return { error: 'Give a reason — it is emailed to the advertiser.' }
   }
 
   const supabase = supabaseService()
@@ -101,9 +115,10 @@ export async function reject(_prev: Decision, formData: FormData): Promise<Decis
 
   if (!campaign) return { error: 'That campaign no longer exists.' }
 
-  // Refund first. Rejecting a campaign somebody has paid for while keeping
-  // their money is not a state this system may rest in, even briefly — so if
-  // the refund cannot be made, nothing is rejected and the operator is told.
+  // Usually there is nothing to give back: review now happens before payment,
+  // so a rejected campaign was never charged. The refund path stays for rows
+  // created under the old order, and because an operator may still reject
+  // something already running.
   const refund = await refundFor(id)
   if (refund.attempted && !refund.ok) {
     return {

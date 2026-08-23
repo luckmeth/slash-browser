@@ -43,9 +43,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!campaign) {
     return NextResponse.json({ error: 'That campaign was not found.' }, { status: 404 })
   }
-  if (campaign.status !== 'pending_payment') {
+  if (campaign.status !== 'approved_unpaid') {
+    // Payment is the step *after* approval now. Taking money first meant
+    // holding it for something that might then be refused, and needing a
+    // refund path for the ordinary case rather than the exceptional one.
     return NextResponse.json(
-      { error: 'That campaign has already been paid for.' },
+      {
+        error:
+          campaign.status === 'pending_review'
+            ? 'This campaign is still being reviewed. You will be emailed when it is approved.'
+            : 'That campaign is not waiting for payment.'
+      },
       { status: 409 }
     )
   }

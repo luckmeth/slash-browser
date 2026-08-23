@@ -17,6 +17,8 @@ import { supabaseService } from './supabase/service'
 
 export type EmailType =
   | 'welcome'
+  | 'campaign_received'
+  | 'approved_pay_now'
   | 'payment_confirmation'
   | 'ad_live'
   | 'rejection'
@@ -105,6 +107,23 @@ export const emails = {
         <li>There is no targeting. We can tell you how many times your advert was
             shown and clicked, per day, and genuinely nothing else.</li>
       </ul>`
+  }),
+
+  campaignReceived: (title: string) => ({
+    type: 'campaign_received' as const,
+    subject: `We have your campaign — ${title}`,
+    body: `<p><strong>${escapeHtml(title)}</strong> is with us for review.</p>
+      <p>Somebody looks at every campaign before it runs. You will hear from us either way, and
+      you have not been charged — payment comes after approval, so there is never money sitting
+      with us for something we then turn down.</p>`
+  }),
+
+  approvedPayNow: (title: string, amount: string, starts: string) => ({
+    type: 'approved_pay_now' as const,
+    subject: `${title} is approved — pay to go live`,
+    body: `<p><strong>${escapeHtml(title)}</strong> has been approved.</p>
+      <p>Pay ${escapeHtml(amount)} from your dashboard and it will start
+      ${escapeHtml(starts)}. Until then the slot is held for you.</p>`
   }),
 
   paymentConfirmation: (title: string, amount: string, starts: string) => ({

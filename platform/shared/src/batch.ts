@@ -28,8 +28,15 @@ export interface BatchTile {
   /** A data: URL, or ''. Never a link — see `acceptCreative`. */
   image: string
   clickUrl: string
+  /** Where it goes. `background` is the exclusive new-tab takeover. */
+  placement: 'tile' | 'background'
   startsAt: number | null
   endsAt: number | null
+}
+
+/** Which placement tier maps to which rendering. */
+export function placementFor(tier: string): 'tile' | 'background' {
+  return tier === 'newtab_background' ? 'background' : 'tile'
 }
 
 export interface Batch {
@@ -44,6 +51,7 @@ export interface CampaignRow {
   destination_link: string
   starts_at: string
   ends_at: string
+  placement_tier?: string
   /**
    * PostgREST returns an embedded relation as an object or as a single-element
    * array depending on how it infers the relationship, and the two are not
@@ -95,6 +103,7 @@ export function toBatchTile(campaign: CampaignRow, imageDataUrl: string): BatchT
     body: campaign.description ?? '',
     image: imageDataUrl,
     clickUrl: campaign.destination_link,
+    placement: placementFor(campaign.placement_tier ?? ''),
     startsAt: Date.parse(campaign.starts_at),
     endsAt: Date.parse(campaign.ends_at)
   }

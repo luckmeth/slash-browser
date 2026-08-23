@@ -18,6 +18,15 @@ export const SponsoredTileSchema = z.object({
   image: z.string().default(''),
   clickUrl: z.string(),
   /**
+   * Where this creative goes.
+   *
+   * `background` takes over the whole new-tab backdrop and is exclusive — one
+   * at a time, which is what makes it worth its rate. `tile` is the small
+   * labelled card. Defaults to `tile` so a batch written before this existed
+   * keeps rendering exactly as it did.
+   */
+  placement: z.enum(['tile', 'background']).default('tile'),
+  /**
    * The campaign's window, in unix ms; null at either end means unbounded.
    *
    * Enforced on this machine rather than by refetching often enough to notice.
@@ -39,6 +48,14 @@ export const SponsorStatusSchema = z.object({
   configured: z.boolean(),
   /** The tile to show now, or null. */
   tile: SponsoredTileSchema.nullable(),
+  /**
+   * The creative taking over the new-tab backdrop, or null.
+   *
+   * Separate from `tile` because it is a different placement sold at a
+   * different rate, and because it is **exclusive**: there is no rotation to
+   * advance, only the one campaign whose window covers now.
+   */
+  background: SponsoredTileSchema.nullable(),
   /** How many creatives are cached, for the settings panel. */
   cached: z.number().int(),
   /** Counts waiting to be reported, so the user can see exactly what is pending. */
@@ -65,6 +82,7 @@ export const SponsorBatchSchema = z.object({
       /** data: URL only. An https: image would be a per-impression request. */
       image: z.string().max(2_000_000).default(''),
       clickUrl: z.string().url(),
+      placement: z.enum(['tile', 'background']).default('tile'),
       /** Unix ms. Omit both for a campaign with no schedule. */
       startsAt: z.number().nullable().default(null),
       endsAt: z.number().nullable().default(null)

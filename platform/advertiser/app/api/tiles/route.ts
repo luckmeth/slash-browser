@@ -56,7 +56,7 @@ export async function GET(): Promise<NextResponse> {
     const { data, error } = await supabase
       .from('campaigns')
       .select(
-        'id, title, description, destination_link, image_path, starts_at, ends_at, ' +
+        'id, title, description, destination_link, image_path, placement_tier, starts_at, ends_at, ' +
           'advertisers ( company_name )'
       )
       .in('status', ['scheduled', 'active'])

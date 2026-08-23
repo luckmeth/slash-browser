@@ -7,8 +7,10 @@ import { BrandMark } from '../../components/BrandMark'
 import { Icon } from '../../components/Icon'
 import { SlashSummary } from './SlashSummary'
 import { RecentlyClosed } from './RecentlyClosed'
+import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
-import { AdvertiseLink } from './AdvertiseLink'
+import { AdvertiseCard } from './AdvertiseCard'
+import { SponsoredBackground } from './SponsoredBackground'
 import { PublisherNotice } from './PublisherNotice'
 import { backgroundCss } from './backgrounds'
 
@@ -35,6 +37,16 @@ export function NewTabPage(): React.JSX.Element {
 
   const workspace = workspaces.find((w) => w.id === activeWorkspaceId)
   const backgroundId = settings?.newTabBackground ?? 'aurora'
+  /**
+   * The campaign taking over the backdrop, if one is live.
+   *
+   * Dismissal lasts the session only. Persisting it would mean an advertiser
+   * paying for hours that one reader had already opted out of, which is a
+   * different product from the one being sold — and the switch that turns it
+   * off for good is two clicks away in Settings.
+   */
+  const [sponsoredBackground, setSponsoredBackground] = useState<SponsoredCreative | null>(null)
+  const [backgroundDismissed, setBackgroundDismissed] = useState(false)
 
   useEffect(() => {
     void window.browser
@@ -62,26 +74,44 @@ export function NewTabPage(): React.JSX.Element {
     })
   }, [backgroundId, settings?.newTabCustomBackground])
 
+  useEffect(() => {
+    void window.browser.invoke('sponsor:status', undefined).then((result) => {
+      if (result.ok) setSponsoredBackground(result.value.background)
+    })
+  }, [])
+
   const background = backgroundCss(backgroundId, customBackground)
+  // A paid takeover replaces the user's chosen backdrop for its window; both
+  // being drawn would leave the advertiser's image fighting a gradient.
+  const showSponsoredBackground = sponsoredBackground !== null && !backgroundDismissed
 
   return (
     <div className="glass-page relative h-full overflow-y-auto">
       {/* Backdrop. CSS gradients rather than bundled photographs — an image set
           worth looking at would add tens of megabytes to the installer, and
           fetching one would make opening a tab an outbound request. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background,
-          backgroundSize: backgroundId === 'custom' ? 'cover' : undefined,
-          backgroundPosition: backgroundId === 'custom' ? 'center' : undefined
-        }}
-      />
+      {!showSponsoredBackground && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background,
+            backgroundSize: backgroundId === 'custom' ? 'cover' : undefined,
+            backgroundPosition: backgroundId === 'custom' ? 'center' : undefined
+          }}
+        />
+      )}
+
+      {showSponsoredBackground && (
+        <SponsoredBackground
+          creative={sponsoredBackground}
+          onDismiss={() => setBackgroundDismissed(true)}
+        />
+      )}
       {/* A scrim under the content when a photograph is behind it, so text stays
           legible whatever the user picked. Not applied to the gradients, which
           are already low-contrast by construction. */}
-      {backgroundId === 'custom' && customBackground && (
+      {!showSponsoredBackground && backgroundId === 'custom' && customBackground && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0"
@@ -130,7 +160,7 @@ export function NewTabPage(): React.JSX.Element {
 
         <PublisherNotice />
         <SponsoredTile />
-        <AdvertiseLink />
+        <AdvertiseCard />
 
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">

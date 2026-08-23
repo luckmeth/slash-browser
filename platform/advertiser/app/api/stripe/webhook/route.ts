@@ -87,14 +87,13 @@ async function fulfil(session: Stripe.Checkout.Session): Promise<void> {
     })
     .eq('stripe_checkout_session', session.id)
 
-  // Paid, but not yet running: an operator still looks at it. A queue somebody
-  // reads is the only thing standing between this browser's start page and
-  // whatever anyone with a card wants to put there.
+  // Already approved by a person before it could be paid for, so payment is the
+  // last gate. It now waits only for its start time.
   const { data: campaign } = await supabase
     .from('campaigns')
-    .update({ status: 'pending_review', updated_at: new Date().toISOString() })
+    .update({ status: 'scheduled', updated_at: new Date().toISOString() })
     .eq('id', campaignId)
-    .eq('status', 'pending_payment')
+    .eq('status', 'approved_unpaid')
     .select('id, title, starts_at, total_cost, advertisers ( contact_email )')
     .maybeSingle()
 

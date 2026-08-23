@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MS_PER_HOUR, formatCents, quote, scheduleProblems, type Tier } from '@slash/ad-shared'
 import { supabaseBrowser } from '@/lib/supabase/browser'
+import { notifySubmitted } from '@/app/campaigns/new/actions'
 import { ImageUpload, type Chosen } from './ImageUpload'
 
 /**
@@ -122,26 +123,10 @@ export function CampaignForm({
 
       if (error) throw new Error(error.message)
 
-      const response = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ campaignId: data.id })
-      })
-      const payload = (await response.json()) as { url?: string; error?: string }
-
-      if (!response.ok || !payload.url) {
-        // The campaign is saved and unpaid, so nothing is lost — say so, rather
-        // than leaving somebody wondering whether they have just been charged.
-        setFailure(
-          `${payload.error ?? 'Checkout could not be started.'} Your campaign is saved as unpaid; ` +
-            'you can pay for it from the dashboard.'
-        )
-        setBusy(false)
-        router.refresh()
-        return
-      }
-
-      window.location.assign(payload.url)
+      // Submitted for review, not for payment. Nobody is charged until a person
+      // has approved it, which is why there is no checkout redirect here.
+      await notifySubmitted(data.id)
+      router.push('/dashboard?submitted=1')
     } catch (cause) {
       setFailure(cause instanceof Error ? cause.message : 'Something went wrong.')
       setBusy(false)
@@ -268,11 +253,12 @@ export function CampaignForm({
 
       <div>
         <button type="submit" disabled={!ready}>
-          {busy ? 'Setting up payment…' : price ? `Pay ${formatCents(price.totalCents, currency)}` : 'Continue'}
+          {busy ? 'Submitting…' : 'Submit for review'}
         </button>
         <p className="note" style={{ marginTop: 10 }}>
-          A person reviews every campaign before it runs. If yours is not approved you are refunded
-          in full.
+          A person reads every campaign before it runs. <strong>You are not charged now</strong> —
+          once it is approved you will be emailed, and you pay then. Nothing is taken for something
+          we turn down.
         </p>
       </div>
     </form>

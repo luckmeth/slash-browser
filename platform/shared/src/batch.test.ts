@@ -6,6 +6,7 @@ import {
   belongsInBatch,
   buildBatch,
   capBatchSize,
+  placementFor,
   toBatchTile,
   type BatchTile,
   type CampaignRow
@@ -32,6 +33,7 @@ const tile = (overrides: Partial<BatchTile> = {}): BatchTile => ({
   body: '',
   image: 'data:image/png;base64,AAAA',
   clickUrl: 'https://example.com/offer',
+  placement: 'tile',
   startsAt: NOW,
   endsAt: NOW + BATCH_TTL_MS,
   ...overrides
@@ -83,6 +85,7 @@ describe('toBatchTile', () => {
       'headline',
       'id',
       'image',
+      'placement',
       'sponsor',
       'startsAt'
     ])
@@ -178,5 +181,25 @@ describe('embedded relations', () => {
     expect(toBatchTile(row({ advertisers: [{ company_name: 'Acme' }] }), '').sponsor).toBe('Acme')
     expect(toBatchTile(row({ advertisers: [] }), '').sponsor).toBe('')
     expect(toBatchTile(row({ advertisers: null }), '').sponsor).toBe('')
+  })
+})
+
+describe('placementFor', () => {
+  it('maps the background tier to the takeover', () => {
+    expect(placementFor('newtab_background')).toBe('background')
+  })
+
+  it('maps everything else to a tile', () => {
+    // Defaulting the other way would turn any tier added later into a
+    // full-screen takeover nobody sold.
+    expect(placementFor('home_banner')).toBe('tile')
+    expect(placementFor('newtab_feature')).toBe('tile')
+    expect(placementFor('')).toBe('tile')
+    expect(placementFor('something-new')).toBe('tile')
+  })
+
+  it('carries through toBatchTile', () => {
+    expect(toBatchTile(row({ placement_tier: 'newtab_background' }), '').placement).toBe('background')
+    expect(toBatchTile(row(), '').placement).toBe('tile')
   })
 })

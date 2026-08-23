@@ -8,9 +8,10 @@ import { PayButton } from '@/components/PayButton'
 export const dynamic = 'force-dynamic'
 
 const STATUS_TEXT: Record<string, string> = {
+  pending_review: 'Being reviewed',
+  approved_unpaid: 'Approved — pay to go live',
   pending_payment: 'Not paid yet',
-  pending_review: 'Waiting for review',
-  scheduled: 'Approved, waiting to start',
+  scheduled: 'Paid, waiting to start',
   active: 'Running now',
   rejected: 'Not approved',
   completed: 'Finished',
@@ -74,10 +75,17 @@ export default async function DashboardPage({
       <h1>Your campaigns</h1>
       <p className="lede">{advertiser.company_name}</p>
 
+      {params.submitted !== undefined && (
+        <p className="banner">
+          Submitted. Somebody reads every campaign before it runs — you will be emailed when it is
+          approved, and you pay then. Nothing has been charged.
+        </p>
+      )}
+
       {params.paid !== undefined && (
         <p className="banner">
-          Payment received. Your campaign is in the review queue — you will get an email when it
-          goes live.
+          Payment received. Your campaign will start at its scheduled time, and you will get one
+          more email when it goes live.
         </p>
       )}
 
@@ -120,7 +128,8 @@ export default async function DashboardPage({
                           {campaign.review_note}
                         </div>
                       )}
-                      {campaign.status === 'pending_payment' && (
+                      {(campaign.status === 'approved_unpaid' ||
+                        campaign.status === 'pending_payment') && (
                         <div style={{ marginTop: 8 }}>
                           <PayButton campaignId={campaign.id} />
                         </div>

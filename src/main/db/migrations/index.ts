@@ -761,6 +761,19 @@ const m022_addresses: Migration = {
   `
 }
 
+const m023_sponsor_placement: Migration = {
+  version: 23,
+  name: 'sponsor_placement',
+  sql: /* sql */ `
+    -- Whether a cached creative is a tile or the new-tab backdrop.
+    --
+    -- Defaults to 'tile', so anything cached before this migration keeps
+    -- rendering exactly as it did rather than silently becoming a full-screen
+    -- takeover on the next launch.
+    ALTER TABLE sponsored_tiles ADD COLUMN placement TEXT NOT NULL DEFAULT 'tile';
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -783,7 +796,8 @@ export const migrations: readonly Migration[] = [
   m019_sponsor_schedule,
   m020_snapshot_windows,
   m021_sync,
-  m022_addresses
+  m022_addresses,
+  m023_sponsor_placement
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(
