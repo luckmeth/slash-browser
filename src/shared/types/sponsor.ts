@@ -20,12 +20,21 @@ export const SponsoredTileSchema = z.object({
   /**
    * Where this creative goes.
    *
-   * `background` takes over the whole new-tab backdrop and is exclusive — one
-   * at a time, which is what makes it worth its rate. `tile` is the small
-   * labelled card. Defaults to `tile` so a batch written before this existed
-   * keeps rendering exactly as it did.
+   * Four shapes, priced by how much attention each takes:
+   *
+   *  - `background` — the whole new-tab backdrop. Exclusive, and dearest of
+   *    the start-page formats.
+   *  - `banner` — a wide panel on the start page. Visible without owning it.
+   *  - `tile` — the small labelled card.
+   *  - `notice` — a dismissible strip in the browser's **own chrome** while
+   *    somebody is browsing. Never inside a web page: injecting adverts into
+   *    pages is the exact behaviour this browser blocks, and doing it ourselves
+   *    would make the product adware. Rarest and dearest.
+   *
+   * Defaults to `tile`, so a batch written before this existed keeps rendering
+   * exactly as it did rather than becoming a takeover nobody sold.
    */
-  placement: z.enum(['tile', 'background']).default('tile'),
+  placement: z.enum(['tile', 'banner', 'background', 'notice']).default('tile'),
   /**
    * The campaign's window, in unix ms; null at either end means unbounded.
    *
@@ -56,6 +65,10 @@ export const SponsorStatusSchema = z.object({
    * advance, only the one campaign whose window covers now.
    */
   background: SponsoredTileSchema.nullable(),
+  /** The wide panel on the start page, or null. */
+  banner: SponsoredTileSchema.nullable(),
+  /** The creative for a browsing notice, or null. Cadence decides *when*. */
+  notice: SponsoredTileSchema.nullable(),
   /** How many creatives are cached, for the settings panel. */
   cached: z.number().int(),
   /** Counts waiting to be reported, so the user can see exactly what is pending. */
@@ -82,7 +95,7 @@ export const SponsorBatchSchema = z.object({
       /** data: URL only. An https: image would be a per-impression request. */
       image: z.string().max(2_000_000).default(''),
       clickUrl: z.string().url(),
-      placement: z.enum(['tile', 'background']).default('tile'),
+      placement: z.enum(['tile', 'banner', 'background', 'notice']).default('tile'),
       /** Unix ms. Omit both for a campaign with no schedule. */
       startsAt: z.number().nullable().default(null),
       endsAt: z.number().nullable().default(null)

@@ -29,14 +29,29 @@ export interface BatchTile {
   image: string
   clickUrl: string
   /** Where it goes. `background` is the exclusive new-tab takeover. */
-  placement: 'tile' | 'background'
+  placement: 'tile' | 'banner' | 'background' | 'notice'
   startsAt: number | null
   endsAt: number | null
 }
 
-/** Which placement tier maps to which rendering. */
-export function placementFor(tier: string): 'tile' | 'background' {
-  return tier === 'newtab_background' ? 'background' : 'tile'
+/**
+ * Which placement tier maps to which shape in the browser.
+ *
+ * Anything unrecognised is a tile: the smallest and least intrusive shape.
+ * Defaulting the other way would turn a tier added later into a full-screen
+ * takeover, or an interruption, that nobody sold.
+ */
+export function placementFor(tier: string): BatchTile['placement'] {
+  switch (tier) {
+    case 'newtab_background':
+      return 'background'
+    case 'newtab_banner':
+      return 'banner'
+    case 'browser_notice':
+      return 'notice'
+    default:
+      return 'tile'
+  }
 }
 
 export interface Batch {

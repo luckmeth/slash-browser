@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import type { SponsoredTile } from '@shared/types/sponsor'
 import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'electron'
 import {
   VIEW_KIND,
@@ -609,6 +610,40 @@ export class BrowserWindowController {
     })
     this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
   }
+
+  /**
+   * Shows a sponsored notice in the browser's own chrome.
+   *
+   * The overlay, not the page. A sponsored strip injected into whatever site
+   * somebody is reading is the behaviour Slash Shield exists to block, and
+   * doing it ourselves would make this adware. Sized to a strip and **not
+   * modal**, so the page underneath stays clickable throughout.
+   */
+  showSponsorNotice(creative: SponsoredTile): void {
+    this.sponsorNotice = creative
+
+    const { width, height } = this.window.getContentBounds()
+    const stripHeight = 108
+    const stripWidth = Math.min(520, Math.max(300, Math.round(width * 0.55)))
+    const state = this.overlay.show(
+      'sponsor-notice',
+      {
+        x: Math.round((width - stripWidth) / 2),
+        y: Math.max(0, height - stripHeight - 24),
+        width: stripWidth,
+        height: stripHeight
+      },
+      { modal: false, takeFocus: false }
+    )
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /** What `sponsor:currentNotice` answers with. */
+  currentSponsorNotice(): SponsoredTile | null {
+    return this.sponsorNotice
+  }
+
+  private sponsorNotice: SponsoredTile | null = null
 
   /**
    * Shows a transient message over the page.

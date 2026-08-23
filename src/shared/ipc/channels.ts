@@ -33,6 +33,7 @@ export const INVOKE_CHANNELS = [
   'overlay:getState',
   'ui:run',
   'notice:current',
+  'sponsor:currentNotice',
   'print:preview',
   'print:run',
   'print:savePdf',

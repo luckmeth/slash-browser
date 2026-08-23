@@ -47,6 +47,27 @@ export function SponsorSection(): React.JSX.Element {
         />
       </label>
 
+      <label className="mt-1.5 flex cursor-default items-start justify-between gap-2 rounded-lg border border-[var(--glass-edge)] px-2.5 py-2">
+        <span className="min-w-0">
+          <span className="block text-xs">Allow a notice while browsing</span>
+          <span className="mt-0.5 block text-[10px] leading-snug text-[var(--color-text-muted)]">
+            At most three a day, thirty minutes apart, never in a private window — and never inside
+            a web page. It appears in Slash&rsquo;s own frame, the way a download notification does.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="mt-0.5 shrink-0"
+          checked={settings?.sponsoredNoticesEnabled ?? true}
+          disabled={!enabled}
+          onChange={(event) =>
+            void window.browser.invoke('settings:update', {
+              sponsoredNoticesEnabled: event.target.checked
+            })
+          }
+        />
+      </label>
+
       {/* The honest paragraph. It says what the network actually does, both the
           part that is reassuring and the part that is a cost. */}
       <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]">

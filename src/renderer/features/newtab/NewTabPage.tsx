@@ -11,6 +11,7 @@ import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
 import { AdvertiseCard } from './AdvertiseCard'
 import { SponsoredBackground } from './SponsoredBackground'
+import { SponsoredBanner } from './SponsoredBanner'
 import { PublisherNotice } from './PublisherNotice'
 import { backgroundCss } from './backgrounds'
 
@@ -46,6 +47,7 @@ export function NewTabPage(): React.JSX.Element {
    * off for good is two clicks away in Settings.
    */
   const [sponsoredBackground, setSponsoredBackground] = useState<SponsoredCreative | null>(null)
+  const [sponsoredBanner, setSponsoredBanner] = useState<SponsoredCreative | null>(null)
   const [backgroundDismissed, setBackgroundDismissed] = useState(false)
 
   useEffect(() => {
@@ -76,7 +78,9 @@ export function NewTabPage(): React.JSX.Element {
 
   useEffect(() => {
     void window.browser.invoke('sponsor:status', undefined).then((result) => {
-      if (result.ok) setSponsoredBackground(result.value.background)
+      if (!result.ok) return
+      setSponsoredBackground(result.value.background)
+      setSponsoredBanner(result.value.banner)
     })
   }, [])
 
@@ -159,6 +163,7 @@ export function NewTabPage(): React.JSX.Element {
         <SlashSummary />
 
         <PublisherNotice />
+        {sponsoredBanner && <SponsoredBanner creative={sponsoredBanner} />}
         <SponsoredTile />
         <AdvertiseCard />
 

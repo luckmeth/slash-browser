@@ -13,6 +13,7 @@ import { ShortcutSheet } from './features/shortcuts/ShortcutSheet'
 import { CleanupPanel } from './features/cleanup/CleanupPanel'
 import { NoticeToast } from './features/notice/NoticeToast'
 import { PrintPreview } from './features/print/PrintPreview'
+import { SponsorNotice } from './features/sponsor/SponsorNotice'
 
 /**
  * Root of the overlay document.
@@ -67,6 +68,8 @@ export function OverlayApp(): React.JSX.Element | null {
       return <NoticeToast />
     case 'print':
       return <PrintPreview />
+    case 'sponsor-notice':
+      return <SponsorNotice />
     case 'spike':
       return <SpikeReport />
     case 'none':

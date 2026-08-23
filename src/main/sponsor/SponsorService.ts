@@ -82,13 +82,9 @@ export class SponsorService {
       // No rotation: the backdrop is sold exclusively, so at most one campaign
       // can be live at a time and picking "the first one due" is the whole of
       // the decision.
-      background: this.active
-        ? selectLive(
-            cached.filter((creative) => creative.placement === 'background'),
-            0,
-            Date.now()
-          )
-        : null,
+      background: this.active ? this.livePlacement(cached, 'background') : null,
+      banner: this.active ? this.livePlacement(cached, 'banner') : null,
+      notice: this.active ? this.livePlacement(cached, 'notice') : null,
       cached: cached.length,
       pendingReports: this.pendingCount()
     }
@@ -119,6 +115,23 @@ export class SponsorService {
    * pressed, and the reader should land where the tile said — not on nothing
    * because a timer turned over between the paint and the press.
    */
+  /**
+   * The one creative live in a placement now, or null.
+   *
+   * No rotation: every placement except the tile is sold with a small
+   * concurrency cap, so the first one due is the whole of the decision.
+   */
+  private livePlacement(
+    cached: SponsoredTile[],
+    placement: SponsoredTile['placement']
+  ): SponsoredTile | null {
+    return selectLive(
+      cached.filter((creative) => creative.placement === placement),
+      0,
+      Date.now()
+    )
+  }
+
   tileFor(id: string): SponsoredTile | null {
     return this.cachedTiles().find((tile) => tile.id === id) ?? null
   }
@@ -138,7 +151,7 @@ export class SponsorService {
         body: row.body,
         image: row.image,
         clickUrl: row.click_url,
-        placement: row.placement === 'background' ? 'background' : 'tile',
+        placement: asPlacement(row.placement),
         startsAt: row.starts_at,
         endsAt: row.ends_at
       }))
@@ -331,4 +344,15 @@ export class SponsorService {
     this.db.connection.prepare('DELETE FROM sponsored_counts').run()
     this.lastFetch = 0
   }
+}
+
+/**
+ * A stored placement string, narrowed.
+ *
+ * Anything unrecognised becomes a tile. A row written by a newer build than
+ * this one must degrade to the smallest, least intrusive shape rather than
+ * to whatever the enum happens to list first.
+ */
+function asPlacement(value: string): SponsoredTile['placement'] {
+  return value === 'background' || value === 'banner' || value === 'notice' ? value : 'tile'
 }

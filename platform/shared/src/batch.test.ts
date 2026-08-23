@@ -203,3 +203,20 @@ describe('placementFor', () => {
     expect(toBatchTile(row(), '').placement).toBe('tile')
   })
 })
+
+describe('placementFor — every format', () => {
+  it('maps each tier to its shape', () => {
+    expect(placementFor('newtab_background')).toBe('background')
+    expect(placementFor('newtab_banner')).toBe('banner')
+    expect(placementFor('browser_notice')).toBe('notice')
+    expect(placementFor('newtab_feature')).toBe('tile')
+    expect(placementFor('home_banner')).toBe('tile')
+  })
+
+  it('falls back to the least intrusive shape for anything unknown', () => {
+    // Defaulting the other way would turn a tier added later into a full-screen
+    // takeover, or an interruption, that nobody sold.
+    expect(placementFor('some_future_tier')).toBe('tile')
+    expect(placementFor('')).toBe('tile')
+  })
+})

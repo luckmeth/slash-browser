@@ -411,6 +411,10 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(result)
   })
 
+  ipc.handle('sponsor:currentNotice', (_req, context) =>
+    ok(windowOf(context.sender)?.currentSponsorNotice() ?? null)
+  )
+
   ipc.handle('notice:current', (_req, context) => {
     const window = windowOf(context.sender)
     return ok(window?.currentNotice() ?? { message: '', tone: 'info' as const })

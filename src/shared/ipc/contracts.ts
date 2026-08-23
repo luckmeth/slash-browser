@@ -52,7 +52,7 @@ import {
 } from '../types/permission'
 import { HistoryEntrySchema, BookmarkSchema, DownloadItemSchema } from '../types/browsing'
 import { ReadingItemSchema } from '../types/readingList'
-import { SponsorStatusSchema } from '../types/sponsor'
+import { SponsorStatusSchema, SponsoredTileSchema } from '../types/sponsor'
 import { LoginFormSchema, VaultStatusSchema } from '../types/logins'
 import { ExtensionsStatusSchema } from '../types/extensions'
 import type { InvokeChannel, EventChannel } from './channels'
@@ -129,6 +129,8 @@ export const OverlayStateSchema = z.object({
     'cleanup',
     /** Print preview: what will come out of the printer, before it does. */
     'print',
+    /** A sponsored notice, in the browser's own chrome. Never inside a page. */
+    'sponsor-notice',
     /**
      * A transient message: what happened, when the answer is "nothing".
      *
@@ -272,6 +274,9 @@ export const invokeContracts = {
     request: z.object({ choices: PrintChoicesSchema }),
     response: z.object({ ok: z.boolean(), path: z.string() })
   },
+
+  /** The sponsored creative the notice surface is showing. */
+  'sponsor:currentNotice': { request: z.void(), response: SponsoredTileSchema.nullable() },
 
   /** The text of the notice currently showing, read by the overlay on mount. */
   'notice:current': {

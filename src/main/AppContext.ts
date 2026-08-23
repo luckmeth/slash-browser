@@ -1,3 +1,4 @@
+import { SponsorNoticeService } from './sponsor/SponsorNoticeService'
 import type { ProfileRegistry } from './profiles/ProfileRegistry'
 import type { AddressFieldKind } from '@shared/addressFields'
 import { join } from 'node:path'
@@ -126,6 +127,7 @@ export class AppContext {
   readonly translation: TranslationService
   readonly addresses: AddressBook
   readonly remoteConfig: RemoteConfigService
+  readonly sponsorNotices: SponsorNoticeService
   readonly addressFiller = new AddressFiller()
   /** Set at launch from the base user-data path — see `applyProfile`. */
   profiles: ProfileRegistry | null = null
@@ -300,6 +302,9 @@ export class AppContext {
     this.readingList = new ReadingListRepository(this.db)
     this.extensions = new ExtensionManager(this.settings)
     this.sponsor = new SponsorService(this.db, this.settings)
+    this.sponsorNotices = new SponsorNoticeService(this.settings, this.sponsor, () =>
+      this.focusedWindow() ?? null
+    )
     this.vault = new PasswordVault(this.db)
     this.loginFiller = new LoginFiller(this.vault)
     this.snapshots = new SessionSnapshotManager(
@@ -364,6 +369,10 @@ export class AppContext {
 
     // After settings load: it reads them to decide whether to register at all.
     this.mediaKeys.start()
+
+    // Does nothing until sponsorship is on, a notice campaign is live, and the
+    // cadence allows it -- which on a default install is never.
+    this.sponsorNotices.start()
 
     // Inert unless a publisher configured an endpoint, so a default install
     // makes no request here at all.
@@ -835,6 +844,7 @@ export class AppContext {
     // would leave the page's callback hanging.
     this.permissions.stop()
     if (this.syncTimer) clearInterval(this.syncTimer)
+    this.sponsorNotices.stop()
     this.mediaKeys.stop()
     void this.printing.cleanup()
     // Kills the utility process. Not awaited — `will-quit` is synchronous and

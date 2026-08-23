@@ -153,6 +153,27 @@ export const SettingsSchema = z.object({
    */
   advertisePortalUrl: z.string().default(''),
   /**
+   * Whether a sponsored notice may appear while browsing.
+   *
+   * The one advertising format that interrupts, so it has its own switch even
+   * though sponsorship as a whole already has one. It appears in the browser's
+   * own chrome and never inside a web page — injecting adverts into pages is
+   * exactly what this browser blocks, and doing it ourselves would make the
+   * product adware.
+   */
+  sponsoredNoticesEnabled: z.boolean().default(true),
+  /**
+   * How often notices have been shown. Persisted so restarting is not a way to
+   * see more of them.
+   */
+  sponsorNoticeState: z
+    .object({
+      lastShownAt: z.number().default(0),
+      shownToday: z.number().int().default(0),
+      day: z.string().default('')
+    })
+    .default({ lastShownAt: 0, shownToday: 0, day: '' }),
+  /**
    * Where the publisher's remote configuration lives, if anywhere.
    *
    * Empty by default, so a fresh install never asks anything how it should
