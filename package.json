@@ -18,7 +18,8 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "npm run build && electron-builder --win --publish never"
+    "package": "npm run build && electron-builder --win --publish never",
+    "logo": "node scripts/apply-logo.mjs"
   },
   "dependencies": {
     "@ghostery/adblocker": "^2.18.2",
