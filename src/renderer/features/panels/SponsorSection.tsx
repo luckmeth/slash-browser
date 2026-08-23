@@ -131,8 +131,10 @@ export function SponsorSection(): React.JSX.Element {
           className="mt-1.5 w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
         />
         <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-          Adds one line to the start page for companies wanting to buy the tile. Left empty — the
-          default — nothing is shown and nothing is requested to find that out.
+          Puts a &ldquo;Post your ad&rdquo; card on the start page for companies wanting to buy the
+          placement. Left empty, it falls back to the origin of the sponsor source above — so
+          setting this is only needed when the portal lives somewhere else. With neither set,
+          nothing is shown and nothing is requested to find that out.
         </p>
       </details>
     </div>

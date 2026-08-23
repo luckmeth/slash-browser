@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { originOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 
@@ -21,8 +22,25 @@ import { Icon } from '../../components/Icon'
  * advertising its own advertising has begun to become the thing it blocks.
  */
 export function AdvertiseCard(): React.JSX.Element | null {
-  const url = useBrowserStore((s) => s.settings?.advertisePortalUrl) ?? ''
+  const configured = useBrowserStore((s) => s.settings?.advertisePortalUrl) ?? ''
+  const sponsorEndpoint = useBrowserStore((s) => s.settings?.sponsorEndpoint) ?? ''
   const [allowed, setAllowed] = useState(true)
+
+  /**
+   * The portal address, or the origin of the sponsor endpoint.
+   *
+   * An operator who has configured `https://ads.example.com/api/tiles` has
+   * already told us where the portal is; making them type the same origin into
+   * a second box is a step whose only possible outcomes are "the same answer"
+   * and "a typo". Setting `advertisePortalUrl` explicitly still wins, for the
+   * deployment where the two genuinely differ.
+   */
+  const url =
+    configured !== ''
+      ? configured
+      : sponsorEndpoint !== ''
+        ? originOf(sponsorEndpoint)
+        : ''
 
   useEffect(() => {
     void window.browser.invoke('config:remote', undefined).then((result) => {
