@@ -315,6 +315,12 @@ export function registerHandlers(ctx: AppContext): void {
         : window.overlay.hide()
 
     ipc.broadcast('overlay:stateChanged', state, window.privilegedContents())
+
+    // Closing a surface frees the overlay, and the download chip is the only
+    // one that appears without being asked for — so it is the only one that has
+    // to be *restored* rather than merely not shown. Without this, opening the
+    // command palette over a playing video would put the chip away for good.
+    if (!state.visible) window.refreshMediaOffer()
     return ok(state)
   })
 

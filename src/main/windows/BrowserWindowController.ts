@@ -526,18 +526,6 @@ export class BrowserWindowController {
     this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
   }
 
-  /**
-   * Hides whatever the overlay is showing, then lets the passive chip return.
-   *
-   * The chip is the only surface that appears without being asked for, so it is
-   * also the only one that has to be *restored* rather than merely not shown.
-   */
-  closeOverlaySurface(): void {
-    const state = this.overlay.hide()
-    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
-    this.refreshMediaOffer()
-  }
-
   dismissPermissionPrompt(requestId: string): void {
     if (this.pendingPermission?.requestId !== requestId) return
     this.pendingPermission = null
