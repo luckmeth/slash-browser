@@ -25,6 +25,7 @@ function fakes(overrides: Partial<ActivitySample> = {}): {
   setEnabled: (value: boolean) => void
   setSignedIn: (value: boolean) => void
   setEarningActive: (value: boolean) => void
+  setProfileComplete: (value: boolean) => void
   changes: () => number
 } {
   const sample: ActivitySample = {
@@ -38,6 +39,7 @@ function fakes(overrides: Partial<ActivitySample> = {}): {
   let enabled = true
   let signedIn = true
   let earningActive = true
+  let profileComplete = true
   let changes = 0
 
   const rewards = {
@@ -46,6 +48,9 @@ function fakes(overrides: Partial<ActivitySample> = {}): {
     },
     get earningActive() {
       return earningActive
+    },
+    get profileComplete() {
+      return profileComplete
     },
     secondsToday: 0,
     dailyCapSeconds: DEFAULT_DAILY_CAP_SECONDS,
@@ -78,6 +83,9 @@ function fakes(overrides: Partial<ActivitySample> = {}): {
     },
     setEarningActive: (value) => {
       earningActive = value
+    },
+    setProfileComplete: (value) => {
+      profileComplete = value
     },
     changes: () => changes
   }
@@ -181,6 +189,21 @@ describe('ActivityTracker', () => {
     tracker.flush()
     expect(recorded).toHaveLength(1)
     expect(recorded[0]!.seconds).toBeGreaterThan(0)
+  })
+
+  it('records nothing until the details are given, then starts', () => {
+    const { tracker, recorded, setProfileComplete } = fakes()
+    setProfileComplete(false)
+    tracker.sync()
+    tick(20)
+    tracker.flush()
+    expect(recorded).toEqual([])
+    expect(tracker.note).toContain('unlock collecting')
+
+    setProfileComplete(true)
+    tick(20)
+    tracker.flush()
+    expect(recorded).toHaveLength(1)
   })
 
   it('records nothing from a private window', () => {

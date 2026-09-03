@@ -58,6 +58,7 @@ export type EarningBlocker =
   | 'signed-out'
   | 'rewards-off'
   | 'paused'
+  | 'profile-incomplete'
   | 'unfocused'
   | 'idle'
   | 'internal-page'
@@ -78,6 +79,14 @@ export interface EarningInputs {
    */
   earningActive: boolean
   signedIn: boolean
+  /**
+   * They have given the details a payout would need.
+   *
+   * The server refuses to credit anything without them, so the timer stops
+   * here too -- banking hours that are about to be thrown away is worse than
+   * not starting, and the screen can say what to do about it.
+   */
+  profileComplete: boolean
   /** Slash has the foreground window. */
   focused: boolean
   /** From `powerMonitor.getSystemIdleTime()`. */
@@ -102,6 +111,9 @@ export function blockersFor(input: EarningInputs): EarningBlocker[] {
   // signing in would earn nothing.
   if (!input.earningActive) blockers.push('paused')
   if (!input.signedIn) blockers.push('signed-out')
+  // After signing in, because "fill in your details" is not advice you can act
+  // on until you have an account to attach them to.
+  else if (!input.profileComplete) blockers.push('profile-incomplete')
   if (!input.focused) blockers.push('unfocused')
   if (input.idleSeconds >= IDLE_THRESHOLD_SECONDS) blockers.push('idle')
   // A private window is browsing the user asked not to be recorded. Earning
@@ -224,6 +236,8 @@ export function explain(blockers: readonly EarningBlocker[]): string {
       return 'Earning is paused by Slash at the moment — nothing is accruing for anyone.'
     case 'signed-out':
       return 'Sign in to start earning.'
+    case 'profile-incomplete':
+      return 'Add your details to unlock collecting — nothing accrues until then.'
     case 'unfocused':
       return 'Paused — Slash is not the active window.'
     case 'idle':

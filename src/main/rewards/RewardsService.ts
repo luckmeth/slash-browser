@@ -122,6 +122,16 @@ export class RewardsService {
      * discarded -- "not yet known" is not "paused".
      */
     earningActive: true,
+    /**
+     * Whether the collector has given the details a payout needs.
+     *
+     * **Starts false**, unlike `earningActive`: an unknown pause must not read
+     * as paused, but an unknown profile must not read as complete either --
+     * one would show a warning nobody has earned, the other would start a
+     * timer the server is going to refuse. Signing in fetches the truth
+     * immediately.
+     */
+    profileComplete: false,
     suspended: false
   }
 
@@ -163,6 +173,11 @@ export class RewardsService {
    */
   get earningActive(): boolean {
     return this.cached.earningActive
+  }
+
+  /** Whether the details a payout needs have been given. */
+  get profileComplete(): boolean {
+    return this.cached.profileComplete
   }
 
   get enabled(): boolean {
@@ -528,6 +543,50 @@ export class RewardsService {
     this.onChanged()
   }
 
+  /**
+   * The session token, for the other things this account can do.
+   *
+   * Advertising uses the same Google account as Slash Coin, because they are
+   * the same `auth.users` row: one sign-in, and the database decides what each
+   * request may touch. Exposed rather than duplicated so there is exactly one
+   * refresh path — two would race each other over the same rotating token,
+   * which is the bug that silently signed people out once already.
+   */
+  async token(): Promise<string> {
+    return await this.accessToken()
+  }
+
+  get email(): string {
+    return this.session?.email ?? ''
+  }
+
+  /**
+   * The account id, read out of the access token.
+   *
+   * Needed for one thing: a storage upload has to land in a folder named for
+   * `auth.uid()`, and the policy checks that prefix. Read from the `sub` claim
+   * rather than fetched, because a round trip to learn something already in
+   * hand is a round trip for nothing.
+   *
+   * **Not trusted, and it does not need to be.** The token is not verified
+   * here; the server verifies it on every request, and a wrong id produces an
+   * upload the storage policy refuses. It is a hint for building a path, never
+   * a claim about who somebody is.
+   */
+  get userId(): string {
+    const token = this.session?.accessToken ?? ''
+    const payload = token.split('.')[1]
+    if (!payload) return ''
+    try {
+      const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+        sub?: unknown
+      }
+      return typeof decoded.sub === 'string' ? decoded.sub : ''
+    } catch {
+      return ''
+    }
+  }
+
   // --- talking to the server ------------------------------------------------
 
   private async accessToken(): Promise<string> {
@@ -652,6 +711,9 @@ export class RewardsService {
         dateOfBirth: typeof raw.dateOfBirth === 'string' ? raw.dateOfBirth : '',
         updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0
       })
+      // The gate has just moved. Re-read rather than assume: the server
+      // decides what counts as complete, and it is stricter than the form.
+      await this.refreshState()
       this.onChanged()
       return { ok: true, problems: [], profile }
     } catch (error) {
@@ -684,6 +746,8 @@ export class RewardsService {
         launchAt: num(state.launchAt),
         // Absent means an older deployment, which is running normally.
         earningActive: state.earningActive !== false,
+        // Absent means a deployment without the gate, where nothing is locked.
+        profileComplete: state.profileComplete !== false,
         suspended: state.suspended === true
       }
       this.onChanged()
@@ -800,6 +864,7 @@ export class RewardsService {
       coinToUsd: this.cached.coinToUsd,
       launchAt: this.cached.launchAt,
       earningActive: this.cached.earningActive,
+      profileComplete: this.cached.profileComplete,
       pending: this.pendingCount(),
       awaitingCode: this.awaitingCode,
       earning,

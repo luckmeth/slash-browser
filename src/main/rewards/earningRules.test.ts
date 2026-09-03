@@ -17,6 +17,7 @@ const earning: EarningInputs = {
   enabled: true,
   earningActive: true,
   signedIn: true,
+  profileComplete: true,
   focused: true,
   idleSeconds: 0,
   url: 'https://example.com/article',
@@ -37,6 +38,22 @@ describe('blockersFor', () => {
 
   it('does not earn signed out', () => {
     expect(blockersFor({ ...earning, signedIn: false })).toContain('signed-out')
+  })
+
+  it('does not earn until the collector has given their details', () => {
+    // The server refuses to credit anything without them, so starting a timer
+    // would bank hours it is about to be told to throw away.
+    const locked = blockersFor({ ...earning, profileComplete: false })
+    expect(locked).toContain('profile-incomplete')
+    expect(explain(locked)).toContain('unlock collecting')
+  })
+
+  it('asks for a sign-in before it asks for details', () => {
+    // "Fill in your details" is not advice you can act on with no account to
+    // attach them to.
+    const out = blockersFor({ ...earning, signedIn: false, profileComplete: false })
+    expect(out).toContain('signed-out')
+    expect(out).not.toContain('profile-incomplete')
   })
 
   it('does not earn while the scheme is paused', () => {

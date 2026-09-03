@@ -89,6 +89,10 @@ export function RewardsPage(): React.JSX.Element {
   // Only once the status has arrived: `earningActive` defaults to true, and
   // treating "not loaded yet" as paused would flash a warning on every open.
   const paused = status !== null && !status.earningActive
+  // Signed in, but the details a payout needs are missing. The server credits
+  // nothing in this state, so the page says so where the balance would be
+  // rather than leaving somebody to notice a number that never moves.
+  const locked = status !== null && status.signedIn && !status.profileComplete
   const capSeconds = status?.dailyCapSeconds ?? 0
   const todaySeconds = status?.secondsToday ?? 0
   const progress = capSeconds > 0 ? Math.min(todaySeconds / capSeconds, 1) : 0
@@ -114,7 +118,12 @@ export function RewardsPage(): React.JSX.Element {
             the sentence somebody would quote back — so the pill goes quiet and
             says so, and the pulse stops with it.
           */}
-          {paused ? (
+          {locked ? (
+            <span className="animate-rise mt-6 inline-flex items-center gap-2 rounded-full border border-[var(--color-warn)]/35 bg-[var(--color-warn)]/10 px-3 py-1 text-[11.5px] font-medium text-[var(--color-warn)]">
+              <span className="size-1.5 rounded-full bg-[var(--color-warn)]" />
+              One step left — your details
+            </span>
+          ) : paused ? (
             <span className="animate-rise mt-6 inline-flex items-center gap-2 rounded-full border border-[var(--color-warn)]/35 bg-[var(--color-warn)]/10 px-3 py-1 text-[11.5px] font-medium text-[var(--color-warn)]">
               <span className="size-1.5 rounded-full bg-[var(--color-warn)]" />
               Earning is paused
@@ -176,6 +185,23 @@ export function RewardsPage(): React.JSX.Element {
           moving is the least answerable complaint a scheme like this can
           generate, and "we paused it" is a far better answer than silence.
         */}
+        {locked && (
+          <section className="slash-reveal mb-3 rounded-2xl border border-[var(--color-warn)]/35 bg-[var(--color-warn)]/8 p-4">
+            <h2 className="text-[13px] font-semibold text-[var(--color-warn)]">
+              Collecting is not switched on yet
+            </h2>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-muted)]">
+              Slash Coin needs to know who it would be paying before it starts counting: your name,
+              date of birth, address, country and phone number, below. It takes a minute and it is
+              asked once.
+            </p>
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-muted)]">
+              Until then <strong>nothing accrues</strong> — and time spent before you fill it in is
+              not banked and added afterwards, so there is nothing to be gained by waiting.
+            </p>
+          </section>
+        )}
+
         {paused && (
           <section className="slash-reveal mb-3 rounded-2xl border border-[var(--color-warn)]/30 bg-[var(--color-warn)]/8 p-4">
             <h2 className="text-[13px] font-semibold text-[var(--color-warn)]">
@@ -256,7 +282,7 @@ export function RewardsPage(): React.JSX.Element {
         )}
 
         {/* Their details, for a payout that has somewhere to go ---------- */}
-        {enabled && signedIn && <ProfileCard email={status?.email ?? ''} />}
+        {enabled && signedIn && <ProfileCard email={status?.email ?? ''} locked={locked} />}
 
         {/* Rates -------------------------------------------------------- */}
         {enabled && (

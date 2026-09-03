@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import type { InvokeResponse } from '@shared/ipc/contracts'
 import type { Settings } from '@shared/types/settings'
 import { SEARCH_ENGINES } from '@shared/constants'
 import { SEMANTIC_MODEL_MB } from '@shared/types/semantic'
@@ -6,11 +7,15 @@ import { useBrowserStore } from '../../stores/browserStore'
 import { useSemanticStatus } from '../memory/useSemanticStatus'
 import { ImportSection } from './ImportSection'
 import { SearchEnginesSection } from './SearchEnginesSection'
+import { splitHint } from './settingsText'
+import { HintText, Toggle } from './SettingsControls'
+import { Icon, type IconName } from '../../components/Icon'
 import { SiteZoomSection } from './SiteZoomSection'
 import { ToolbarSection } from './ToolbarSection'
 import { PasswordsSection } from './PasswordsSection'
 import { NewTabSection } from './NewTabSection'
 import { SponsorSection } from './SponsorSection'
+import { RewardsSection } from './RewardsSection'
 import { ShortcutEditor } from './ShortcutEditor'
 import { AddressSection } from './AddressSection'
 import { ProfileSection } from './ProfileSection'
@@ -19,6 +24,24 @@ import { SyncSection } from './SyncSection'
 import { ExtensionsSection } from './ExtensionsSection'
 import { DiagnosticsSection } from './DiagnosticsSection'
 import { UpdateSection } from './UpdateSection'
+
+/**
+ * An icon for each category.
+ *
+ * Not decoration: the rail is seventeen words of similar length in the same
+ * colour, and an icon is what lets somebody find "Downloads" again by shape
+ * rather than by reading the list top to bottom every time. Drawn from the
+ * existing set, so nothing new ships for this.
+ */
+const CATEGORY_ICONS: Record<string, IconName> = {
+  Appearance: 'sparkle',
+  Search: 'search',
+  'Privacy & security': 'shield',
+  Browsing: 'globe',
+  Extensions: 'folder',
+  Earning: 'star',
+  'About Slash': 'activity'
+}
 
 export function SettingsPanel(): React.JSX.Element {
   const settings = useBrowserStore((s) => s.settings)
@@ -62,12 +85,13 @@ export function SettingsPanel(): React.JSX.Element {
                     setFilter('')
                     setCategory(name)
                   }}
-                  className={`w-full cursor-default rounded-lg px-3 py-2 text-left text-[13px] transition ${
+                  className={`flex w-full cursor-default items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] transition ${
                     filter.trim() === '' && category === name
-                      ? 'bg-[var(--glass-high)] text-[var(--color-text-primary)]'
+                      ? 'bg-[var(--color-accent)]/15 font-medium text-[var(--color-accent)]'
                       : 'text-[var(--color-text-muted)] hover:bg-white/[0.06]'
                   }`}
                 >
+                  <Icon name={CATEGORY_ICONS[name] ?? 'settings'} size={15} />
                   {name}
                 </button>
               </li>
@@ -80,7 +104,16 @@ export function SettingsPanel(): React.JSX.Element {
           )}
         </nav>
 
-        <div className="min-w-0 flex-1 space-y-6 overflow-y-auto pb-8">
+        <div className="min-w-0 flex-1 overflow-y-auto pb-8">
+          {/*
+            Says where you are. Without it the right-hand column started
+            mid-thought, and with the search box in the rail there was nothing
+            on screen naming the section being shown.
+          */}
+          <h2 className="mb-4 text-xl font-semibold text-[var(--color-text-primary)]">
+            {filter.trim() === '' ? category : `Results for “${filter.trim()}”`}
+          </h2>
+          <div className="space-y-6">
       <Group title="Appearance">
         <Field label="Accent colour">
           {/* Swatches rather than a dropdown: the thing being chosen is a
@@ -103,9 +136,9 @@ export function SettingsPanel(): React.JSX.Element {
               />
             ))}
           </div>
-          <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <Note>
             A workspace with its own colour overrides this while you are in it.
-          </p>
+          </Note>
         </Field>
 
         <Field label="Density">
@@ -134,9 +167,9 @@ export function SettingsPanel(): React.JSX.Element {
             <option value="top">Across the top</option>
             <option value="left">Down the left side</option>
           </select>
-          <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <Note>
             Vertical keeps titles readable past a dozen tabs, at the cost of some window width.
-          </p>
+          </Note>
         </Field>
 
         <Field label={`Glass ${settings.glassOpacity}%`}>
@@ -151,11 +184,11 @@ export function SettingsPanel(): React.JSX.Element {
           />
           {/* Said outright because it is a performance setting as much as a
               taste one, and that is not obvious from a slider. */}
-          <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <Note>
             Lower is more transparent. At 100% the blur is switched off entirely, which is the
             faster setting on an older machine and on Windows 10, where the effect is ignored
             anyway.
-          </p>
+          </Note>
         </Field>
       </Group>
 
@@ -211,7 +244,11 @@ export function SettingsPanel(): React.JSX.Element {
         <NewTabSection />
       </Group>
 
-      <Group title="Sponsored tiles">
+      <Group title="Slash Coin">
+        <RewardsSection />
+      </Group>
+
+      <Group title="Sponsored placements">
         <SponsorSection />
       </Group>
 
@@ -251,14 +288,27 @@ export function SettingsPanel(): React.JSX.Element {
           onChange={(allowPageScripts) => update({ allowPageScripts })}
         />
         {/*
+          On by default and, until now, with no way to turn it off. Worth its own
+          switch rather than being folded into "block ads": it is the only rule
+          that edits a page's own data rather than cancelling a request, and
+          somebody who wants to leave YouTube alone should be able to.
+        */}
+        <Toggle
+          label="Try to remove YouTube's ad breaks"
+          hint="Deletes the fields YouTube lists its ad breaks in, before the player reads them, and hides its ad panels. Needs the switch above. It does not touch sponsor segments a creator reads out. Be aware this does not always work: YouTube also inserts adverts on its servers, stitched into the same stream as the video, and an advert delivered that way cannot be removed from the video it is inside. Expect some adverts to get through."
+          checked={settings.blockYouTubeVideoAds}
+          disabled={!settings.allowPageScripts || !settings.blockAds}
+          onChange={(blockYouTubeVideoAds) => update({ blockYouTubeVideoAds })}
+        />
+        {/*
           Said plainly, because a shield icon invites the assumption that this is
           antivirus. It is not, and a browser cannot be.
         */}
-        <p className="pt-1 text-xs text-[var(--color-text-muted)]">
+        <Note>
           This is not a virus scanner. A browser cannot inspect a file for malware — keep Windows
           Security on for that. The malicious-site list is also small and bundled; real coverage
           needs a continuously updated feed, which this build does not have.
-        </p>
+        </Note>
       </Group>
 
       <Group title="Browsing memory">
@@ -280,6 +330,25 @@ export function SettingsPanel(): React.JSX.Element {
           checked={settings.excludePrivateFromMemory}
           onChange={(excludePrivateFromMemory) => update({ excludePrivateFromMemory })}
         />
+
+        {/*
+          `memoryRetentionDays` is enforced by `MemoryIndexer` on every prune and
+          could only be changed by editing the settings row. A retention period
+          nobody can see is not a promise anybody can rely on.
+        */}
+        <Field label={`Forget pages after — ${settings.memoryRetentionDays} days`}>
+          <input
+            type="range"
+            min={7}
+            max={365}
+            step={7}
+            value={settings.memoryRetentionDays}
+            onChange={(event) =>
+              update({ memoryRetentionDays: Number(event.currentTarget.value) })
+            }
+            className="w-full"
+          />
+        </Field>
         {/*
           Driven through its own channel rather than `settings:update`, because
           enabling it starts a download and the panel has to be able to show the
@@ -371,13 +440,13 @@ export function SettingsPanel(): React.JSX.Element {
         {/* The claim that matters, stated where somebody might otherwise assume
             the opposite. This is a website in a pane, not an integration: no key
             to enter, and the page you are reading is not sent anywhere. */}
-        <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+        <Note>
           Ctrl+Shift+L opens this beside the page you are reading. It is the real site, signed in
           the way you normally sign in — so a subscription you already pay for works, and there is
           no API key to enter. Slash does not read the page or send anything to it; what reaches
           the assistant is what you type. Sending page content to an AI provider is a separate
           feature with its own switch.
-        </p>
+        </Note>
       </Group>
 
       <Group title="Default browser">
@@ -417,12 +486,36 @@ export function SettingsPanel(): React.JSX.Element {
           was effectively undiscoverable from the one screen people open when
           they go looking for privacy controls.
         */}
-        <p className="pt-1 text-xs text-[var(--color-text-muted)]">
+        <Note>
           <span className="text-[var(--color-text-primary)]">Private window</span> — Ctrl+Shift+N, or
           File → New Private Window. It records no history, no browsing memory and no reopenable
           tabs, and is left out of session restore. It does not hide you from the sites you visit or
           from your network.
-        </p>
+        </Note>
+      </Group>
+
+      {/*
+        The switch that decides whether the text of pages you are reading may be
+        sent to an AI provider. It has always been enforced — in `AiEngine` and
+        again in `TranslationService` — and until now there was nowhere to change
+        it, so the stricter of the two AI privacy gates could only be moved by
+        editing the settings row by hand. Principle 2 is that nothing leaves the
+        machine unless the user turned it on; a switch nobody can reach does not
+        satisfy that.
+      */}
+      <Group title="AI and your page content">
+        <Toggle
+          label="Let AI features read the text of pages"
+          hint="Off by default. When off, the assistant sees only page titles and addresses, and Translate refuses rather than sending an article anywhere."
+          checked={settings.aiMayReadPageContent}
+          onChange={(aiMayReadPageContent) => update({ aiMayReadPageContent })}
+        />
+        <Note>
+          This applies wherever page text would reach a provider, including Translate — one switch
+          rather than several, so there is no second one to miss. It does not switch AI on: nothing
+          contacts a provider until you connect one, and every action is still previewed and
+          approved before it runs.
+        </Note>
       </Group>
 
       <Group title="Downloads">
@@ -430,6 +523,73 @@ export function SettingsPanel(): React.JSX.Element {
           label="Ask where to save each file"
           checked={settings.askWhereToSaveDownloads}
           onChange={(askWhereToSaveDownloads) => update({ askWhereToSaveDownloads })}
+        />
+
+        <Toggle
+          label="Offer to download links you copy"
+          hint="When a Slash window comes into focus, checks whether the clipboard holds a link to a file and offers to fetch it. Slash only ever looks while it is the focused window — never in the background, and never while you are working in another application."
+          checked={settings.watchClipboardForDownloads}
+          onChange={(watchClipboardForDownloads) => update({ watchClipboardForDownloads })}
+        />
+        {settings.watchClipboardForDownloads && (
+          <Note>
+            Reading a clipboard means reading everything you copy, so this stays off unless you ask
+            for it. Text that is not a single link to a file is discarded before anything else in
+            the browser sees it.
+          </Note>
+        )}
+
+        {/*
+          `downloadDirectory` has always been honoured by `DownloadManager`; the
+          only way to change it was to edit the settings row by hand. The path
+          never comes from here — `downloadEngine:chooseFolder` opens a native
+          chooser in main and returns what the OS gave it.
+        */}
+        <Field label="Save files to">
+          <div className="flex items-center gap-2">
+            <span
+              className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-muted)]"
+              title={settings.downloadDirectory || undefined}
+            >
+              {settings.downloadDirectory === ''
+                ? 'Your system Downloads folder'
+                : settings.downloadDirectory}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                void window.browser
+                  .invoke('downloadEngine:chooseFolder', undefined)
+                  .then((result) => {
+                    // A cancelled dialog is an ordinary outcome; keep what was set.
+                    if (result.ok && result.value.directory !== null) {
+                      update({ downloadDirectory: result.value.directory })
+                    }
+                  })
+              }}
+              className="shrink-0 cursor-default rounded border border-[var(--color-border-subtle)] px-2 py-1 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+            >
+              Change
+            </button>
+            {settings.downloadDirectory !== '' && (
+              <button
+                type="button"
+                onClick={() => update({ downloadDirectory: '' })}
+                className="shrink-0 cursor-default rounded border border-[var(--color-border-subtle)] px-2 py-1 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </Field>
+      </Group>
+
+      <Group title="Reading">
+        <Toggle
+          label="Hide the toolbar until the pointer reaches the top"
+          hint="Gives the page the whole window while you read. The bars come back when you move the pointer to the top edge, and Ctrl+L still reaches the address bar from anywhere."
+          checked={settings.autoHideChrome}
+          onChange={(autoHideChrome) => update({ autoHideChrome })}
         />
       </Group>
 
@@ -454,7 +614,7 @@ export function SettingsPanel(): React.JSX.Element {
           <input
             type="range"
             min={1}
-            max={8}
+            max={16}
             step={1}
             value={settings.downloadConnections}
             onChange={(event) => update({ downloadConnections: Number(event.target.value) })}
@@ -462,12 +622,66 @@ export function SettingsPanel(): React.JSX.Element {
           />
           {/* Said plainly, because more is not always better and servers
               disagree about it. */}
-          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          <Note>
             More connections help on a fast link and a server that allows them. Some servers refuse
             or throttle several at once, and a few count them against a per-user limit — if
             downloads from a particular site get slower, lower this.
-          </p>
+          </Note>
         </Field>
+
+        <Toggle
+          label="Sort downloads into folders by kind"
+          hint="Video, Music, Images, Documents, Archives and Programs, inside your downloads folder. Anything Slash cannot classify stays at the top level rather than going into an Other folder nobody looks in."
+          checked={settings.sortDownloadsByCategory}
+          onChange={(sortDownloadsByCategory) => update({ sortDownloadsByCategory })}
+        />
+
+        <Field label="When everything has finished">
+          <select
+            value={settings.downloadCompletionAction}
+            onChange={(event) =>
+              update({
+                downloadCompletionAction: event.target
+                  .value as typeof settings.downloadCompletionAction
+              })
+            }
+            className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="nothing">Do nothing</option>
+            <option value="notify">Show a notification</option>
+            <option value="quit">Close Slash</option>
+            <option value="sleep">Sleep this computer</option>
+            <option value="shutdown">Shut down this computer</option>
+          </select>
+          <Note>
+            Anything that ends the session waits 30 seconds first and can be called off. It only
+            runs when the queue is genuinely finished — a paused or failed download stops it,
+            because those are transfers you meant to come back to.
+          </Note>
+        </Field>
+
+        <Toggle
+          label="Use yt-dlp for sites Slash cannot download"
+          hint="Some sites — YouTube among them — serve video in a form no browser can turn into a file on its own. Reaching those means defeating the site's access controls, which Slash does not do. If you install yt-dlp yourself, Slash will hand those pages to it and show the result in this list. Slash never installs or bundles it, and every download it makes is labelled."
+          checked={settings.useExternalDownloader}
+          onChange={(useExternalDownloader) => update({ useExternalDownloader })}
+        />
+
+        {settings.useExternalDownloader && <ExternalDownloaderRow />}
+
+        {settings.useExternalDownloader && (
+          <Field label="Path to yt-dlp">
+            <input
+              value={settings.externalDownloaderPath}
+              onChange={(event) => update({ externalDownloaderPath: event.target.value })}
+              placeholder="Leave empty to find it on your PATH"
+              className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+            />
+            <Note>
+              Only needed if yt-dlp is not on your PATH.
+            </Note>
+          </Field>
+        )}
 
         <Field label="Speed limit">
           <select
@@ -485,10 +699,10 @@ export function SettingsPanel(): React.JSX.Element {
             <option value="5242880">5 MB/s</option>
             <option value="10485760">10 MB/s</option>
           </select>
-          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          <Note>
             Across all downloads at once. Useful when a large file is making a call or a game
             unusable.
-          </p>
+          </Note>
         </Field>
       </Group>
 
@@ -508,11 +722,11 @@ export function SettingsPanel(): React.JSX.Element {
         />
         {/* The limit, stated where somebody would otherwise conclude the
             feature is broken on the site they tried it on. */}
-        <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+        <Note>
           Complete files only. Video delivered as an adaptive stream — thousands of short segments —
           is not reassembled, and video protected by DRM cannot be downloaded at all. Slash says
           which of those it found rather than offering a file that will not play.
-        </p>
+        </Note>
       </Group>
 
       {/*
@@ -526,7 +740,9 @@ export function SettingsPanel(): React.JSX.Element {
         is as much a lie as an overstated capability.
       */}
       <Group title="Updates">
-        <UpdateSection feedUrl={settings.updateFeedUrl} onFeedChange={update} />
+        <UpdateSection autoCheck={settings.updateAutoCheck}
+              autoDownload={settings.updateAutoDownload}
+              feedUrl={settings.updateFeedUrl} onFeedChange={update} />
       </Group>
 
       <Group title="Crash reports">
@@ -534,22 +750,23 @@ export function SettingsPanel(): React.JSX.Element {
       </Group>
 
       <Group title="Not built yet">
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <Note>
           <span className="text-[var(--color-text-primary)]">Automatic updates.</span> This build
           cannot update itself, and it is not code-signed. Chromium ships security fixes roughly
           monthly, so check for a newer version yourself rather than assuming this one is current.
           Both need a signing certificate before they can exist — an unsigned update channel would be
           an unauthenticated way onto your machine, which is worse than none.
-        </p>
+        </Note>
       </Group>
 
         {/* Nothing matched: say so, rather than leaving an empty panel that
             looks like the settings failed to load. */}
         {filter.trim() !== '' && !Object.keys(GROUP_META).some((t) => groupMatches(t, filter)) && (
-          <p className="text-xs text-[var(--color-text-muted)]">
+          <Note>
             Nothing matches &ldquo;{filter.trim()}&rdquo;.
-          </p>
+          </Note>
         )}
+          </div>
         </div>
       </div>
      </SettingsCategory.Provider>
@@ -642,6 +859,14 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     category: 'Privacy & security',
     keywords: 'cookies clear data private excluded origins'
   },
+  Reading: {
+    category: 'Browsing',
+    keywords: 'auto hide chrome toolbar focus distraction free reading fullscreen immersive'
+  },
+  'AI and your page content': {
+    category: 'Privacy & security',
+    keywords: 'ai page content read translate assistant provider privacy egress send text llm'
+  },
   'Saved sign-ins': {
     category: 'Privacy & security',
     keywords: 'password passwords login logins credentials autofill fill vault account'
@@ -696,7 +921,12 @@ const GROUP_META: Record<string, { category: Category; keywords: string }> = {
     category: 'Extensions',
     keywords: 'extension extensions addon add-on plugin unpacked crx chrome web store'
   },
-  'Sponsored tiles': {
+  'Slash Coin': {
+    category: 'Earning',
+    keywords:
+      'slash coin coins rewards reward earn earning balance points crypto currency sign in login google collect'
+  },
+  'Sponsored placements': {
     category: 'Earning',
     keywords: 'sponsored ads advertising sponsor revenue tile support funding'
   },
@@ -739,21 +969,21 @@ function DefaultBrowserField(): React.JSX.Element {
 
   if (status?.supported === false) {
     return (
-      <p className="text-xs text-[var(--color-text-muted)]">
+      <Note>
         Setting the default browser is not available on this platform.
-      </p>
+      </Note>
     )
   }
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-[var(--color-text-muted)]">
+      <Note>
         {status === null
           ? 'Checking…'
           : status.isDefault
             ? 'Slash is your default browser. Links from other applications open here.'
             : 'Slash is not your default browser.'}
-      </p>
+      </Note>
 
       {status !== null && !status.isDefault && (
         <>
@@ -779,10 +1009,10 @@ function DefaultBrowserField(): React.JSX.Element {
           >
             Open Windows settings
           </button>
-          <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          <Note>
             Windows does not let an application make itself the default. This opens the Default apps
             screen, where Slash can be chosen for http and https.
-          </p>
+          </Note>
         </>
       )}
     </div>
@@ -807,49 +1037,176 @@ function Group({
 
   return (
     <section>
-      <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
-        {title}
-      </h3>
-      <div className="space-y-3">{children}</div>
+      {/*
+        A group whose name is the category's is not telling anybody anything —
+        the page heading directly above already says "Appearance", and repeating
+        it read as a rendering fault rather than as structure.
+      */}
+      {title !== category && (
+        <h3 className="mb-2.5 px-1 text-[13px] font-semibold text-[var(--color-text-primary)]">
+          {title}
+        </h3>
+      )}
+      {/*
+        One surface per group, with a hairline between rows — the shape every
+        other browser's settings screen uses, and the reason theirs can be
+        skimmed. Seventeen groups of free-floating paragraphs had no edges at
+        all, so nothing told the eye where one setting ended and the next began.
+      */}
+      {/*
+        `Field` and `Toggle` both render a <label> and carry their own padding,
+        so the dividers can run the full width of the card. Anything else a
+        group contains — a grid of presets, a list, a stray paragraph — has
+        none, and went edge to edge against the border. The variant pads those
+        without touching the rows.
+      */}
+      <div className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.035] shadow-sm [&>*:not(label):not(.settings-row)]:px-3.5 [&>*:not(label):not(.settings-row)]:py-3">
+        {children}
+      </div>
     </section>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+/**
+ * A labelled control.
+ *
+ * Stacked rather than side-by-side, unlike `Toggle`: the controls here are
+ * sliders, text fields and selects that need room, and squeezing them into a
+ * right-hand column makes a path field four characters wide. The label carries
+ * the weight instead, and the row's padding does the separating.
+ */
+/**
+ * An explanation under a control.
+ *
+ * Wraps `HintText` so every one of these gets the same treatment: a first
+ * sentence, and the rest behind More. They were plain paragraphs of three or
+ * four lines, twenty of them down one screen, and the effect was a wall — the
+ * settings were hard to use *because* they were thorough.
+ *
+ * Only splits when the child is a single string. Several of these carry markup
+ * or an interpolated value, and those render whole rather than being cut at a
+ * full stop that might be inside them.
+ */
+function Note({ children }: { children: React.ReactNode }): React.JSX.Element {
+  if (typeof children === 'string') {
+    const { lead, rest } = splitHint(children)
+    return <HintText lead={lead} rest={rest} />
+  }
   return (
-    <label className="block">
-      <span className="mb-1 block text-sm">{label}</span>
+    <span className="mt-1.5 block text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
       {children}
-    </label>
+    </span>
   )
 }
 
-function Toggle({
+function Field({
   label,
   hint,
-  checked,
-  onChange,
-  disabled = false
+  children
 }: {
   label: string
   hint?: string
-  checked: boolean
-  onChange: (value: boolean) => void
-  disabled?: boolean
+  children: React.ReactNode
 }): React.JSX.Element {
+  const { lead, rest } = splitHint(hint)
   return (
-    <label className={`flex gap-3 ${disabled ? 'opacity-45' : 'cursor-pointer'}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
-      />
-      <span className="min-w-0">
-        <span className="block text-sm">{label}</span>
-        {hint && <span className="block text-xs text-[var(--color-text-muted)]">{hint}</span>}
+    // A <div>, not a <label>. The control here is arbitrary — a select, a
+    // slider, a text field — so it cannot be named by id from out here, and an
+    // implicit association would be claimed by the "More" disclosure below
+    // rather than by the control, for the same reason it was in `Toggle`.
+    // Each control inside carries its own accessible name.
+    <div className="settings-row block px-3.5 py-3">
+      <span className="mb-1.5 block text-[13px] font-medium text-[var(--color-text-primary)]">
+        {label}
       </span>
-    </label>
+      {lead !== '' && <HintText lead={lead} rest={rest} />}
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Install, update and remove the copy of yt-dlp that Slash manages.
+ *
+ * Not bundled with the installer on purpose, and the copy says so: yt-dlp ships
+ * extractor fixes every few weeks because the sites keep moving, Slash has no
+ * auto-update of its own, and a version frozen into the installer would break
+ * within a month with no way to repair it short of reinstalling.
+ */
+function ExternalDownloaderRow(): React.JSX.Element {
+  const [status, setStatus] = useState<InvokeResponse<'external:status'> | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  const refresh = (): void => {
+    void window.browser.invoke('external:status', undefined).then((result) => {
+      if (result.ok) setStatus(result.value)
+    })
+  }
+
+  useEffect(refresh, [])
+
+  const install = (): void => {
+    setBusy(true)
+    setNote('Fetching the current release…')
+    void window.browser.invoke('external:install', undefined).then((result) => {
+      setBusy(false)
+      setNote(result.ok ? result.value.note : 'That did not work.')
+      refresh()
+    })
+  }
+
+  const remove = (): void => {
+    setBusy(true)
+    void window.browser.invoke('external:uninstall', undefined).then((result) => {
+      setBusy(false)
+      setNote(result.ok ? result.value.note : 'Nothing to remove.')
+      refresh()
+    })
+  }
+
+  return (
+    <Field label="yt-dlp">
+      <Note>
+        {status === null
+          ? 'Checking…'
+          : status.installed
+            ? `Found ${status.version ?? 'an unknown version'}${status.managed ? ', installed by Slash' : ' on your PATH'}.`
+            : 'Not installed. Slash can fetch it from the project’s official releases and check it against the published checksum.'}
+      </Note>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={install}
+          className="cursor-pointer rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] transition hover:border-[var(--color-accent)] disabled:opacity-40"
+        >
+          {busy ? 'Working…' : status?.managed ? 'Update' : 'Install yt-dlp'}
+        </button>
+        {status?.managed === true && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={remove}
+            className="cursor-pointer rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] transition hover:border-[var(--color-danger)] disabled:opacity-40"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {note !== null && (
+        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]" role="status">
+          {note}
+        </p>
+      )}
+
+      <Note>
+        Kept out of the Slash installer deliberately. yt-dlp is updated every few weeks as sites
+        change, and a copy frozen into the installer would stop working with no way to fix it.
+        Installing here keeps it current and updatable.
+      </Note>
+    </Field>
   )
 }

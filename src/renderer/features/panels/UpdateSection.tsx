@@ -3,22 +3,34 @@ import type { UpdateStatus } from '@shared/types/updates'
 import type { Settings } from '@shared/types/settings'
 
 /**
- * Update checking, in Settings.
+ * Updates, in Settings.
  *
- * States the constraint rather than hiding it: this build can *find* a newer
- * version but cannot install one, because it is not code-signed and therefore
- * cannot verify a package came from us. Offering an Install button that refused
- * would be worse than not offering one.
+ * There are two different capabilities here and the screen keeps them apart,
+ * because conflating them is how a security claim gets overstated.
+ *
+ * **Fetching and verifying** is available when the feed publishes a checksum.
+ * Slash downloads the package, hashes it as it arrives, and deletes it unless
+ * it matches. That proves the bytes are the ones that were published — it does
+ * not prove who published them, since whoever controls the feed controls both.
+ *
+ * **Installing without a warning** needs a code signature, which this build
+ * does not have. Windows will say "unknown publisher" exactly as it did when
+ * Slash was first installed. That is stated here rather than discovered.
  *
  * The feed field is empty by default and no default endpoint is baked in — a
  * browser that phones a server on first launch to ask about updates has made an
- * outbound request nobody agreed to.
+ * outbound request nobody agreed to. The automatic check does nothing at all
+ * until an address is in that box.
  */
 export function UpdateSection({
   feedUrl,
+  autoCheck,
+  autoDownload,
   onFeedChange
 }: {
   feedUrl: string
+  autoCheck: boolean
+  autoDownload: boolean
   onFeedChange: (patch: Partial<Settings>) => void
 }): React.JSX.Element {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
@@ -30,6 +42,10 @@ export function UpdateSection({
     void window.browser.invoke('updates:status', undefined).then((result) => {
       if (result.ok) setStatus(result.value)
     })
+    // A download reports progress from main; without this the panel would have
+    // to poll, and a progress bar that updates every second by polling is a
+    // cost paid on a path that is idle almost always.
+    return window.browser.on('updates:changed', (next) => setStatus(next))
   }, [])
 
   const check = (): void => {
@@ -54,6 +70,19 @@ export function UpdateSection({
       </p>
 
       {status && <p className="text-[11px] text-[var(--color-text-muted)]">{status.detail}</p>}
+      {status?.notes && status.state !== 'up-to-date' && (
+        <p className="text-[11px] whitespace-pre-line text-[var(--color-text-muted)]">
+          {status.notes}
+        </p>
+      )}
+      {status?.state === 'downloading' && (
+        <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-[var(--color-accent)] transition-[width]"
+            style={{ width: `${Math.max(status.progress * 100, 2)}%` }}
+          />
+        </div>
+      )}
       {installProblem !== '' && (
         <p role="status" aria-live="polite" className="text-[11px] text-[var(--color-warn)]">
           {installProblem}
@@ -92,14 +121,37 @@ export function UpdateSection({
           Showing a disabled button rather than hiding it is deliberate: the
           reason is stated in `status.detail` beside it.
         */}
-        {status?.state === 'update-available' && (
+        {/* Fetch and verify, without installing. Two clicks for two decisions:
+            one spends bandwidth, the other closes the browser. */}
+        {status?.state === 'update-available' && status.canFetch && !status.canInstall && (
           <button
             type="button"
-            disabled={!status.canInstall || installing}
+            disabled={installing}
+            title="Download the package and check it against the checksum the feed publishes"
+            onClick={() => {
+              setInstalling(true)
+              setInstallProblem('')
+              void window.browser.invoke('updates:download', undefined).then((result) => {
+                setInstalling(false)
+                if (result.ok && !result.value.ok) setInstallProblem(result.value.detail)
+              })
+            }}
+            className="cursor-default rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+          >
+            {installing ? 'Downloading…' : 'Download and verify'}
+          </button>
+        )}
+
+        {(status?.state === 'update-available' || status?.state === 'ready') && (
+          <button
+            type="button"
+            disabled={(!status.canInstall && !status.canFetch) || installing}
             title={
               status.canInstall
                 ? 'Download and install, then restart'
-                : 'This build is not code-signed, so an update cannot be verified as coming from us.'
+                : status.canFetch
+                  ? 'Verifies the package against its published checksum, then starts the installer. Windows will warn about an unknown publisher.'
+                  : 'This release publishes no package Slash can verify. Open the release page instead.'
             }
             onClick={() => {
               setInstalling(true)
@@ -110,7 +162,13 @@ export function UpdateSection({
             }}
             className="cursor-default rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
           >
-            {installing ? 'Installing…' : 'Install and restart'}
+            {installing
+              ? 'Working…'
+              : status.state === 'ready'
+                ? 'Run the installer'
+                : status.canInstall
+                  ? 'Install and restart'
+                  : 'Download and install'}
           </button>
         )}
         {status?.releaseUrl && (
@@ -133,10 +191,38 @@ export function UpdateSection({
         The honest bottom line, stated where the user is looking at updates
         rather than buried in a document they will never open.
       */}
+      <label className="flex cursor-default items-start gap-2 text-[11px] text-[var(--color-text-muted)]">
+        <input
+          type="checkbox"
+          checked={autoCheck}
+          onChange={(event) => onFeedChange({ updateAutoCheck: event.target.checked })}
+          className="mt-0.5"
+        />
+        <span>
+          Check on launch and every six hours. Does nothing while the box above is empty — the
+          address is what decides whether Slash talks to a server at all.
+        </span>
+      </label>
+
+      <label className="flex cursor-default items-start gap-2 text-[11px] text-[var(--color-text-muted)]">
+        <input
+          type="checkbox"
+          checked={autoDownload}
+          onChange={(event) => onFeedChange({ updateAutoDownload: event.target.checked })}
+          className="mt-0.5"
+        />
+        <span>
+          Download the package as soon as one is found. Installing still always asks — this only
+          decides whether the bytes are already here when you say yes.
+        </span>
+      </label>
+
       <p className="text-[11px] text-[var(--color-text-muted)]">
-        Slash cannot install updates for itself: this build is not code-signed, so it has no way to
-        confirm an update package came from us. Chromium ships security fixes roughly monthly, so
-        check periodically and install manually.
+        What Slash can prove about an update is that it matches the checksum the feed published —
+        the bytes are the ones that were released, and no proxy substituted others. What it cannot
+        prove is who published them, because this build is not code-signed: Windows will warn about
+        an unknown publisher, exactly as it did when you first installed Slash. Chromium ships
+        security fixes roughly monthly, so it is worth keeping this on.
       </p>
     </div>
   )

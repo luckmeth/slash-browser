@@ -26,7 +26,6 @@ export const SettingsSchema = z.object({
    * searching somewhere the user did not choose.
    */
   searchEngineId: z.string().default('google'),
-  homepage: z.string().default('app://newtab'),
   /**
    * User-defined search engines, triggered by typing their keyword first.
    *
@@ -171,23 +170,24 @@ export const SettingsSchema = z.object({
    * showing it.
    */
   newTabCustomBackground: z.string().default(''),
-  /**
-   * Start-page sections the user has hidden.
-   *
-   * A deny-list, like the toolbar: a section added in a later version shows up
-   * by default rather than being invisible to everyone who once customised.
-   */
-  hiddenNewTabCards: z.array(z.string()).default([]),
-
   // --- sponsored tiles -------------------------------------------------------
   /**
-   * Whether the start page may show a sponsored tile.
+   * Whether sponsored placements may run.
    *
-   * Off by default, and it stays off until both this and an endpoint are set.
-   * A browser whose pitch is that it blocks advertising does not get to switch
-   * its own advertising on without being asked.
+   * **On by default, and no longer exposed to the reader.** Sponsored
+   * placements are how the browser is funded, so they are not optional — the
+   * settings screen states that plainly rather than offering a switch that was
+   * only ever going to be found by the people least willing to see an advert.
+   *
+   * The key survives because it is still a real gate: it stops the batch fetch
+   * in `SponsorService.active`, whoever publishes the browser needs to be able
+   * to turn the network off without shipping a release, and both
+   * `SLASH_AD_SHOWCASE` and `SLASH_SPONSOR_PROBE` drive it.
+   *
+   * A default build still shows nothing: no `sponsorEndpoint` means no request
+   * is made and there is nothing to display.
    */
-  sponsoredTilesEnabled: z.boolean().default(false),
+  sponsoredTilesEnabled: z.boolean().default(true),
   /**
    * Where batches of sponsored creatives are fetched from.
    *
@@ -207,6 +207,40 @@ export const SettingsSchema = z.object({
    * spent on a hyperlink.
    */
   advertisePortalUrl: z.string().default(''),
+  /**
+   * Slash Coin: whether qualifying browsing time is reported and rewarded.
+   *
+   * **Off on a fresh install, and it stays off until the user signs in.** This
+   * is the one feature that sends a record of *when* somebody was browsing to
+   * a server, which is precisely the thing principle 2 says does not happen
+   * unless it was switched on. Nothing about which pages, ever — only closed
+   * intervals of time — but "how long you used the browser, and when" is
+   * personal data whatever it omits, so it is opt-in and says so.
+   */
+  rewardsEnabled: z.boolean().default(false),
+  /**
+   * Overrides the compiled rewards service address.
+   *
+   * For whoever publishes this build; empty means the address in
+   * `shared/types/rewards.ts`.
+   */
+  rewardsEndpoint: z.string().default(''),
+  /**
+   * An opaque per-installation id, generated on first report.
+   *
+   * Not an identifier of the person: it is random, local, and travels only
+   * beside a ledger already tied to their account. It exists so one account
+   * farming across twenty fabricated machines is visible rather than invisible.
+   */
+  rewardsDeviceId: z.string().default(''),
+  /**
+   * Whether the one-time Slash Coin invitation has been shown.
+   *
+   * Once, ever. Principle 4 is that the browser does not nag: an invitation
+   * that reappears is an advert for our own feature, and the rewards page is a
+   * click away in Settings and on the start page for anybody who dismissed it.
+   */
+  rewardsPromptSeen: z.boolean().default(false),
   /**
    * Whether a sponsored notice may appear while browsing.
    *
@@ -286,6 +320,19 @@ export const SettingsSchema = z.object({
    */
   tabStripPosition: z.enum(['top', 'left']).default('top'),
   /**
+   * Hide the toolbar and tabs until the pointer reaches the top of the window.
+   *
+   * For reading rather than for browsing: the chrome is three rows tall, and on
+   * a long article that is three rows of browser between you and the text. With
+   * this on, the page takes the whole window and the bars slide back the moment
+   * the pointer goes looking for them.
+   *
+   * Off by default. Chrome that vanishes is a surprise the first time it
+   * happens, and a browser whose address bar is missing reads as broken rather
+   * than as focused.
+   */
+  autoHideChrome: z.boolean().default(false),
+  /**
    * How translucent the chrome is, 0–100.
    *
    * Not everyone wants acrylic: it costs GPU time, it is ignored on Windows 10,
@@ -293,7 +340,7 @@ export const SettingsSchema = z.object({
    * and the blur is dropped entirely, which is also the sensible setting on a
    * low-end machine.
    */
-  glassOpacity: z.number().int().min(0).max(100).default(55),
+  glassOpacity: z.number().int().min(0).max(100).default(0),
   restoreTabsOnStartup: z.boolean().default(true),
   /** Ask before running a downloaded file with an executable extension. */
   warnOnExecutableDownload: z.boolean().default(true),
@@ -311,15 +358,86 @@ export const SettingsSchema = z.object({
   /** Prompt for a save location on every download instead of using the folder above. */
   askWhereToSaveDownloads: z.boolean().default(false),
   /**
+   * Whether Slash looks at the clipboard for download links.
+   *
+   * **Off by default and it must stay that way.** Reading the clipboard is
+   * reading everything the user copies — passwords, account numbers, private
+   * messages. Even switched on, it is read only when a Slash window takes
+   * focus, never on a timer, so it cannot see what is copied inside another
+   * application. See `ClipboardWatcher`.
+   */
+  watchClipboardForDownloads: z.boolean().default(false),
+  /**
    * Connections the download engine may open per file.
    *
    * Only used when the server supports range requests. More is not reliably
    * faster: a server that caps total bandwidth per client gains nothing, and
    * some refuse many parallel connections outright.
+   *
+   * Defaults to 8 - the same as IDM's default, and double what this used to
+   * ask for. Four was chosen when segments were split statically at the start
+   * and never revisited, where extra connections mostly bought extra ways for
+   * one slow range to hold the file up. Now that an idle connection steals half
+   * of whatever is furthest from done, more of them genuinely finish sooner.
    */
-  downloadConnections: z.number().int().min(1).max(8).default(4),
+  downloadConnections: z.number().int().min(1).max(16).default(8),
+  /**
+   * Hand downloads Slash cannot make to a user-installed yt-dlp.
+   *
+   * Off by default, and Slash never installs, bundles or downloads the tool.
+   * Some sites serve media in a form no observer can turn into a file — an
+   * address that exists only inside the player's session, or a transport
+   * framing the player unwraps in the page. Reaching those means impersonating
+   * a different client or running the site's own signature code, which is
+   * defeating an access control, and this browser does not do that itself.
+   *
+   * A tool the user chose to install is their decision rather than ours. This
+   * switch is how they make it, and the UI always says which downloads went
+   * through yt-dlp and which the browser made.
+   */
+  useExternalDownloader: z.boolean().default(false),
+  /** Explicit path to yt-dlp. Empty means look on PATH. */
+  externalDownloaderPath: z.string().default(''),
   /** Ceiling in bytes per second across all downloads. 0 = unlimited. */
   downloadBandwidthLimit: z.number().int().min(0).default(0),
+  /**
+   * Named queues downloads can be sorted into and run independently.
+   *
+   * Kept in settings rather than in a table because a queue is a handful of
+   * preferences, not a record with a history - and because the downloads that
+   * reference one already carry the id, so a queue disappearing strands
+   * nothing (`selectStartable` falls back to the first).
+   */
+  downloadQueues: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        name: z.string().min(1).max(64),
+        maxConcurrent: z.number().int().min(1).max(10),
+        paused: z.boolean()
+      })
+    )
+    .min(1)
+    .max(12)
+    .default([{ id: 'main', name: 'Main', maxConcurrent: 3, paused: false }]),
+  /**
+   * File the download into a folder named for its kind.
+   *
+   * Off by default: turning it on means files stop appearing where the last one
+   * did, and somebody who did not ask for it goes looking in Downloads and
+   * finds nothing.
+   */
+  sortDownloadsByCategory: z.boolean().default(false),
+  /**
+   * What to do when every download has finished.
+   *
+   * Everything past `notify` ends the session, so it is offered with a
+   * cancellable countdown rather than acted on immediately - see
+   * `COMPLETION_GRACE_MS`.
+   */
+  downloadCompletionAction: z
+    .enum(['nothing', 'notify', 'quit', 'sleep', 'shutdown'])
+    .default('nothing'),
   /**
    * Whether Slash takes large downloads from Chromium and accelerates them.
    *
@@ -411,6 +529,23 @@ export const SettingsSchema = z.object({
    * has made an outbound request the user never agreed to.
    */
   updateFeedUrl: z.string().default(''),
+  /**
+   * Check the feed on launch and every few hours.
+   *
+   * On by default, and still contacts nothing while `updateFeedUrl` is empty --
+   * which it is on a fresh install. The pair is deliberate: the switch that
+   * decides *whether* to talk to a server is the address, and this one only
+   * decides how often once that address exists.
+   */
+  updateAutoCheck: z.boolean().default(true),
+  /**
+   * Fetch the package as soon as a newer version is found.
+   *
+   * Off by default. Downloading a hundred megabytes without being asked is a
+   * decision about somebody's connection, and installing is always a separate
+   * click regardless of this.
+   */
+  updateAutoDownload: z.boolean().default(false),
 
   // --- cleanup mode ----------------------------------------------------------
   /** Which Cleanup Mode the Clean This Page button uses. */
@@ -479,3 +614,51 @@ export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({})
 
 /** Keys the renderer is allowed to write. Anything else is rejected by the handler. */
 export const WRITABLE_SETTING_KEYS = Object.keys(SettingsSchema.shape) as (keyof Settings)[]
+
+/**
+ * A patch: only the keys the caller actually sent.
+ *
+ * `SettingsSchema.partial()` cannot be used for this, and the reason is subtle
+ * enough that it shipped and stayed hidden for a long time. Every field here
+ * carries a `.default()`, and `.partial()` wraps that in an optional without
+ * removing it — so an absent key still parses to its **default** rather than
+ * being left out. Measured: `SettingsSchema.partial().parse({ blockAds: false })`
+ * returns all 74 keys.
+ *
+ * Fed to `SettingsStore.update`, which merges the patch over the current
+ * settings, that meant every change reset every *other* setting to its default.
+ * Turn on two things and the first one came back off — which is exactly how it
+ * was reported: "most of the switches are not working".
+ *
+ * So the default is stripped before the key is made optional. An absent key is
+ * then genuinely absent, and the merge only touches what was sent.
+ */
+export const SettingsPatchSchema = z.object(
+  Object.fromEntries(
+    Object.entries(SettingsSchema.shape).map(([key, field]) => [key, stripDefault(field).optional()])
+  ) as z.ZodRawShape
+  // The shape is built at runtime, so its static type is only `ZodTypeAny` per
+  // key. The cast restores what it actually is — every key of `Settings`,
+  // optional, validated — so callers keep full type checking on a patch.
+) as unknown as z.ZodType<Partial<Settings>>
+
+export type SettingsPatch = Partial<Settings>
+
+/**
+ * The schema without its default.
+ *
+ * Written defensively across zod's two spellings — `removeDefault()` and the
+ * inner type on `_def` — because this is load-bearing and a zod upgrade that
+ * renamed it would silently restore the bug rather than fail to compile.
+ */
+function stripDefault(field: z.ZodTypeAny): z.ZodTypeAny {
+  const candidate = field as unknown as {
+    removeDefault?: () => z.ZodTypeAny
+    _def?: { innerType?: z.ZodTypeAny; defaultValue?: unknown }
+  }
+  if (typeof candidate.removeDefault === 'function') return candidate.removeDefault()
+  if (candidate._def?.innerType && candidate._def.defaultValue !== undefined) {
+    return candidate._def.innerType
+  }
+  return field
+}

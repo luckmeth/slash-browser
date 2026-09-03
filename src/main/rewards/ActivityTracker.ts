@@ -92,6 +92,7 @@ export class ActivityTracker {
       enabled: this.settings.getAll().rewardsEnabled,
       earningActive: this.rewards.earningActive,
       signedIn: this.rewards.signedIn,
+      profileComplete: this.rewards.profileComplete,
       focused: activity.focused,
       idleSeconds: activity.idleSeconds,
       url: activity.url,

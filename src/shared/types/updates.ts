@@ -24,8 +24,10 @@ export const UpdateStateSchema = z.enum([
   'checking',
   'up-to-date',
   'update-available',
-  /** Fetching the package. Only reachable on a signed build. */
+  /** Fetching the package. */
   'downloading',
+  /** Downloaded and verified against the published checksum, ready to run. */
+  'ready',
   'error'
 ])
 export type UpdateState = z.infer<typeof UpdateStateSchema>
@@ -48,6 +50,19 @@ export const UpdateStatusSchema = z.object({
    * False while unsigned. Reported so the UI states the real constraint instead
    * of offering a button that would refuse.
    */
-  canInstall: z.boolean()
+  canInstall: z.boolean(),
+  /**
+   * Whether the feed publishes a package and a checksum for it.
+   *
+   * Distinct from `canInstall`, which is about this build being code-signed.
+   * A feed with a checksum lets Slash fetch the package and prove it is the
+   * one that was published; it does not prove who published it, which is what
+   * a signature is for. The UI states both rather than conflating them.
+   */
+  canFetch: z.boolean().default(false),
+  /** 0-1 while downloading. */
+  progress: z.number().default(0),
+  /** What the release says about itself, from the feed. */
+  notes: z.string().default('')
 })
 export type UpdateStatus = z.infer<typeof UpdateStatusSchema>

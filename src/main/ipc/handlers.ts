@@ -1262,6 +1262,7 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('updates:status', () => ok(ctx.updates.current()))
   ipc.handle('updates:check', async () => ok(await ctx.updates.check()))
+  ipc.handle('updates:download', async () => ok(await ctx.updates.download()))
   ipc.handle('updates:install', async () => ok(await ctx.updates.downloadAndInstall()))
 
   // --- sync ------------------------------------------------------------------
@@ -1366,6 +1367,13 @@ export function registerHandlers(ctx: AppContext): void {
     ctx.rewards.signOut()
     return ok(ctx.rewards.status(ctx.activity.earning, ctx.activity.note))
   })
+  ipc.handle('advertiser:state', async () => ok(await ctx.advertiser.state()))
+  ipc.handle('advertiser:saveCompany', async (request) =>
+    ok(await ctx.advertiser.saveCompany(request))
+  )
+  ipc.handle('advertiser:submitCampaign', async (request) =>
+    ok(await ctx.advertiser.submitCampaign(request))
+  )
   ipc.handle('rewards:profile', async () => ok(await ctx.rewards.profile()))
   ipc.handle('rewards:saveProfile', async (request) => ok(await ctx.rewards.saveProfile(request)))
   ipc.handle('rewards:refresh', async () => {

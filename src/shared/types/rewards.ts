@@ -62,6 +62,13 @@ export const RewardsStatusSchema = z.object({
    * which is about this moment on this machine.
    */
   earningActive: z.boolean().default(true),
+  /**
+   * The collector has given the details a payout would need, which is what
+   * unlocks collecting. Defaults to **true** so a browser talking to a
+   * deployment without the gate is not told it is locked out of a gate that
+   * does not exist there.
+   */
+  profileComplete: z.boolean().default(true),
   coinsPerHour: z.number(),
   /** Epoch ms; 0 when the campaign end has not been fetched yet. */
   campaignEndsAt: z.number(),

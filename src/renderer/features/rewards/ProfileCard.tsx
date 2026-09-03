@@ -26,7 +26,14 @@ import { Icon } from '../../components/Icon'
  *   shared, not sold, not sent anywhere except the Slash service the account
  *   already talks to.
  */
-export function ProfileCard({ email }: { email: string }): React.JSX.Element {
+export function ProfileCard({
+  email,
+  locked = false
+}: {
+  email: string
+  /** Earning is waiting on this form. It cannot be folded away while so. */
+  locked?: boolean
+}): React.JSX.Element {
   const [profile, setProfile] = useState<CoinProfile | null>(null)
   const [form, setForm] = useState<CoinProfileInput | null>(null)
   const [saving, setSaving] = useState(false)
@@ -92,14 +99,19 @@ export function ProfileCard({ email }: { email: string }): React.JSX.Element {
     <section className="slash-reveal glass-raised mt-3 overflow-hidden rounded-2xl border border-[var(--glass-edge)]">
       <button
         type="button"
-        onClick={() => setShowing(!showing)}
+        // While earning is waiting on it, this is the one thing on the page
+        // worth doing; collapsing it would hide the only route out of the
+        // locked state.
+        onClick={() => setShowing(locked ? true : !showing)}
         className="flex w-full cursor-default items-center gap-3 px-5 py-4 text-left transition hover:bg-white/[0.03]"
       >
         <Icon name={profile.complete ? 'star' : 'warning'} size={15} />
         <span className="flex-1">
           <span className="block text-[13.5px] font-medium">Your details</span>
           <span className="block text-[12px] text-[var(--color-text-muted)]">
-            {profile.complete
+            {locked
+              ? 'Fill this in to start collecting. Nothing accrues until it is saved.'
+              : profile.complete
               ? profile.walletAddress === ''
                 ? 'Saved. No payout wallet added yet.'
                 : `Saved. Payouts would go to your ${
@@ -112,7 +124,7 @@ export function ProfileCard({ email }: { email: string }): React.JSX.Element {
         </span>
         {!profile.complete && (
           <span className="rounded-full bg-[var(--color-warn)]/15 px-2.5 py-1 text-[11px] text-[var(--color-warn)]">
-            Not filled in
+            {locked ? 'Required' : 'Not filled in'}
           </span>
         )}
         <Icon name="expand" size={14} className={showing ? 'rotate-180 transition' : 'transition'} />
@@ -240,7 +252,13 @@ export function ProfileCard({ email }: { email: string }): React.JSX.Element {
               disabled={saving || problems.length > 0}
               className="cursor-default rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-[13px] font-semibold text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {saving ? 'Saving…' : profile.complete ? 'Save changes' : 'Save my details'}
+              {saving
+                ? 'Saving…'
+                : profile.complete
+                  ? 'Save changes'
+                  : locked
+                    ? 'Save and start collecting'
+                    : 'Save my details'}
             </button>
             {saved && (
               <span className="text-[12px] text-[var(--color-good)]">Saved.</span>

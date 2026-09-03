@@ -20,6 +20,9 @@ export async function publishRelease(
   const releaseUrl = String(formData.get('releaseUrl') ?? '').trim()
   const notes = String(formData.get('notes') ?? '').trim().slice(0, 2000)
   const channel = formData.get('channel') === 'beta' ? 'beta' : 'stable'
+  const fileUrl = String(formData.get('fileUrl') ?? '').trim()
+  const sha512 = String(formData.get('sha512') ?? '').trim()
+  const sizeBytes = Number(String(formData.get('sizeBytes') ?? '').trim() || 0)
 
   // Checked here as well as by the database, so the operator gets a sentence
   // rather than a constraint violation.
@@ -35,6 +38,9 @@ export async function publishRelease(
     release_url: releaseUrl,
     notes,
     channel,
+    file_url: fileUrl,
+    sha512,
+    size_bytes: Number.isFinite(sizeBytes) && sizeBytes > 0 ? Math.floor(sizeBytes) : 0,
     published: true,
     created_by: admin.authUserId
   })

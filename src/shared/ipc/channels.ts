@@ -268,9 +268,13 @@ export const INVOKE_CHANNELS = [
   'rewards:completeSignIn',
   'rewards:signOut',
   'rewards:refresh',
+  'advertiser:state',
+  'advertiser:saveCompany',
+  'advertiser:submitCampaign',
   'rewards:profile',
   'rewards:saveProfile',
   'updates:install',
+  'updates:download',
 
   // --- diagnostics / crash reporting ---
   'crashes:report',
@@ -351,6 +355,7 @@ export const EVENT_CHANNELS = [
   'bookmarks:changed',
   'sync:changed',
   'rewards:changed',
+  'updates:changed',
   'config:changed',
   'workspaces:snapshot',
   'performance:changed',

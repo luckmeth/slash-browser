@@ -1,5 +1,11 @@
 import { z } from 'zod'
 import {
+  AdvertiserResultSchema,
+  AdvertiserStateSchema,
+  CampaignInputSchema,
+  CompanyInputSchema
+} from '../types/advertising'
+import {
   CoinProfileInputSchema,
   CoinProfileResultSchema,
   CoinProfileSchema,
@@ -1237,6 +1243,18 @@ export const invokeContracts = {
    * profile -- "not signed in" and "signed in and never filled it in" are
    * different screens.
    */
+  /**
+   * Advertising from inside the browser, on the same account as Slash Coin.
+   *
+   * Everything that decides anything is server-side: row-level security scopes
+   * the company and the campaigns to the caller, and a trigger sets the price
+   * from the rate card. These three carry a form to it and bring the answer
+   * back.
+   */
+  'advertiser:state': { request: z.void(), response: AdvertiserStateSchema },
+  'advertiser:saveCompany': { request: CompanyInputSchema, response: AdvertiserResultSchema },
+  'advertiser:submitCampaign': { request: CampaignInputSchema, response: AdvertiserResultSchema },
+
   'rewards:profile': { request: z.void(), response: CoinProfileSchema.nullable() },
   'rewards:saveProfile': {
     request: CoinProfileInputSchema,
@@ -1249,6 +1267,18 @@ export const invokeContracts = {
    * the UI can say why, which is the whole point of offering the button at all.
    */
   'updates:install': {
+    request: z.void(),
+    response: z.object({ ok: z.boolean(), detail: z.string() })
+  },
+
+  /**
+   * Fetches the package and verifies it against the checksum the feed
+   * published, without installing anything.
+   *
+   * Separate from `updates:install` because they are separate decisions: one
+   * spends bandwidth, the other closes the browser and runs an installer.
+   */
+  'updates:download': {
     request: z.void(),
     response: z.object({ ok: z.boolean(), detail: z.string() })
   },
@@ -1657,6 +1687,7 @@ export const eventContracts = {
   /** Sync state moved: unlocked, synced, failed, or reset. */
   'sync:changed': SyncStatusSchema,
   'rewards:changed': RewardsStatusSchema,
+  'updates:changed': UpdateStatusSchema,
   /** The publisher's remote configuration changed since the last fetch. */
   'config:changed': RemoteConfigSchema,
   'workspaces:snapshot': WorkspacesSnapshotSchema,
