@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { emailConfigured } from '@/lib/env'
 import { currentAdmin } from '@/lib/supabase/server'
@@ -19,7 +20,12 @@ export default async function EmailLogPage(): Promise<React.JSX.Element> {
 
   return (
     <main>
-      <h1>Email log</h1>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h1 style={{ marginBottom: 0 }}>Email log</h1>
+        <Link href="/emails/send" className="button secondary">
+          Send a message
+        </Link>
+      </div>
       <p className="lede">
         Every send attempted, including the ones that failed. &ldquo;Did they get the
         receipt?&rdquo; is otherwise unanswerable, and the first time anyone asks is when somebody

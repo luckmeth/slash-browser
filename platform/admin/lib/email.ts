@@ -23,6 +23,10 @@ export type EmailType =
   | 'ad_live'
   | 'rejection'
   | 'ending_soon'
+  // An operator message to a list, rather than a message caused by one
+  // campaign. Logged like everything else, so a broadcast is answerable the
+  // same way a receipt is.
+  | 'broadcast'
 
 interface SendArgs {
   to: string
@@ -30,15 +34,26 @@ interface SendArgs {
   subject: string
   body: string
   campaignId?: string
+  /**
+   * Why this person is receiving it.
+   *
+   * Defaults to the advertiser wording, which is what every message here was
+   * until collectors existed. A broadcast to people collecting Slash Coin that
+   * tells them they have an advertiser account is wrong in the one line of an
+   * email whose whole job is to be trustworthy.
+   */
+  footer?: string
 }
 
-const wrap = (title: string, body: string): string => `
+const ADVERTISER_FOOTER = 'You are receiving this because you have an advertiser account.'
+
+const wrap = (title: string, body: string, footer: string = ADVERTISER_FOOTER): string => `
 <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:520px;
             margin:0 auto;padding:24px;color:#1b1f27;line-height:1.55">
   <h1 style="font-size:19px;margin:0 0 14px">${escapeHtml(title)}</h1>
   ${body}
   <p style="margin-top:28px;font-size:12px;color:#6b7280">
-    Slash advertising. You are receiving this because you have an advertiser account.
+    Slash. ${escapeHtml(footer)}
   </p>
 </div>`
 
@@ -50,7 +65,14 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;')
 }
 
-export async function sendEmail({ to, type, subject, body, campaignId }: SendArgs): Promise<void> {
+export async function sendEmail({
+  to,
+  type,
+  subject,
+  body,
+  campaignId,
+  footer
+}: SendArgs): Promise<void> {
   let status: 'sent' | 'failed' = 'sent'
   let error: string | null = null
 
@@ -64,7 +86,7 @@ export async function sendEmail({ to, type, subject, body, campaignId }: SendArg
         from: env.EMAIL_FROM!,
         to,
         subject,
-        html: wrap(subject, body)
+        html: wrap(subject, body, footer)
       })
       if (result.error) {
         status = 'failed'

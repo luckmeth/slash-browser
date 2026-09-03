@@ -35,6 +35,7 @@ export default async function RootLayout({
                 <>
                   <Link href="/dashboard">Campaigns</Link>
                   <Link href="/campaigns/new">New campaign</Link>
+                  <Link href="/company">Company</Link>
                   <span className="note">{advertiser.email}</span>
                   <SignOutButton />
                 </>

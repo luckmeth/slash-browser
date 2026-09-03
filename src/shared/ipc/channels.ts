@@ -43,6 +43,7 @@ export const INVOKE_CHANNELS = [
   'menu:showAppMenu',
   'layout:setRightPanelWidth',
   'layout:setChromeHeight',
+  'layout:setChromeHidden',
 
   // --- tabs ---
   'tabs:list',
@@ -217,7 +218,16 @@ export const INVOKE_CHANNELS = [
   'downloadEngine:remove',
   'downloadEngine:setPriority',
   'downloadEngine:clearFinished',
+  'downloadEngine:openFile',
+  'downloadEngine:showInFolder',
+  'downloadEngine:destination',
+  'downloadEngine:chooseFolder',
   'downloadEngine:startNow',
+  'downloadEngine:enqueueBatch',
+  'downloadEngine:previewBatch',
+  'downloadEngine:setQueue',
+  'downloadEngine:refreshUrl',
+  'downloadEngine:cancelCompletionAction',
 
   // --- mission mode ---
   'mission:status',
@@ -253,6 +263,13 @@ export const INVOKE_CHANNELS = [
   'sync:lock',
   'sync:now',
   'sync:reset',
+  'rewards:status',
+  'rewards:signIn',
+  'rewards:completeSignIn',
+  'rewards:signOut',
+  'rewards:refresh',
+  'rewards:profile',
+  'rewards:saveProfile',
   'updates:install',
 
   // --- diagnostics / crash reporting ---
@@ -290,6 +307,7 @@ export const INVOKE_CHANNELS = [
   // --- download guardian / media detection ---
   'guardian:scanDownloads',
   'guardian:scanMedia',
+  'guardian:grabSite',
   /** How many downloadable files the active tab has been seen fetching. */
   'media:detected',
   /** What the floating chip over the page should say. */
@@ -301,6 +319,13 @@ export const INVOKE_CHANNELS = [
   /** What the picker shows — asked by the picker itself once it is up. */
   'media:options',
   /** Downloads one of the options the picker listed. */
+  'media:qualities',
+  'media:requestQuality',
+  'external:status',
+  'external:install',
+  'external:uninstall',
+  'media:externalFormats',
+  'media:downloadExternal',
   'media:downloadChoice',
 
   /** Docks the chosen AI assistant beside the page, or puts it away. */
@@ -322,8 +347,10 @@ export const EVENT_CHANNELS = [
   'tabs:snapshot',
   'downloads:changed',
   'history:changed',
+  'sponsor:changed',
   'bookmarks:changed',
   'sync:changed',
+  'rewards:changed',
   'config:changed',
   'workspaces:snapshot',
   'performance:changed',

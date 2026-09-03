@@ -18,8 +18,10 @@ import { SignOutButton } from './SignOutButton'
 const PAGES: ReadonlyArray<{ href: string; label: string }> = [
   { href: '/', label: 'Overview' },
   { href: '/queue', label: 'Review queue' },
+  { href: '/advertisers', label: 'Advertisers' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/coin', label: 'Slash Coin' },
+  { href: '/collectors', label: 'Collectors' },
   { href: '/browser', label: 'Browser' },
   { href: '/releases', label: 'Releases' },
   { href: '/emails', label: 'Email log' },

@@ -1,6 +1,13 @@
 import { z } from 'zod'
+import {
+  CoinProfileInputSchema,
+  CoinProfileResultSchema,
+  CoinProfileSchema,
+  RewardsStatusSchema,
+  RewardsSignInResultSchema
+} from '../types/rewards'
 import { PrintChoicesSchema, PrintPreviewSchema } from '../types/print'
-import { SettingsSchema } from '../types/settings'
+import { SettingsPatchSchema, SettingsSchema } from '../types/settings'
 import { TabsSnapshotSchema, TabSchema } from '../types/tab'
 import { TabGroupSchema } from '../types/tabGroup'
 import {
@@ -17,7 +24,7 @@ import { SemanticStatusSchema } from '../types/semantic'
 import { ImportSourceSchema, ImportSummarySchema } from '../types/importer'
 import { ReaderResultSchema } from '../types/reader'
 import { DownloadPrioritySchema, EngineDownloadSchema } from '../types/downloadEngine'
-import { DownloadScanSchema, MediaScanSchema } from '../types/downloadGuardian'
+import { DownloadScanSchema, MediaScanSchema, SiteGrabSchema } from '../types/downloadGuardian'
 import { TabAnalysisSchema } from '../types/tabBrain'
 import { CleanupModeSchema, CleanupResultSchema, CleanupStatusSchema } from '../types/cleanup'
 import { PageInsightSchema } from '../types/pageInsight'
@@ -117,7 +124,6 @@ export const OverlayStateSchema = z.object({
     'none',
     'spike',
     'command-bar',
-    'dialog',
     'permission-prompt',
     'tab-search',
     'reader',
@@ -199,7 +205,17 @@ export const UiCommandSchema = z.object({
     'bookmark-current-tab',
     /** Saves the active tab to the read-later queue. */
     'save-to-reading',
-    'close-panel'
+    'close-panel',
+    /** The pointer left the top of the window while auto-hide is on. */
+    'hide-chrome',
+    /**
+     * The pointer reached the top edge while the chrome was auto-hidden.
+     *
+     * Sent from main rather than decided in the renderer, because the pixels
+     * this gesture happens in do not belong to us - see
+     * `BrowserWindowController.setChromeAutoHidden`.
+     */
+    'reveal-chrome'
   ])
 })
 export type UiCommand = z.infer<typeof UiCommandSchema>
@@ -211,7 +227,10 @@ export const invokeContracts = {
   'diagnostics:dbStatus': { request: z.void(), response: DbStatusSchema },
 
   'settings:getAll': { request: z.void(), response: SettingsSchema },
-  'settings:update': { request: SettingsSchema.partial(), response: SettingsSchema },
+  // `SettingsPatchSchema`, never `SettingsSchema.partial()`: the latter still
+  // applies every field's `.default()` to absent keys, so a one-key patch
+  // arrived as all 74 and reset everything else. See the note on the schema.
+  'settings:update': { request: SettingsPatchSchema, response: SettingsSchema },
 
   /** Ranked suggestions for what has been typed so far. */
   'omnibox:suggest': {
@@ -303,7 +322,26 @@ export const invokeContracts = {
     request: z.void(),
     response: z.object({
       message: z.string(),
-      tone: z.enum(['info', 'warn'])
+      tone: z.enum(['info', 'warn']),
+      /**
+       * One optional thing the notice offers to do.
+       *
+       * Deliberately a *download address* rather than a general command: a
+       * notice that could run arbitrary commands would be a second, unaudited
+       * action channel next to the AI executor's carefully enumerated one. The
+       * only thing a notice offers today is fetching a file the user copied,
+       * and the shape says so.
+       */
+      action: z
+        // `downloadUrl` enqueues; `openUrl` opens a tab. Exactly one is set —
+        // a notice that offers an action has to say which action, and the two
+        // are different enough that a single field would have to be sniffed.
+        .object({
+          label: z.string(),
+          downloadUrl: z.string().default(''),
+          openUrl: z.string().default('')
+        })
+        .nullable()
     })
   },
   'shortcuts:list': {
@@ -356,6 +394,22 @@ export const invokeContracts = {
    */
   'layout:setChromeHeight': {
     request: z.object({ height: z.number().int().min(0).max(600) }),
+    response: z.void()
+  },
+  /**
+   * Tells main whether the chrome is currently hidden by auto-hide.
+   *
+   * Main needs to know because it, not the renderer, has to watch for the
+   * pointer coming back: the top edge of the window is the OS resize border and
+   * never reaches web content at all.
+   */
+  'layout:setChromeHidden': {
+    request: z.object({
+      /** Whether the auto-hide setting is on at all. */
+      active: z.boolean(),
+      /** Whether the chrome is collapsed right now. */
+      hidden: z.boolean()
+    }),
     response: z.void()
   },
 
@@ -926,8 +980,97 @@ export const invokeContracts = {
     request: z.object({ id: z.string(), priority: DownloadPrioritySchema }),
     response: z.void()
   },
+  /**
+   * Follows this site's links and collects the files it publishes.
+   *
+   * Bounded before it starts — the depth and page count are clamped in main by
+   * `clampOptions`, so a renderer cannot ask for a bigger crawl than the limits
+   * allow. Same-origin is not a parameter at all.
+   */
+  'guardian:grabSite': {
+    request: z.object({
+      depth: z.number().int().min(0).max(3).default(1),
+      maxPages: z.number().int().min(1).max(200).default(50),
+      extensions: z.array(z.string().max(8)).max(20).default([]),
+      respectRobots: z.boolean().default(true)
+    }),
+    response: SiteGrabSchema
+  },
   'downloadEngine:clearFinished': { request: z.void(), response: z.void() },
+  /**
+   * Opens or reveals a finished *engine* download.
+   *
+   * Separate from `downloads:openFile` because the two engines keep separate id
+   * namespaces — Chromium's `dl-…` and the queue's UUIDs — and routing an
+   * engine id to the Chromium lookup found nothing and did nothing, silently.
+   */
+  'downloadEngine:openFile': { request: z.object({ id: z.string() }), response: z.void() },
+  'downloadEngine:showInFolder': { request: z.object({ id: z.string() }), response: z.void() },
+  /**
+   * Where downloads are going, and a way to change it for the next one.
+   *
+   * Read separately from `settings` so the picker can show the folder without
+   * pulling the whole settings object into a modal that needs one string.
+   */
+  'downloadEngine:destination': {
+    request: z.void(),
+    response: z.object({ directory: z.string(), asksEveryTime: z.boolean() })
+  },
+  /**
+   * Opens a folder chooser and returns what was picked.
+   *
+   * Null when the user cancelled, which is a normal outcome and not an error —
+   * the caller keeps the folder it had. The **path never comes from the
+   * renderer**: it is whatever the OS dialog returned, so a compromised chrome
+   * view cannot name a directory of its own.
+   */
+  'downloadEngine:chooseFolder': {
+    request: z.void(),
+    response: z.object({ directory: z.string().nullable() })
+  },
   /** Releases a scheduled download from its hold. */
+  /**
+   * Expands a pattern like `file[1-50].jpg` without fetching anything.
+   *
+   * Separate from enqueueing on purpose: the user sees exactly what is about to
+   * be requested, and how many requests that is, before a single one is made.
+   */
+  'downloadEngine:previewBatch': {
+    request: z.object({ pattern: z.string().max(2048) }),
+    response: z.object({
+      urls: z.array(z.string()),
+      note: z.string(),
+      error: z.boolean()
+    })
+  },
+  'downloadEngine:enqueueBatch': {
+    request: z.object({
+      pattern: z.string().max(2048),
+      queue: z.string().max(64).optional()
+    }),
+    response: z.object({ started: z.number().int(), note: z.string() })
+  },
+  /** Moves a download to another named queue. */
+  'downloadEngine:setQueue': {
+    request: z.object({ id: z.string(), queue: z.string().max(64) }),
+    response: z.void()
+  },
+  /**
+   * Points a paused download at a fresh address after the old one expired.
+   *
+   * Answers with what happened rather than a bare boolean, because "kept the
+   * 2.1 GB already downloaded" and "started again" are both successes and the
+   * user needs to know which.
+   */
+  'downloadEngine:refreshUrl': {
+    request: z.object({ id: z.string(), url: z.string().url() }),
+    response: z.object({ ok: z.boolean(), reason: z.string() })
+  },
+  /** Calls off a pending sleep or shutdown. */
+  'downloadEngine:cancelCompletionAction': {
+    request: z.void(),
+    response: z.void()
+  },
   'downloadEngine:startNow': { request: z.object({ id: z.string() }), response: z.void() },
 
   /**
@@ -1067,6 +1210,38 @@ export const invokeContracts = {
   'sync:lock': { request: z.void(), response: SyncStatusSchema },
   'sync:now': { request: z.void(), response: SyncStatusSchema },
   'sync:reset': { request: z.void(), response: SyncStatusSchema },
+
+  /**
+   * Slash Coin.
+   *
+   * `status` is the only reader, and everything in it is a copy of what the
+   * server last said — the browser never computes a balance. `signIn` opens the
+   * *system* browser and returns immediately: Google's FedCM is not implemented
+   * in Electron, so the sign-in cannot happen in a window here, and the result
+   * arrives later over `rewards:changed`.
+   */
+  'rewards:status': { request: z.void(), response: RewardsStatusSchema },
+  'rewards:signIn': { request: z.void(), response: RewardsSignInResultSchema },
+  /**
+   * Finishes a sign-in from an address the user pasted, when the loopback never
+   * received the code. The escape hatch every desktop OAuth tool carries.
+   */
+  'rewards:completeSignIn': {
+    request: z.object({ pasted: z.string().max(4096) }),
+    response: RewardsSignInResultSchema
+  },
+  'rewards:signOut': { request: z.void(), response: RewardsStatusSchema },
+  'rewards:refresh': { request: z.void(), response: RewardsStatusSchema },
+  /**
+   * The collector's own details. Null when signed out, rather than an empty
+   * profile -- "not signed in" and "signed in and never filled it in" are
+   * different screens.
+   */
+  'rewards:profile': { request: z.void(), response: CoinProfileSchema.nullable() },
+  'rewards:saveProfile': {
+    request: CoinProfileInputSchema,
+    response: CoinProfileResultSchema
+  },
   /**
    * Downloads and installs the available update, then relaunches.
    *
@@ -1230,8 +1405,115 @@ export const invokeContracts = {
       note: z.string().nullable()
     })
   },
+  /**
+   * Qualities the page's own player says it can switch to.
+   *
+   * Separate from `media:options` because they answer different questions.
+   * Options is "what can be downloaded right now"; this is "what could be, if
+   * the player were asked to fetch it". On a site that publishes no addresses —
+   * YouTube, measured at 30 formats with none — the second list is much longer
+   * than the first, and the gap between them is the entire "why is only 360p
+   * offered" complaint.
+   */
+  'media:qualities': {
+    request: z.void(),
+    response: z.object({
+      available: z.boolean(),
+      levels: z.array(
+        z.object({ level: z.string(), label: z.string(), current: z.boolean() })
+      ),
+      note: z.string().nullable()
+    })
+  },
+  /**
+   * Asks the page's player to switch quality, then waits for it to fetch some.
+   *
+   * This calls the site's **own public player API** — the same call its quality
+   * menu makes — so nothing is worked around and the effect is exactly as if
+   * the person had chosen it by hand. It changes what they are watching, which
+   * is why it only ever runs from an explicit choice.
+   */
+  'media:requestQuality': {
+    request: z.object({ level: z.string().max(32) }),
+    response: z.object({
+      ok: z.boolean(),
+      now: z.string(),
+      /** How many downloadable items exist after the switch. */
+      found: z.number().int(),
+      note: z.string()
+    })
+  },
+  /**
+   * What a user-installed yt-dlp says this page is available as.
+   *
+   * Separate from `media:options` because the two have different provenance,
+   * and the UI has to be able to say which is which. Options is what the
+   * browser itself observed; this is what an external tool reports.
+   */
+  /** Whether a yt-dlp is available, and whether Slash installed it. */
+  'external:status': {
+    request: z.void(),
+    response: z.object({
+      installed: z.boolean(),
+      /** True when this is the copy Slash fetched, which it can also update. */
+      managed: z.boolean(),
+      path: z.string().nullable(),
+      version: z.string().nullable()
+    })
+  },
+  /**
+   * Fetches the current yt-dlp from its official releases into userData.
+   *
+   * Deliberately not bundled with the installer: yt-dlp ships extractor fixes
+   * every few weeks, Slash has no auto-update of its own, and a copy frozen
+   * into the installer would break within a month with no way to repair it.
+   */
+  'external:install': {
+    request: z.void(),
+    response: z.object({
+      ok: z.boolean(),
+      version: z.string().nullable(),
+      note: z.string()
+    })
+  },
+  'external:uninstall': {
+    request: z.void(),
+    response: z.object({ ok: z.boolean(), note: z.string() })
+  },
+  'media:externalFormats': {
+    request: z.void(),
+    response: z.object({
+      /** False when the tool is off or not installed — `note` says which. */
+      available: z.boolean(),
+      title: z.string(),
+      choices: z.array(
+        z.object({
+          selector: z.string(),
+          label: z.string(),
+          ext: z.string(),
+          sizeText: z.string()
+        })
+      ),
+      note: z.string().nullable()
+    })
+  },
+  'media:downloadExternal': {
+    request: z.object({ selector: z.string().max(200), label: z.string().max(300) }),
+    response: z.object({ started: z.boolean(), note: z.string() })
+  },
   'media:downloadChoice': {
-    request: z.object({ url: z.string() }),
+    request: z.object({
+      url: z.string(),
+      /**
+       * Where to put it, when the user chose a folder in the dialog.
+       *
+       * Only ever a path this process handed out from a native chooser — the
+       * handler checks it against the last one offered rather than trusting the
+       * renderer, because a directory from an untrusted sender is a write
+       * anywhere on the disk.
+       */
+      directory: z.string().optional()
+    }),
     response: z.object({ ok: z.boolean(), reason: z.string().nullable() })
   },
   'media:dismissOffer': { request: z.void(), response: z.void() },
@@ -1361,9 +1643,20 @@ export const eventContracts = {
   'downloads:changed': z.array(DownloadItemSchema),
   'media:found': z.object({ count: z.number().int() }),
   'history:changed': z.object({}),
+  /**
+   * A new batch of creatives arrived, or the cache was emptied.
+   *
+   * The start page read sponsor status once on mount with an empty
+   * dependency array, and it is drawn by the chrome document — which mounts
+   * at launch, before any batch has been fetched. So the banner and the
+   * background never appeared until the next restart, on a placement
+   * somebody had paid for.
+   */
+  'sponsor:changed': z.object({}),
   'bookmarks:changed': z.array(BookmarkSchema),
   /** Sync state moved: unlocked, synced, failed, or reset. */
   'sync:changed': SyncStatusSchema,
+  'rewards:changed': RewardsStatusSchema,
   /** The publisher's remote configuration changed since the last fetch. */
   'config:changed': RemoteConfigSchema,
   'workspaces:snapshot': WorkspacesSnapshotSchema,

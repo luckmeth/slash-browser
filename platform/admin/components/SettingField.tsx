@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useRef, useState } from 'react'
+import { useActionState, useEffect, useRef, useState } from 'react'
 import { savePlatformSetting, saveBrowserSetting, type SaveResult } from '@/app/settings/actions'
 import { Field, Measure, Switch } from './Field'
 
@@ -67,14 +67,29 @@ function Row({
   const [state, action, saving] = useActionState<SaveResult, FormData>(actionFor(target), undefined)
   const form = useRef<HTMLFormElement>(null)
 
+  /**
+   * Submitting a switch, one render *after* it moved.
+   *
+   * This was an `onChange` on the form, and it silently saved the wrong value
+   * every time. A click on the switch and the form's change handler are the
+   * same event: `setState` has been queued but React has not re-rendered, so
+   * the hidden input still holds the value the row had **before** the click.
+   * The old value was submitted, the row said "Saved.", and the switch snapped
+   * back on the next load — which is what "the settings page is not working"
+   * looks like from outside.
+   *
+   * An effect runs after the DOM is updated, so the hidden input holds what
+   * the switch now shows. Keyed on the value rather than on a counter, so a
+   * re-render for any other reason cannot re-submit; and gated on `dirty`, so
+   * mounting a row does not save it.
+   */
+  useEffect(() => {
+    if (!submitOnChange || !dirty) return
+    form.current?.requestSubmit()
+  }, [submitOnChange, dirty, json])
+
   return (
-    <form
-      ref={form}
-      action={action}
-      // Enter in a text field is a save, which is what people expect of a
-      // single-field row and what the JSON textareas could not offer.
-      onChange={submitOnChange ? () => form.current?.requestSubmit() : undefined}
-    >
+    <form ref={form} action={action}>
       <input type="hidden" name="key" value={settingKey} />
       <input type="hidden" name="value" value={json} />
       <Field

@@ -1,6 +1,8 @@
 import { copyFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, dialog, shell } from 'electron'
+import { mediaFilename } from '../downloads/engine/mediaFilename'
+import { expandBatch } from '../downloads/engine/batchUrls'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
@@ -431,7 +433,7 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('notice:current', (_req, context) => {
     const window = windowOf(context.sender)
-    return ok(window?.currentNotice() ?? { message: '', tone: 'info' as const })
+    return ok(window?.currentNotice() ?? { message: '', tone: 'info' as const, action: null })
   })
 
   ipc.handle('shortcuts:list', () => ok(listShortcuts(ctx)))
@@ -502,6 +504,11 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('layout:setChromeHeight', (request, context) => {
     windowOf(context.sender)?.setChromeHeight(request.height)
+    return ok(undefined)
+  })
+
+  ipc.handle('layout:setChromeHidden', (request, context) => {
+    windowOf(context.sender)?.setChromeAutoHidden(request.active, request.hidden)
     return ok(undefined)
   })
 
@@ -1065,17 +1072,37 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('downloadEngine:list', () => ok(ctx.downloadEngine.list()))
 
-  ipc.handle('downloadEngine:enqueue', (request) => {
+  ipc.handle('downloadEngine:enqueue', (request, invocation) => {
     // http(s) only. The engine writes whatever it fetches to disk, so a file://
     // or data: URL here would turn a download button into an arbitrary local
     // file copy.
     if (!/^https?:\/\//i.test(request.url)) {
       return err('FORBIDDEN', 'Only http and https downloads are supported')
     }
+    // Detected media reaches the engine through here, and a stream fetched
+    // without its page's referrer, cookies and user agent is refused by every
+    // CDN worth downloading from. The page is the active tab: this channel is
+    // driven by the Downloads panel, which is looking at it.
+    const window = windowOf(invocation.sender)
+    const contents = window?.tabs.activeTab?.contents ?? null
     return ok({
       id: ctx.downloadEngine.enqueue(request.url, {
         priority: request.priority,
-        startAfter: request.startAfter
+        startAfter: request.startAfter,
+        // Named after the page, not the endpoint. Streaming sites call the
+        // manifest after its role in the protocol - `index.m3u8`, `master.m3u8`,
+        // `videoplayback` - so deriving the name from the path produced a film
+        // called `index.ts`. The title is the only thing on hand that describes
+        // what was actually downloaded.
+        filename: mediaFilename(contents?.getTitle() ?? '', request.url),
+        // Keyed to *this address*, so a stream requested by a player iframe
+        // carries that iframe's referrer rather than the tab's — see
+        // `mediaContextForUrl`.
+        context: ctx.mediaContextForUrl(contents, request.url),
+        // Only reaches the size estimate, and looked up from what the master
+        // playlist actually said rather than taken from the renderer.
+        streamHint: ctx.streamHintFor(request.url),
+        isStream: ctx.isKnownStream(request.url, contents)
       })
     })
   })
@@ -1102,6 +1129,41 @@ export function registerHandlers(ctx: AppContext): void {
   })
   ipc.handle('downloadEngine:startNow', (request) => {
     ctx.downloadEngine.startNow(request.id)
+    return ok(undefined)
+  })
+
+  ipc.handle('downloadEngine:previewBatch', (request) => {
+    // Pure, and fetches nothing. The dialog shows the expansion before the
+    // first request is made, because a pattern is a rule and a mistyped rule
+    // is five hundred requests to somebody else's server.
+    return ok(expandBatch(request.pattern))
+  })
+
+  ipc.handle('downloadEngine:enqueueBatch', (request) => {
+    const expansion = expandBatch(request.pattern)
+    if (expansion.error) return ok({ started: 0, note: expansion.note })
+
+    for (const url of expansion.urls) {
+      ctx.downloadEngine.enqueue(url, {
+        priority: 'normal',
+        startAfter: null,
+        queue: request.queue
+      })
+    }
+    return ok({ started: expansion.urls.length, note: expansion.note })
+  })
+
+  ipc.handle('downloadEngine:setQueue', (request) => {
+    ctx.downloadEngine.setQueue(request.id, request.queue)
+    return ok(undefined)
+  })
+
+  ipc.handle('downloadEngine:refreshUrl', async (request) => {
+    return ok(await ctx.downloadEngine.refreshUrl(request.id, request.url))
+  })
+
+  ipc.handle('downloadEngine:cancelCompletionAction', () => {
+    ctx.cancelCompletionAction()
     return ok(undefined)
   })
 
@@ -1289,6 +1351,29 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(ctx.sync.status())
   })
 
+  // --- Slash Coin ------------------------------------------------------------
+  ipc.handle('rewards:status', () =>
+    ok(ctx.rewards.status(ctx.activity.earning, ctx.activity.note))
+  )
+  // Returns as soon as the system browser has been opened. The sign-in itself
+  // finishes out of process and arrives over `rewards:changed`.
+  ipc.handle('rewards:signIn', async () => ok(await ctx.rewards.signIn()))
+  ipc.handle('rewards:completeSignIn', async (request) =>
+    ok(await ctx.rewards.completeSignIn(request.pasted))
+  )
+  ipc.handle('rewards:signOut', () => {
+    ctx.activity.flush()
+    ctx.rewards.signOut()
+    return ok(ctx.rewards.status(ctx.activity.earning, ctx.activity.note))
+  })
+  ipc.handle('rewards:profile', async () => ok(await ctx.rewards.profile()))
+  ipc.handle('rewards:saveProfile', async (request) => ok(await ctx.rewards.saveProfile(request)))
+  ipc.handle('rewards:refresh', async () => {
+    await ctx.rewards.report(true)
+    await ctx.rewards.refreshState()
+    return ok(ctx.rewards.status(ctx.activity.earning, ctx.activity.note))
+  })
+
   // --- diagnostics / crash reporting ----------------------------------------
 
   ipc.handle('crashes:report', async () => ok(await ctx.crashes.report()))
@@ -1327,8 +1412,21 @@ export function registerHandlers(ctx: AppContext): void {
       const provider = info?.connected
         ? ctx.providers.build(info.id)
         : null
+      // `info.local` is a catalogue label; `info.destination` is a check of the
+      // endpoint actually stored. Everything downstream — the disclosure list,
+      // the third-party count and the badge on every answer — reads this, so
+      // taking the label here would have made all three claim the same wrong
+      // thing.
       return info && provider
-        ? [{ id: info.id, name: info.name, local: info.local, provider }]
+        ? [
+            {
+              id: info.id,
+              name: info.name,
+              local: info.destination === 'loopback',
+              host: info.destinationHost,
+              provider
+            }
+          ]
         : []
     })
   }
@@ -1340,7 +1438,8 @@ export function registerHandlers(ctx: AppContext): void {
       recipients: targets.map((target) => ({
         provider: target.id,
         name: target.name,
-        local: target.local
+        local: target.local,
+        host: target.host
       })),
       cloudCount: targets.filter((target) => !target.local).length
     })
@@ -1524,7 +1623,11 @@ export function registerHandlers(ctx: AppContext): void {
     // Both sources. The DOM scan finds a plain <video src>; the sniffer finds
     // what the page actually fetched, which is the only view of a video loaded
     // through Media Source Extensions — i.e. most of them.
-    return ok(await ctx.guardian.scanMedia(contents, ctx.mediaSniffer.forTab(contents)))
+    const scan = await ctx.guardian.scanMedia(contents, ctx.mediaSniffer.forTab(contents))
+    // A master playlist is a list of qualities, and offering it as a single row
+    // means the downloader picks one silently. Expanded here rather than in the
+    // guardian, which is pure and reads no network.
+    return ok({ ...scan, candidates: await ctx.withStreamQualities(scan.candidates, contents) })
   })
 
   ipc.handle('assistant:toggle', (_req, context) => {
@@ -1584,6 +1687,34 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(undefined)
   })
 
+  ipc.handle('external:status', async () => ok(await ctx.externalStatus()))
+  ipc.handle('external:install', async () => ok(await ctx.installExternal()))
+  ipc.handle('external:uninstall', async () => ok(await ctx.uninstallExternal()))
+
+  ipc.handle('media:externalFormats', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.externalFormatsFor(window))
+  })
+
+  ipc.handle('media:downloadExternal', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.startExternalDownload(window, request.selector, request.label))
+  })
+
+  ipc.handle('media:qualities', async (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.playerQualitiesFor(window))
+  })
+
+  ipc.handle('media:requestQuality', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    return ok(await ctx.requestPlayerQuality(window, request.level))
+  })
+
   ipc.handle('media:options', async (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
@@ -1611,8 +1742,8 @@ export function registerHandlers(ctx: AppContext): void {
     })
   })
 
-  ipc.handle('media:downloadChoice', async (request, context) => {
-    const window = windowOf(context.sender)
+  ipc.handle('media:downloadChoice', async (request, invocation) => {
+    const window = windowOf(invocation.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
 
     if (!window.wasOffered(request.url)) {
@@ -1628,7 +1759,23 @@ export function registerHandlers(ctx: AppContext): void {
       return ok({ ok: false, reason: 'That option is no longer available. Try opening the list again.' })
     }
 
+    // A directory from the renderer is a write to anywhere on the disk, so it is
+    // only honoured if this process handed that exact path out from a native
+    // chooser. Anything else falls back to the default folder.
+    const directory =
+      request.directory !== undefined && ctx.wasFolderOffered(request.directory)
+        ? request.directory
+        : undefined
+
     const filename = ctx.filenameForChoice(window.offeredTitle, choice)
+    // The tab this was read from. Every one of these addresses is bound to the
+    // page that listed it — `googlevideo` refuses a request that does not look
+    // like the browser it minted the URL for, and a film CDN refuses one with
+    // no referrer — so the download has to be the page's own request.
+    const pageContext = ctx.mediaContextForUrl(
+      window.tabs.activeTab?.contents ?? null,
+      request.url
+    )
 
     // A picture-only stream is half a video. If there is audio alongside it and
     // a muxer to join them, one entry downloads both and produces one file —
@@ -1637,7 +1784,11 @@ export function registerHandlers(ctx: AppContext): void {
     if (choice.hasVideo && !choice.hasAudio) {
       const audio = options.choices.find((entry) => entry.hasAudio && !entry.hasVideo)
       if (audio && ctx.downloadEngine.canJoin()) {
-        ctx.downloadEngine.enqueueJoined(request.url, audio.url, { filename })
+        ctx.downloadEngine.enqueueJoined(request.url, audio.url, {
+          filename,
+          context: pageContext,
+          ...(directory === undefined ? {} : { directory })
+        })
         return ok({ ok: true, reason: null })
       }
     }
@@ -1645,7 +1796,11 @@ export function registerHandlers(ctx: AppContext): void {
     ctx.downloadEngine.enqueue(request.url, {
       priority: 'normal',
       startAfter: null,
-      filename
+      filename,
+      context: pageContext,
+      isStream: choice.isStream === true,
+      ...(directory === undefined ? {} : { directory }),
+      ...(choice.streamHint ? { streamHint: choice.streamHint } : {})
     })
     return ok({ ok: true, reason: null })
   })
@@ -1663,9 +1818,51 @@ export function registerHandlers(ctx: AppContext): void {
     return ok({ count: ctx.mediaSniffer.countFor(window.tabs.activeTab?.contents ?? null) })
   })
 
+  ipc.handle('guardian:grabSite', async (request, invocation) => {
+    const window = windowOf(invocation.sender)
+    const contents = window?.tabs.activeTab?.contents ?? null
+    const seed = contents?.getURL() ?? ''
+
+    // The crawl carries the page's own context for the same reason a download
+    // does: a members' area behind a cookie is exactly where this is useful,
+    // and an anonymous fetch would collect twenty copies of a login page.
+    return ok(
+      await ctx.siteGrabber.grab(seed, request, ctx.mediaContextFor(contents))
+    )
+  })
+
   ipc.handle('downloadEngine:clearFinished', () => {
     ctx.downloadEngine.clearFinished()
     return ok(undefined)
+  })
+
+  ipc.handle('downloadEngine:openFile', async (request) => {
+    const item = ctx.downloadEngine.list().find((entry) => entry.id === request.id)
+    if (!item || item.state !== 'completed') return ok(undefined)
+    await ctx.downloads.openPath(item.savePath, item.filename, item.url)
+    return ok(undefined)
+  })
+
+  ipc.handle('downloadEngine:showInFolder', (request) => {
+    const item = ctx.downloadEngine.list().find((entry) => entry.id === request.id)
+    if (item) ctx.downloads.revealPath(item.savePath)
+    return ok(undefined)
+  })
+
+  ipc.handle('downloadEngine:destination', () => {
+    const settings = ctx.settings.getAll()
+    return ok({
+      directory: ctx.downloads.directory(),
+      asksEveryTime: settings.askWhereToSaveDownloads
+    })
+  })
+
+  ipc.handle('downloadEngine:chooseFolder', async (_req, invocation) => {
+    const window = windowOf(invocation.sender)
+    const chosen = await ctx.chooseDownloadFolder(window?.browserWindow ?? null)
+    // Null is a cancelled dialog, which is an ordinary outcome. The caller keeps
+    // the folder it already had rather than being told something went wrong.
+    return ok({ directory: chosen })
   })
 
   // --- reader mode ----------------------------------------------------------
