@@ -51,6 +51,7 @@ export default async function NewCampaignPage(): Promise<React.JSX.Element> {
         minLeadHours={settings.minLeadTimeHours}
         currency={settings.currency}
         advertiserAuthId={advertiser.authUserId}
+        advertiserId={advertiser.id}
         companyName={advertiser.company_name}
       />
     </main>

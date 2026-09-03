@@ -289,10 +289,16 @@ export class AdvertiserService {
           placement_tier: input.placementTier,
           image_path: imagePath === '' ? null : imagePath,
           starts_at: new Date(input.startsAt).toISOString(),
-          ends_at: new Date(input.endsAt).toISOString(),
-          // Submitted for review, never approved. The policy refuses any other
-          // value, so this is a statement of intent rather than a control.
-          status: 'pending_review'
+          ends_at: new Date(input.endsAt).toISOString()
+          // `status` is deliberately absent, and sending it was what made every
+          // submission fail with "permission denied". The insert grant on this
+          // table is **per column** -- eight of them, and `status` is not one,
+          // because a client that can state its own status is a client that can
+          // approve its own campaign. The column defaults to `pending_review`,
+          // which is exactly what a submission is.
+          //
+          // The money columns are absent for the same reason: the pricing
+          // trigger computes them and ignores anything a client claims.
         })
       })
 
@@ -369,6 +375,21 @@ export class AdvertiserService {
  * correct client can still hit are named; everything else keeps the code.
  */
 function readablePostgrest(body: string, status: number): string {
+  // The pricing trigger raises these, and they are the rules a person is most
+  // likely to hit. Passed through nearly verbatim: they already name the
+  // number that is wrong, which is more use than anything this could add.
+  if (/whole number of hours/.test(body)) {
+    return 'Campaigns run for a whole number of hours — set the start and end to the same minute.'
+  }
+  if (/sold in blocks of at least/.test(body)) {
+    const match = /at least (\d+) hours/.exec(body)
+    return `That placement is sold in blocks of at least ${match?.[1] ?? 'more'} hours.`
+  }
+  if (/is not on sale/.test(body)) return 'That placement is not on sale at the moment.'
+  if (/unknown placement tier/.test(body)) return 'That placement no longer exists — pick another.'
+  if (/null value in column "advertiser_id"/.test(body)) {
+    return 'Your company profile could not be found. Save it again and retry.'
+  }
   // The function raises these deliberately, with the field in the message.
   if (/company name is needed/i.test(body)) return 'A company name is needed.'
   if (/website has to start/i.test(body)) return 'The website has to start with https://.'

@@ -108,6 +108,15 @@ export function checkCampaign(
 
   if (hours <= 0) {
     problems.push({ field: 'endsAt', problem: 'The end has to be after the start.' })
+  } else if (hours !== Math.trunc(hours)) {
+    // The pricing trigger refuses a fractional hour outright, and it is right
+    // to: an advert is sold by the hour and a bill for 12.4 of them is an
+    // argument waiting to happen. Checked here so it is a sentence beside the
+    // field rather than a rejection after pressing submit.
+    problems.push({
+      field: 'endsAt',
+      problem: `Campaigns run for a whole number of hours — this is ${hours.toFixed(2)}. Set the same minutes past the hour at both ends.`
+    })
   } else if (rate && hours < rate.minHours) {
     problems.push({
       field: 'endsAt',

@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { checkCampaign, estimateCost } from '@shared/campaignRules'
 import { countryOptions } from '@shared/countries'
 import {
-  CREATIVE_TYPES,
-  MAX_CREATIVE_BYTES,
   type AdvertiserState,
   type CampaignInput,
   type CompanyInput
 } from '@shared/types/advertising'
 import { Icon } from '../../components/Icon'
+import { CreativePicker } from './CreativePicker'
 
 /**
  * Booking an advert without leaving the browser.
@@ -274,7 +273,6 @@ function BookingCard({
     imageBase64: '',
     imageType: ''
   })
-  const [imageName, setImageName] = useState('')
 
   const problems = useMemo(
     () => checkCampaign(form, state.rates, 12, Date.now()),
@@ -289,28 +287,6 @@ function BookingCard({
     setDone('')
     setProblem('')
     setForm({ ...form, [field]: value })
-  }
-
-  const pickImage = (file: File | undefined): void => {
-    if (!file) return
-    setDone('')
-    if (file.size > MAX_CREATIVE_BYTES) {
-      setProblem(
-        `That image is ${Math.round(file.size / 1024)} KB. The limit is ${Math.round(
-          MAX_CREATIVE_BYTES / 1024
-        )} KB — every live creative ships inside the batch each reader downloads.`
-      )
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = String(reader.result ?? '')
-      // Strip the data: prefix; main wants the bytes, not a URL.
-      setForm({ ...form, imageBase64: result.slice(result.indexOf(',') + 1), imageType: file.type })
-      setImageName(file.name)
-      setProblem('')
-    }
-    reader.readAsDataURL(file)
   }
 
   return (
@@ -352,24 +328,33 @@ function BookingCard({
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Field label="Starts" problem={problemFor('startsAt')}>
-          <Input type="datetime-local" value={form.startsAt} onChange={(v) => set('startsAt', v)} />
+          <Input
+            type="datetime-local"
+            step={3600}
+            value={form.startsAt}
+            onChange={(v) => set('startsAt', v)}
+          />
         </Field>
         <Field label="Ends" problem={problemFor('endsAt')}>
-          <Input type="datetime-local" value={form.endsAt} onChange={(v) => set('endsAt', v)} />
+          <Input
+            type="datetime-local"
+            step={3600}
+            value={form.endsAt}
+            onChange={(v) => set('endsAt', v)}
+          />
         </Field>
       </div>
 
-      <Field label="Creative (PNG, JPEG or WebP, up to 512 KB)" problem={problemFor('image')}>
-        <input
-          type="file"
-          accept={CREATIVE_TYPES.join(',')}
-          onChange={(event) => pickImage(event.target.files?.[0])}
-          className="w-full text-[12px] text-[var(--color-text-muted)]"
-        />
-        {imageName !== '' && (
-          <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">{imageName} attached</p>
-        )}
-      </Field>
+      <CreativePicker
+        imageType={form.imageType}
+        problem={problemFor('image')}
+        onPick={(base64, type) => {
+          setDone('')
+          setProblem('')
+          setForm({ ...form, imageBase64: base64, imageType: type })
+        }}
+        onClear={() => setForm({ ...form, imageBase64: '', imageType: '' })}
+      />
 
       {/* The estimate, beside the thing that changes it. */}
       <div className="mt-4 flex items-center justify-between rounded-xl border border-[var(--glass-edge)] bg-white/[0.03] px-4 py-3">
@@ -412,8 +397,14 @@ function BookingCard({
             setDone(
               'Submitted for review. You will hear either way, and you have not been charged.'
             )
-            setForm({ ...form, title: '', description: '', destinationLink: '', imageBase64: '', imageType: '' })
-            setImageName('')
+            setForm({
+              ...form,
+              title: '',
+              description: '',
+              destinationLink: '',
+              imageBase64: '',
+              imageType: ''
+            })
             onSubmitted()
           })
         }}
@@ -502,17 +493,21 @@ function Input({
   value,
   onChange,
   placeholder,
-  type = 'text'
+  type = 'text',
+  step
 }: {
   value: string
   onChange: (next: string) => void
   placeholder?: string
   type?: string
+  /** Whole hours for the date pickers: the database refuses a part-hour run. */
+  step?: number
 }): React.JSX.Element {
   return (
     <input
       type={type}
       value={value}
+      step={step}
       placeholder={placeholder}
       spellCheck={false}
       onChange={(event) => onChange(event.target.value)}

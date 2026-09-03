@@ -23,6 +23,15 @@ interface Props {
   minLeadHours: number
   currency: string
   advertiserAuthId: string
+  /**
+   * The `advertisers.id` this campaign belongs to.
+   *
+   * Required by the insert: the column is NOT NULL with no default, so a
+   * submission without it was refused outright. The policy then checks it
+   * against `current_advertiser_id()`, which is why naming it here claims
+   * nothing -- a value that is not theirs is refused by the database.
+   */
+  advertiserId: string
   /** Shown in the preview, where the reader would see it. */
   companyName: string
 }
@@ -43,6 +52,7 @@ export function CampaignForm({
   minLeadHours,
   currency,
   advertiserAuthId,
+  advertiserId,
   companyName
 }: Props): React.JSX.Element {
   const router = useRouter()
@@ -114,6 +124,11 @@ export function CampaignForm({
       const { data, error } = await supabase
         .from('campaigns')
         .insert({
+          // Required, and it has no default: the row is refused outright
+          // without it. The insert policy then checks it against
+          // `current_advertiser_id()`, so naming it here claims nothing --
+          // a value that is not theirs is refused by the database.
+          advertiser_id: advertiserId,
           title: title.trim(),
           description: description.trim(),
           destination_link: link.trim(),

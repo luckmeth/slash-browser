@@ -72,6 +72,24 @@ describe('when a campaign may start', () => {
     expect(fields({ endsAt: '2026-09-04T09:00:00Z' })).toContain('endsAt')
   })
 
+  it('refuses a part-hour run, which the pricing trigger will not price', () => {
+    // The database raises "campaigns run for a whole number of hours"; this is
+    // the same rule, said beside the field instead of after a refusal.
+    const problems = checkCampaign(
+      { ...good, startsAt: '2026-09-05T09:00:00Z', endsAt: '2026-09-08T09:30:00Z' },
+      RATES,
+      12,
+      NOW
+    )
+    expect(problems.map((problem) => problem.field)).toContain('endsAt')
+    expect(problems[0]?.problem).toContain('whole number of hours')
+  })
+
+  it('accepts a window that is whole hours at an odd minute', () => {
+    // 09:17 to 09:17 three days later is 72 hours exactly, and legal.
+    expect(fields({ startsAt: '2026-09-05T09:17:00Z', endsAt: '2026-09-08T09:17:00Z' })).toEqual([])
+  })
+
   it('enforces the minimum block for the chosen placement', () => {
     // 12 hours, against a 24-hour minimum.
     expect(fields({ startsAt: '2026-09-05T09:00:00Z', endsAt: '2026-09-05T21:00:00Z' })).toContain(
