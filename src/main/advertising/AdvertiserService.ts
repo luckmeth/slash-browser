@@ -202,28 +202,35 @@ export class AdvertiserService {
       return { ok: false, problem: 'The website has to start with https://.', campaignId: '' }
     }
 
-    const body = {
-      company_name: name,
-      contact_email: email,
+    // A function, not a PATCH, for two reasons found by trying the PATCH.
+    //
+    // Supabase runs the `safeupdate` extension, so an UPDATE with no filter is
+    // refused outright — `400 UPDATE requires a WHERE clause` — and the request
+    // deliberately had no filter, because row-level security already scopes it
+    // to the caller and a filter here would be a second, weaker copy of that.
+    //
+    // And there was nothing to update: `mark_browser_account()` deletes the
+    // advertiser row the signup trigger creates whenever it is untouched, so
+    // every browser account has none. The function upserts, keyed to the
+    // session, and touches only the columns an advertiser owns.
+    const details = {
+      companyName: name,
+      contactEmail: email,
       website,
       description: input.description.trim().slice(0, 600),
-      contact_name: input.contactName.trim().slice(0, 120),
-      contact_phone: input.contactPhone.trim().slice(0, 32),
-      address_line1: input.addressLine1.trim().slice(0, 160),
+      contactName: input.contactName.trim().slice(0, 120),
+      contactPhone: input.contactPhone.trim().slice(0, 32),
+      addressLine1: input.addressLine1.trim().slice(0, 160),
       city: input.city.trim().slice(0, 80),
       postcode: input.postcode.trim().slice(0, 24),
       country: input.country.trim().toUpperCase().slice(0, 2),
-      tax_id: input.taxId.trim().slice(0, 40),
-      profile_updated_at: new Date().toISOString()
+      taxId: input.taxId.trim().slice(0, 40)
     }
 
     try {
-      // The row exists already: `handle_new_user` creates one for every account
-      // at sign-up. An update with no filter is safe here for the same reason
-      // the read is — the policy scopes it to their own row.
-      const response = await this.rest('advertisers', {
-        method: 'PATCH',
-        body: JSON.stringify(body)
+      const response = await this.rest('rpc/save_advertiser_profile', {
+        method: 'POST',
+        body: JSON.stringify({ details })
       })
       if (!response.ok) {
         const detail = await response.text()
@@ -362,6 +369,12 @@ export class AdvertiserService {
  * correct client can still hit are named; everything else keeps the code.
  */
 function readablePostgrest(body: string, status: number): string {
+  // The function raises these deliberately, with the field in the message.
+  if (/company name is needed/i.test(body)) return 'A company name is needed.'
+  if (/website has to start/i.test(body)) return 'The website has to start with https://.'
+  if (/save_advertiser_profile|PGRST202|Could not find the function/i.test(body)) {
+    return 'This deployment is missing save_advertiser_profile. Apply supabase/migrations/20260904_advertiser_profile.sql.'
+  }
   if (/destination_link/.test(body)) return 'The destination link has to start with https://.'
   if (/campaign_window_ordered/.test(body)) return 'The end has to be after the start.'
   if (/row-level security|permission denied/i.test(body)) {

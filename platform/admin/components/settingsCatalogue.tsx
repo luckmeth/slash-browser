@@ -1,5 +1,6 @@
 'use client'
 
+import { groupOf } from './settingsGroups'
 import {
   BooleanSetting,
   ChoiceSetting,
@@ -36,35 +37,26 @@ import {
 interface Described {
   label: string
   why: React.ReactNode
-  group: string
 }
-
-export const PLATFORM_GROUPS = ['Payments', 'Scheduling and contact'] as const
-export const BROWSER_GROUPS = ['Start page', 'Rollout'] as const
 
 const PLATFORM: Record<string, Described> = {
   stripe_mode: {
-    group: 'Payments',
     label: 'Stripe mode',
     why: 'A label for your own benefit. What actually decides whether real money moves is which secret key is set in the host environment — this does not switch it.'
   },
   stripe_publishable_key: {
-    group: 'Payments',
     label: 'Stripe publishable key',
     why: 'Safe to be public: it identifies your Stripe account and authorises nothing. The secret key is deliberately not here — see the note at the foot of this page.'
   },
   currency: {
-    group: 'Payments',
     label: 'Currency',
     why: 'What prices are quoted and charged in. Changing it does not convert existing prices — it relabels them.'
   },
   min_lead_time_hours: {
-    group: 'Scheduling and contact',
     label: 'Minimum lead time',
     why: 'How far ahead of now a campaign is allowed to start. Browsers collect adverts every six hours, so anything under about 12 will not reach most readers before it is already running.'
   },
   support_email: {
-    group: 'Scheduling and contact',
     label: 'Support email',
     why: 'Shown on the public site as a way to ask a question before signing up. Empty removes it from the page rather than showing an empty link.'
   }
@@ -72,12 +64,11 @@ const PLATFORM: Record<string, Described> = {
 
 const BROWSER: Record<string, Described> = {
   show_advertise_cta: {
-    group: 'Start page',
     label: 'Offer “Advertise on Slash”',
     why: 'Whether the start page offers the entry point to the advertising portal. Off removes the link; it does not stop campaigns running.'
   },
-  notice: { group: 'Start page', label: 'Start-page notice', why: '' },
-  feature_flags: { group: 'Rollout', label: 'Rollout flags', why: '' }
+  notice: { label: 'Start-page notice', why: '' },
+  feature_flags: { label: 'Rollout flags', why: '' }
 }
 
 const CURRENCIES = [
@@ -90,10 +81,11 @@ const CURRENCIES = [
   { value: 'lkr', label: 'LKR — Sri Lankan rupee' }
 ]
 
-/** Which group a key belongs in, so the page can lay them out without knowing them. */
-export function groupOf(target: 'platform' | 'browser', key: string): string | null {
-  const described = target === 'platform' ? PLATFORM[key] : BROWSER[key]
-  return described ? described.group : null
+/** Every described key has a group; the two tables are kept in step by this. */
+export function describedKeys(): string[] {
+  return [...Object.keys(PLATFORM), ...Object.keys(BROWSER)].filter(
+    (key) => groupOf('platform', key) !== null || groupOf('browser', key) !== null
+  )
 }
 
 export function PlatformSetting({

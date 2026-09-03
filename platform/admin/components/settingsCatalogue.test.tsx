@@ -32,7 +32,8 @@ vi.mock('@/app/settings/actions', () => ({
   }
 }))
 
-const { PlatformSetting, BrowserSetting, groupOf } = await import('./settingsCatalogue')
+const { PlatformSetting, BrowserSetting } = await import('./settingsCatalogue')
+const { groupOf } = await import('./settingsGroups')
 
 beforeEach(() => {
   saved.length = 0
@@ -107,17 +108,25 @@ describe('the value a described control actually submits', () => {
 })
 
 /**
- * The mistake itself, as a rule about the source.
+ * The two mistakes, as rules about the source.
  *
- * A server component may not pass a function to a client component. The
- * typecheck cannot see it, the build cannot see it, and rendering the pages
- * here would not reproduce it either — the error comes from the RSC
- * serializer, which no test in this repository runs. So the shape is checked
- * in the text: an inline arrow in a prop, in a file with no `'use client'`.
+ * The boundary between a server component and a client one is crossed in both
+ * directions, and getting either wrong throws at request time only: the
+ * typecheck is happy, `next build` never renders a dynamic page, and the error
+ * comes from the RSC runtime, which no test here runs.
+ *
+ * Both have now happened, a day apart. First a function was passed *down*
+ * (`after={(typed) => …}`), then — in the fix for that — a function was called
+ * *up*, when the server page called `groupOf()` out of the client catalogue.
+ * The second was found the same way as the first, in `operations.log`.
+ *
+ * So the rules are checked in the text: no inline arrow in a prop, and nothing
+ * imported from a `'use client'` module unless it is a component.
  */
-describe('no server page passes a function to a client component', () => {
+describe('the server/client boundary, in both directions', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const appDir = join(here, '..', 'app')
+  const componentsDir = join(here, '..', 'components')
 
   const files: string[] = []
   const walk = (dir: string): void => {
@@ -129,9 +138,75 @@ describe('no server page passes a function to a client component', () => {
   }
   walk(appDir)
 
+  /**
+   * Whether a file carries the directive, rather than merely mentioning it.
+   *
+   * The first version of this asked whether the text contained `'use client'`
+   * anywhere, and immediately flagged `settingsGroups.ts` — whose comment
+   * explains the rule and therefore quotes the words. A guard that reads a
+   * comment as code is the same mistake, one layer up, so this reads the first
+   * real statement in the file.
+   */
+  const carriesDirective = (source: string): boolean => {
+    let text = source.trimStart()
+    // Strip leading comments, which is where every file here starts.
+    for (;;) {
+      if (text.startsWith('/*')) {
+        const end = text.indexOf('*/')
+        if (end === -1) return false
+        text = text.slice(end + 2).trimStart()
+      } else if (text.startsWith('//')) {
+        text = text.slice(text.indexOf('\n') + 1).trimStart()
+      } else {
+        break
+      }
+    }
+    return /^(['"])use client\1/.test(text)
+  }
+
+  /** Whether a module this page imports is a client module. */
+  const isClientModule = (specifier: string): boolean => {
+    const name = specifier.replace(/^@\/components\//, '').replace(/^\.\//, '')
+    if (specifier.startsWith('@/components/') || specifier.startsWith('./')) {
+      for (const extension of ['.tsx', '.ts']) {
+        try {
+          return carriesDirective(readFileSync(join(componentsDir, name + extension), 'utf8'))
+        } catch {
+          /* try the next extension */
+        }
+      }
+    }
+    return false
+  }
+
+  it.each(files)('%s imports only components from client modules', (path) => {
+    const source = readFileSync(path, 'utf8')
+    if (carriesDirective(source)) return
+
+    const offenders: string[] = []
+    const imports = source.matchAll(/import\s*\{([^}]+)\}\s*from\s*'([^']+)'/g)
+    for (const match of imports) {
+      const names = match[1] ?? ''
+      const specifier = match[2] ?? ''
+      if (!isClientModule(specifier)) continue
+      for (const raw of names.split(',')) {
+        const name = raw.trim().split(/\s+as\s+/).pop() ?? ''
+        if (name === '' || raw.trim().startsWith('type ')) continue
+        // A component is rendered; anything else would be *called*, and a
+        // server component cannot call into a client module.
+        if (!/^[A-Z]/.test(name)) offenders.push(`${name} from ${specifier}`)
+      }
+    }
+
+    expect(
+      offenders,
+      `A server component may only render components from a 'use client' module; calling a function out of one throws at request time ("Attempted to call X() from the server"). Move it to a module with no directive, as settingsGroups.ts is.\n${offenders.join('\n')}`
+    ).toEqual([])
+  })
+
   it.each(files)('%s', (path) => {
     const source = readFileSync(path, 'utf8')
-    if (source.includes("'use client'")) return
+    if (carriesDirective(source)) return
 
     // `prop={(` starts an inline arrow or a parenthesised expression; the
     // latter is rare enough in these files to be worth the false positive,

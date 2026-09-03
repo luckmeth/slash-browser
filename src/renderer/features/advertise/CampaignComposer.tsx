@@ -534,6 +534,11 @@ function Select({
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      // The dropdown itself is drawn by the operating system, not by this
+      // document: a list styled here is a list of white text on white,
+      // which is what a country picker looked like. `color-scheme` is what
+      // tells the platform to draw its own widget dark.
+      style={{ colorScheme: 'dark' }}
       className="w-full cursor-default rounded-lg border border-[var(--glass-edge)] bg-white/[0.04] px-3 py-2 text-[13px] outline-none focus:border-[var(--color-accent)]"
     >
       {children}

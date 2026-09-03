@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { Group } from '@/components/Field'
-import { PlatformSetting, PLATFORM_GROUPS, groupOf } from '@/components/settingsCatalogue'
+import { PlatformSetting } from '@/components/settingsCatalogue'
+import { PLATFORM_GROUPS, groupOf } from '@/components/settingsGroups'
 import { currentAdmin } from '@/lib/supabase/server'
 import { supabaseService } from '@/lib/supabase/service'
 

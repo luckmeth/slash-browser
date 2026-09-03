@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { Group } from '@/components/Field'
-import { BrowserSetting, BROWSER_GROUPS, groupOf } from '@/components/settingsCatalogue'
+import { BrowserSetting } from '@/components/settingsCatalogue'
+import { BROWSER_GROUPS, groupOf } from '@/components/settingsGroups'
 import { currentAdmin } from '@/lib/supabase/server'
 import { supabaseService } from '@/lib/supabase/service'
 
