@@ -5,7 +5,7 @@ Three pieces, one database:
 | | | |
 |---|---|---|
 | `advertiser/` | Next.js, port 3000 | The public site. Signup, campaign builder, checkout, dashboard. Also hosts the five endpoints the browser talks to. |
-| `admin/` | Next.js, port 3001 | Operations. Review queue, pricing, releases, browser config, email log. Separate deployment, separate login, not linked from the public site. |
+| `admin/` | Next.js, port 3001 | Operations. Review queue, pricing, **Slash Coin**, browser config, releases, email log. Separate deployment, separate login, not linked from the public site. Also shipped as a Windows application -- see `admin-desktop/`. |
 | `admin-desktop/` | Electron | **The same admin app as a Windows .exe.** Embeds the build above; asks for the database key on first run rather than shipping it. See its own README. |
 | `supabase/` | SQL | Schema, security policies, seed data. |
 | `shared/` | TypeScript | Pricing and batch logic used by both apps. 34 unit tests. |

@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import './globals.css'
 import { currentAdmin } from '@/lib/supabase/server'
-import { SignOutButton } from '@/components/SignOutButton'
+import { Nav } from '@/components/Nav'
 
 export const metadata: Metadata = {
   title: 'Slash advertising — operations',
@@ -26,19 +26,7 @@ export default async function RootLayout({
             <Link href="/" className="brand">
               Slash operations
             </Link>
-            {admin && (
-              <nav>
-                <Link href="/">Overview</Link>
-                <Link href="/queue">Review queue</Link>
-                <Link href="/pricing">Pricing</Link>
-                <Link href="/releases">Releases</Link>
-                <Link href="/browser">Browser config</Link>
-                <Link href="/settings">Settings</Link>
-                <Link href="/emails">Email log</Link>
-                <span className="note">{admin.email}</span>
-                <SignOutButton />
-              </nav>
-            )}
+            {admin && <Nav email={admin.email} />}
           </div>
         </header>
         {children}
