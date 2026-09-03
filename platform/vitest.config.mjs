@@ -4,7 +4,9 @@ import { defineConfig } from 'vitest/config'
 // picked up instead — that one sets aliases for the Electron source tree.
 export default defineConfig({
   test: {
-    include: ['shared/src/**/*.test.ts'],
+    // The desktop shell's rules live in plain CJS beside main.js, because
+    // main.js cannot be imported here at all -- it requires electron.
+    include: ['shared/src/**/*.test.ts', 'admin-desktop/*.test.mjs'],
     environment: 'node'
   }
 })

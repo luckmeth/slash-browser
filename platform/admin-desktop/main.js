@@ -1,8 +1,15 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, dialog } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, safeStorage, shell, dialog } = require('electron')
 const { fork } = require('node:child_process')
 const { createServer } = require('node:net')
 const { appendFileSync, readFileSync, writeFileSync, existsSync, rmSync } = require('node:fs')
 const { join } = require('node:path')
+const {
+  parseCredentials,
+  serialiseCredentials,
+  describeCredentials,
+  emailConfigured,
+  checkSetup
+} = require('./credentials.js')
 
 /**
  * Slash Operations — the advertising and browser management app, as a desktop
@@ -10,8 +17,15 @@ const { join } = require('node:path')
  *
  * It embeds the same Next.js app that runs at localhost:3001 and nothing else:
  * one build, one set of pages, no second implementation to drift out of step.
- * The shell's whole job is to hold the service-role key safely, start the
+ * The shell's whole job is to hold the operator's secrets safely, start the
  * server on a private port, and show it.
+ *
+ * Two secrets now: the service-role key, and a Resend API key if transactional
+ * email is wanted. Both go in the same encrypted file, because the embedded
+ * server reads them as environment variables and this file is that server's
+ * environment. Email is optional -- without it the app works and every send
+ * is logged as failed with the reason, which is the state the email log
+ * showed for weeks before there was anywhere to enter a key.
  *
  * **The service-role key is never baked into this executable.** It bypasses
  * every row-level security policy in the database, so an .exe carrying one is a
@@ -61,14 +75,16 @@ function logLine(text) {
 }
 
 let serverProcess = null
+let serverPort = null
 let window = null
 
-function readSecret() {
+function readCredentials() {
   const path = credentialsFile()
   if (!existsSync(path)) return null
   try {
     if (!safeStorage.isEncryptionAvailable()) return null
-    return safeStorage.decryptString(readFileSync(path))
+    const record = parseCredentials(safeStorage.decryptString(readFileSync(path)))
+    return record.serviceKey ? record : null
   } catch {
     // Written by a different Windows account, or the file is damaged. Treated as
     // absent so the setup screen appears, rather than failing to start with an
@@ -77,11 +93,11 @@ function readSecret() {
   }
 }
 
-function writeSecret(value) {
+function writeCredentials(record) {
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('This system cannot encrypt stored credentials, so the key will not be saved.')
+    throw new Error('This system cannot encrypt stored credentials, so nothing will be saved.')
   }
-  writeFileSync(credentialsFile(), safeStorage.encryptString(value))
+  writeFileSync(credentialsFile(), safeStorage.encryptString(serialiseCredentials(record)))
 }
 
 /** A free port, asked of the operating system rather than guessed. */
@@ -114,7 +130,7 @@ async function waitForServer(port, hasExited = () => false, timeoutMs = 30_000) 
   return false
 }
 
-async function startServer(secret) {
+async function startServer(credentials) {
   const port = await freePort()
 
   // In a packaged build the server sits beside app.asar, because Node cannot
@@ -143,7 +159,16 @@ async function startServer(secret) {
       // same binary behave as plain Node, which is what the server needs.
       ELECTRON_RUN_AS_NODE: '1',
       ...publicConfig(),
-      SUPABASE_SERVICE_ROLE_KEY: secret,
+      SUPABASE_SERVICE_ROLE_KEY: credentials.serviceKey,
+      // Email delivery, from the setup screen.
+      //
+      // Set explicitly even when blank: process.env is spread above, so a
+      // RESEND_API_KEY that happens to be in the operator's own environment
+      // would otherwise leak in and send mail from an account this app was
+      // never told about. Blank is read as absent by admin/lib/env.ts, and
+      // sendEmail then logs every attempt as failed with the reason.
+      RESEND_API_KEY: credentials.resendApiKey || '',
+      EMAIL_FROM: credentials.emailFrom || '',
       // Loopback only. Binding to 0.0.0.0 would put an app with a service-role
       // key on the local network, reachable by anything else on it.
       HOSTNAME: '127.0.0.1',
@@ -168,6 +193,11 @@ async function startServer(secret) {
   let exited = null
   serverProcess.on('exit', (code, signal) => { exited = { code, signal } })
 
+  logLine(
+    'starting server on port ' + port + '; email delivery ' +
+      (emailConfigured(credentials) ? 'configured as ' + credentials.emailFrom : 'not configured')
+  )
+
   const ready = await waitForServer(port, () => exited !== null)
   if (!ready) {
     const why = exited
@@ -178,7 +208,42 @@ async function startServer(secret) {
     const tail = output.trim().slice(-500)
     throw new Error(why + (tail ? String.fromCharCode(10, 10) + tail : String()))
   }
+  serverPort = port
   return port
+}
+
+/**
+ * Stops the embedded server and waits for it to actually be gone.
+ *
+ * Configuration reaches that server as environment variables, and those are
+ * fixed when a process starts -- so changing an email key means a new process,
+ * not a reload. Killing without waiting would leave the old server holding its
+ * port while the new one tries to bind, which is a failure to start with a
+ * cause an operator cannot see.
+ */
+function stopServer() {
+  const child = serverProcess
+  serverProcess = null
+  serverPort = null
+  if (!child || child.killed || child.exitCode !== null) return Promise.resolve()
+  return new Promise((resolve) => {
+    // Never hang the window on a child that will not die; the port it holds is
+    // one the operating system picked and the next start picks another.
+    const giveUp = setTimeout(resolve, 5000)
+    child.once('exit', () => {
+      clearTimeout(giveUp)
+      resolve()
+    })
+    child.kill()
+  })
+}
+
+/** Saves what was entered, restarts the server so it takes effect, and shows it. */
+async function applyCredentials(record) {
+  writeCredentials(record)
+  await stopServer()
+  const port = await startServer(record)
+  await window.loadURL('http://127.0.0.1:' + port)
 }
 
 function createWindow() {
@@ -189,7 +254,6 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0b0d12',
     title: 'Slash Operations',
-    autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       // The same posture the browser takes with its own chrome. This window
@@ -210,10 +274,63 @@ function createWindow() {
   return window
 }
 
-async function boot() {
-  const secret = readSecret()
+/**
+ * The application menu.
+ *
+ * It exists for one reason: the setup screen was reachable only on first run,
+ * so an operator who had already entered the database key had no way back into
+ * it. Email delivery is entered there, which made "first run only" mean
+ * "never" for every install that already existed.
+ *
+ * The menu bar is visible rather than hidden behind Alt for the same reason --
+ * a setting nobody can find is a setting that does not exist.
+ */
+function buildMenu() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Setup',
+        submenu: [
+          {
+            label: 'Database key and email delivery…',
+            click: () => {
+              void window.loadFile(join(__dirname, 'setup.html'))
+            }
+          },
+          {
+            label: 'Open the log file',
+            click: () => {
+              void shell.openPath(join(app.getPath('userData'), 'operations.log'))
+            }
+          },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }]
+      }
+    ])
+  )
+}
 
-  if (!secret) {
+async function boot() {
+  buildMenu()
+  const credentials = readCredentials()
+
+  if (!credentials) {
     createWindow()
     await window.loadFile(join(__dirname, 'setup.html'))
     return
@@ -223,7 +340,7 @@ async function boot() {
   await window.loadFile(join(__dirname, 'starting.html'))
 
   try {
-    const port = await startServer(secret)
+    const port = await startServer(credentials)
     await window.loadURL(`http://127.0.0.1:${port}`)
   } catch (error) {
     await dialog.showMessageBox(window, {
@@ -236,27 +353,40 @@ async function boot() {
   }
 }
 
-ipcMain.handle('setup:save', async (_event, key) => {
-  const trimmed = String(key ?? '').trim()
-  // Both formats Supabase issues. Checked here so a pasted anon key — which
-  // looks similar and would fail silently on every query — is caught now rather
-  // than as an empty review queue later.
-  if (!/^(eyJ|sb_secret_)/.test(trimmed)) {
-    return { ok: false, problem: 'That does not look like a service_role key.' }
-  }
-  try {
-    writeSecret(trimmed)
-  } catch (error) {
-    return { ok: false, problem: String(error.message) }
-  }
+/**
+ * What the setup screen may know about what is already stored.
+ *
+ * Never a secret. This window navigates to the embedded server the moment it
+ * starts, so a value handed to this renderer is a value in a process that goes
+ * on to load pages -- what comes back is whether a key exists, not what it is.
+ * The From address is not a secret and does round-trip, because clearing it is
+ * how delivery gets turned off.
+ */
+ipcMain.handle('setup:current', () => ({
+  ...describeCredentials(readCredentials()),
+  running: serverPort !== null
+}))
+
+ipcMain.handle('setup:save', async (_event, fields) => {
+  // Decided by a pure function beside this one, tested without Electron:
+  // "blank keeps the stored secret" and "clearing the From address deletes the
+  // key" are rules that go wrong silently in both directions.
+  const verdict = checkSetup(fields, readCredentials())
+  if (!verdict.ok) return verdict
 
   try {
-    const port = await startServer(trimmed)
-    await window.loadURL(`http://127.0.0.1:${port}`)
+    await applyCredentials(verdict.credentials)
     return { ok: true, problem: '' }
   } catch (error) {
     return { ok: false, problem: String(error && error.message ? error.message : error) }
   }
+})
+
+/** Back to the running server, for an operator who opened the screen only to read it. */
+ipcMain.handle('setup:cancel', async () => {
+  if (serverPort === null) return false
+  await window.loadURL('http://127.0.0.1:' + serverPort)
+  return true
 })
 
 ipcMain.handle('setup:forget', () => {

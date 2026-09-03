@@ -5,7 +5,7 @@ a terminal open for.
 
 It embeds **the same Next.js app** that runs at `localhost:3001` — one build, one set of pages, no
 second implementation to drift out of step with the first. The Electron shell's entire job is to
-hold the database key safely, start the server on a private port, and show it.
+hold the operator's secrets safely, start the server on a private port, and show it.
 
 ## Building it
 
@@ -35,6 +35,42 @@ Supabase SQL editor, just to make an account for this app was three applications
 The offer disappears once an operator exists, and the action behind it re-checks that at write
 time rather than trusting what the page decided when it rendered.
 
+## Email delivery
+
+Under **Setup → Database key and email delivery**, reachable from the menu at any time — not only
+on first run, which is what it used to be, and which meant "never" for an install that already
+existed.
+
+Two fields, both needed to send anything:
+
+| | |
+|---|---|
+| **From address** | A domain verified with Resend. `ads@yourdomain.com`, or `Slash Adverts <ads@yourdomain.com>` |
+| **Resend API key** | From resend.com → API Keys. Stored in the same encrypted file as the database key |
+
+It is **optional**, and off is a real state rather than a broken one: every page still works, and
+`sendEmail` records each attempt in the email log as **failed** with `RESEND_API_KEY or EMAIL_FROM
+is not set`. The email log now says which of those it is looking at, because an empty table means
+"nothing has been attempted" and with no key set that is indistinguishable from "nothing can be
+sent" — which is how that screen got read.
+
+Three rules the screen states, because each fails silently in the other direction:
+
+- **A blank secret field keeps the stored one.** There is no way to display a secret back into a
+  field, so blank cannot also mean "erase".
+- **Clearing the From address turns delivery off and deletes the stored key.** Off means the secret
+  is gone, not dormant.
+- **Half a pair is refused.** A key with no From address, or an address with no key, is a screen
+  that reports success and an email log that fills with failures.
+
+Those rules live in `credentials.js`, which imports nothing from Electron so that
+`credentials.test.mjs` can exercise them — run by `npm test` at `platform/`. The same file reads
+credentials written before email was configurable here: those are a bare key string rather than
+JSON, and an operator who updates must not be asked for the key again.
+
+Saving **restarts the embedded server**. These reach it as environment variables, and those are
+fixed when a process starts, so there is no reloading it in place.
+
 ## The key it asks for, and why it is not in the file
 
 On first run it asks for your Supabase **service_role** key.
@@ -44,7 +80,7 @@ is a file that hands your whole database to anyone who copies it — so it is no
 `scripts/prepare-server.mjs` refuses to build if a secret ever appears in the public slot.
 
 What you enter is encrypted by Windows through Electron's `safeStorage` (DPAPI) and written to
-`%APPDATA%/slash-operations/operations.credentials`. That ties it to the Windows account that
+`%APPDATA%/slash-operations/operations.credentials`, along with the Resend key if you set one. That ties it to the Windows account that
 entered it: copy the program to another machine, or run it as a different user, and you get the
 setup screen rather than the data.
 
@@ -80,8 +116,9 @@ Two failures worth knowing about, both found by building this:
   by `scripts/after-pack.js` instead, and why that script asserts the dependencies arrived
   rather than trusting the copy.
 - **A blank window and an empty log** — a syntax error in `main.js`. The app never loaded at
-  all. `npm run verify` (part of `npm run package`) parses both scripts first so this cannot
-  ship again.
+  all. `npm run verify` (part of `npm run package`) now parses every script this app executes,
+  including the **inline script in `setup.html`**: as far as every build step is concerned that is
+  a string, so nothing else checks it, and the symptom is a screen whose fields do nothing.
 
 ## Signing
 

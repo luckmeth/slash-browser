@@ -11,6 +11,10 @@ directories:
 # files on disk.
 files:
   - main.js
+  # The setup rules, required by main.js. Omitting a file main.js requires
+  # produces a packaged app that cannot start at all, with the module name as
+  # its only symptom.
+  - credentials.js
   - preload.js
   - setup.html
   - starting.html
