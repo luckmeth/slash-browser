@@ -27,6 +27,8 @@ import { ContextBuilder } from '../ai/ContextBuilder'
 import type { BrowserWindowController } from '../windows/BrowserWindowController'
 import { assistantUrlFor, isAssistantUrl } from '../assistant/assistants'
 import { createLogger } from '../logger'
+import { describeDecision, describeMachine } from '@shared/hardwareProfile'
+import { readMachine } from '../performance/readMachine'
 
 const log = createLogger('ipc')
 
@@ -1260,6 +1262,11 @@ export function registerHandlers(ctx: AppContext): void {
 
   // --- updates --------------------------------------------------------------
 
+  ipc.handle('system:hardware', () => {
+    const enabled = ctx.settings.getAll().hardwareOptimisation
+    const profile = describeMachine(readMachine())
+    return ok({ ...profile, enabled, said: describeDecision(profile, enabled) })
+  })
   ipc.handle('updates:status', () => ok(ctx.updates.current()))
   ipc.handle('updates:check', async () => ok(await ctx.updates.check()))
   ipc.handle('updates:download', async () => ok(await ctx.updates.download()))

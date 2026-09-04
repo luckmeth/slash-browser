@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { WebContentsView, type BaseWindow, type Rectangle } from 'electron'
+import { shell, WebContentsView, type BaseWindow, type Rectangle, type WebContents } from 'electron'
 import type { OverlayState } from '@shared/ipc/contracts'
 import { VIEW_KIND } from '@shared/constants'
 import type { IpcRegistry } from '../ipc/registry'
@@ -61,10 +61,55 @@ export class OverlayController {
     if (entry.kind === 'url') void view.webContents.loadURL(entry.url)
     else void view.webContents.loadFile(entry.path)
 
+    this.harden(view.webContents)
     this.ipc.registerPrivilegedView(view.webContents, VIEW_KIND.overlay)
     this.view = view
     log.debug('overlay view created')
     return view
+  }
+
+  /**
+   * The overlay holds the privileged bridge, so it must never leave its own
+   * document.
+   *
+   * The chrome view has had this guard since it was written; the overlay did
+   * not, and it is the surface that renders *page-derived* material — reader
+   * text, a media offer, a permission prompt naming a site, a context menu
+   * built from a link. None of those is supposed to be able to navigate
+   * anything, and none of them can today. But "no current path does this" is a
+   * statement about today's code, and the cost of being wrong is a remote
+   * origin holding `window.browser`: every privileged channel in the
+   * application, from the same process that renders whatever a page supplied.
+   *
+   * So the rule is stated rather than relied upon. A navigation away from the
+   * overlay's own document is refused and logged loudly, because in normal
+   * operation it never happens — an entry in the log means either a bug or an
+   * attempt.
+   */
+  private harden(contents: WebContents): void {
+    contents.on('will-navigate', (event, url) => {
+      const devServer = process.env['ELECTRON_RENDERER_URL']
+      if ((devServer && url.startsWith(devServer)) || url.startsWith('file://')) return
+      event.preventDefault()
+      log.error(`blocked navigation of the overlay view to ${url}`)
+    })
+
+    // Same for a frame inside it, which `will-navigate` does not cover.
+    contents.on('will-frame-navigate', (event) => {
+      const url = event.url
+      const devServer = process.env['ELECTRON_RENDERER_URL']
+      if ((devServer && url.startsWith(devServer)) || url.startsWith('file://')) return
+      event.preventDefault()
+      log.error(`blocked frame navigation inside the overlay to ${url}`)
+    })
+
+    // A link in the overlay opens in the real browser rather than replacing a
+    // privileged view, and anything that is not a web address opens nothing.
+    contents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
+      else log.warn(`refused to open ${url.slice(0, 40)} from the overlay`)
+      return { action: 'deny' }
+    })
   }
 
   /**

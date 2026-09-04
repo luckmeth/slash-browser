@@ -1,10 +1,9 @@
 import { join } from 'node:path'
 import type { SponsoredTile } from '@shared/types/sponsor'
 import type { InvokeResponse } from '@shared/ipc/contracts'
-import { BaseWindow, WebContentsView, shell, dialog, type WebContents } from 'electron'
+import { BaseWindow, WebContentsView, screen, shell, dialog, type WebContents } from 'electron'
 import {
   VIEW_KIND,
-  WORKSPACE_RAIL_WIDTH,
   VERTICAL_TAB_STRIP_WIDTH,
   TITLE_BAR_HEIGHT,
   PAGE_INSET
@@ -28,10 +27,14 @@ import type { SettingsStore } from '../settings/SettingsStore'
 import { TabManager, type ClosedTab as ClosedTabEntry } from '../tabs/TabManager'
 import { TabPerformanceManager } from '../performance/TabPerformanceManager'
 import { installPageContextMenu, type ContextMenuDeps } from '../menus/ContextMenus'
+import { installChromeContextMenu } from '../menus/ChromeContextMenu'
+import { resolveInput } from '../navigation/UrlResolver'
 import { createLogger } from '../logger'
 import { OverlayController } from './OverlayController'
 import { ViewLayoutManager } from './ViewLayoutManager'
 import { rendererEntry } from './rendererEntry'
+import { describeMachine, effectiveMode } from '@shared/hardwareProfile'
+import { readMachine } from '../performance/readMachine'
 
 const log = createLogger('window')
 
@@ -54,7 +57,7 @@ export interface WindowDeps {
   /** Invoked by the tab context menu's "Bookmark this tab". */
   onBookmarkRequested: (url: string, title: string) => void
   /** Hands a link to the segmented download engine, from the link context menu. */
-  enqueueDownload?: (url: string) => void
+  enqueueDownload?: (url: string, contents: WebContents | null) => void
   /** Saved addresses that could fill the page this context menu opened over. */
   addressOffers?: (contents: WebContents) => { id: number; label: string }[]
   fillAddress?: (contents: WebContents, id: number) => void
@@ -75,6 +78,14 @@ export interface WindowDeps {
   /** A redirect chain finished and is worth reporting to the user. */
   onRedirectChain?: (chain: RedirectChain) => void
   /** A tab closed — drop anything scoped to it. */
+  /**
+   * The set of open tabs changed.
+   *
+   * Distinct from `onSnapshot`, which fires for anything the UI renders —
+   * a title, a favicon, a loading spinner. This is for changes worth writing
+   * to disk.
+   */
+  onTabsChanged?: () => void
   onTabDiscarded: (tabId: string) => void
   /** A tab closed — persisted so reopening it survives a restart. */
   onTabClosed: (entry: ClosedTabEntry & { closedAt: number }) => void
@@ -113,9 +124,45 @@ export interface WindowDeps {
  * and the chrome document shows through — which is why the new tab page needs
  * neither a custom protocol nor a renderer of its own.
  */
+/**
+ * How close to the top edge counts as "the pointer came back".
+ *
+ * Wider than the OS resize border it has to see through, because the gesture is
+ * a flick to the top of the window and the pointer lands within a pixel or two
+ * of the edge.
+ */
+const CHROME_REVEAL_BAND = 8
+
+/**
+ * Cursor poll while - and only while - auto-hide has the chrome collapsed.
+ *
+ * Fast enough that the bars feel like they were waiting, slow enough to be
+ * nothing: `getCursorScreenPoint` is a synchronous read of a value the OS
+ * already holds.
+ */
+const CHROME_REVEAL_POLL_MS = 90
+
+/**
+ * How far below the chrome the pointer must go before the bars retreat.
+ *
+ * Hysteresis. Revealing triggers on the top few pixels and hiding on this,
+ * which is much further down - with a single threshold the pointer resting near
+ * the boundary flips the state on every poll and the chrome strobes.
+ */
+const CHROME_HIDE_MARGIN = 56
+
+/** How long the page takes to slide to a new inset. */
+const CHROME_TWEEN_MS = 260
+
+/** How long the window takes to fade up on launch. */
+const WINDOW_FADE_MS = 260
+
 export class BrowserWindowController {
   private readonly window: BaseWindow
   private readonly layout = new ViewLayoutManager()
+  private chromeRevealTimer: ReturnType<typeof setInterval> | null = null
+  private chromeIsHidden = false
+  private chromeTween: ReturnType<typeof setInterval> | null = null
   private readonly chromeView: WebContentsView
   readonly overlay: OverlayController
   /** Redirect X-Ray's record of main-frame chains in this window. */
@@ -210,6 +257,26 @@ export class BrowserWindowController {
     this.window.contentView.addChildView(this.chromeView)
     this.deps.ipc.registerPrivilegedView(this.chromeView.webContents, VIEW_KIND.chrome)
     this.hardenChrome(this.chromeView.webContents)
+    // Slash's own interface had no right-click menu at all, so the address bar
+    // could not be copied out of or pasted into with the mouse. Deliberately a
+    // much smaller menu than a page's — this document holds the privileged IPC
+    // bridge, so it gets editing commands and nothing else.
+    installChromeContextMenu(this.chromeView.webContents, {
+      window: this.window,
+      navigate: (input) => {
+        const tabId = this.tabs.activeTab?.id
+        if (!tabId) return
+        // Resolved through the same function the omnibox uses, so pasting a
+        // search term does a search rather than being treated as an address.
+        const settings = this.deps.settings.getAll()
+        const resolved = resolveInput(
+          input,
+          settings.searchEngineId,
+          settings.customSearchEngines
+        )
+        this.tabs.navigate(tabId, resolved.url)
+      }
+    })
 
     const entry = rendererEntry('index')
     if (entry.kind === 'url') void this.chromeView.webContents.loadURL(entry.url)
@@ -246,6 +313,9 @@ export class BrowserWindowController {
         onSnapshot: (snapshot) => {
           this.deps.ipc.broadcast('tabs:snapshot', snapshot, this.privilegedContents())
           this.syncWindowTitle(snapshot)
+          // Records the session a few seconds after it settles, so a force-kill
+          // loses seconds rather than up to five minutes. Debounced inside.
+          this.deps.onTabsChanged?.()
           // Switching tabs changes what is playing. `refreshMediaOffer` is
           // idempotent, so calling it from the snapshot costs a comparison.
           this.refreshMediaOffer()
@@ -298,7 +368,16 @@ export class BrowserWindowController {
         return contents ? this.deps.downloads.hasActiveDownloadFrom(contents.id) : false
       }
     })
-    this.performance.policy.setMode(this.deps.settings.getAll().performanceMode)
+    // The stored mode, adjusted for what this machine actually is. See
+    // `effectiveMode`: an explicit "off" is never overruled.
+    const settings = this.deps.settings.getAll()
+    this.performance.policy.setMode(
+      effectiveMode(
+        settings.performanceMode,
+        describeMachine(readMachine()),
+        settings.hardwareOptimisation
+      )
+    )
     this.performance.start()
 
     // The workspace rail is always visible, so the page view is permanently
@@ -326,8 +405,7 @@ export class BrowserWindowController {
         // Push the restored state now that the chrome can receive it.
         this.tabs.emitNow()
       }
-      this.window.show()
-      log.info('window shown')
+      this.revealWindow()
     })
   }
 
@@ -362,7 +440,10 @@ export class BrowserWindowController {
       workspaces: this.deps.workspaces,
       searchEngineId: () => this.deps.settings.getAll().searchEngineId,
       bookmarkUrl: (url, title) => this.deps.onBookmarkRequested(url, title),
-      enqueueDownload: (url) => this.deps.enqueueDownload?.(url),
+      // The active tab is the page the menu was opened on, and it is the
+      // referrer the download has to carry — a "Download with Slash" that drops
+      // it is refused by every host that checks.
+      enqueueDownload: (url) => this.deps.enqueueDownload?.(url, this.tabs.activeTab?.contents ?? null),
       addressOffers: (contents) => this.deps.addressOffers?.(contents) ?? [],
       fillAddress: (contents, id) => this.deps.fillAddress?.(contents, id),
       moveTabToWorkspace: (tabId, workspaceId) => {
@@ -544,14 +625,184 @@ export class BrowserWindowController {
    */
   applySidebarWidth(): void {
     const vertical = this.deps.settings.getAll().tabStripPosition === 'left'
-    this.layout.setSidebarWidth(WORKSPACE_RAIL_WIDTH + (vertical ? VERTICAL_TAB_STRIP_WIDTH : 0))
+    // No workspace rail any more — it is a row at the top of the chrome, so
+    // the only thing that still insets the page from the left is the vertical
+    // tab column, and a horizontal strip insets nothing at all.
+    this.layout.setSidebarWidth(vertical ? VERTICAL_TAB_STRIP_WIDTH : 0)
     this.applyLayout()
   }
 
-  /** Chrome grew or shrank — e.g. the find bar opened. */
+  /**
+   * Shows the window by fading it up rather than making it appear.
+   *
+   * Costs nothing: the window is created transparent and this runs at exactly
+   * the moment `show()` used to, on the chrome view's `did-finish-load`. The
+   * browser is already interactive underneath — the renderer's own launch
+   * sequence plays over live chrome — so this is a reveal, not a splash screen
+   * standing between somebody and their tabs.
+   *
+   * Same cubic ease-out and the same stepped tween as `setChromeHeight`, rather
+   * than a second easing implementation that could drift from it.
+   */
+  private revealWindow(): void {
+    this.window.setOpacity(0)
+    this.window.show()
+
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      if (this.window.isDestroyed()) return clearInterval(timer)
+      const progress = Math.min(1, (Date.now() - startedAt) / WINDOW_FADE_MS)
+      this.window.setOpacity(1 - Math.pow(1 - progress, 3))
+      if (progress >= 1) {
+        clearInterval(timer)
+        // Set to exactly 1 rather than to a rounding of it: a window left at
+        // 0.999 opacity is composited as translucent for the rest of its life.
+        this.window.setOpacity(1)
+      }
+    }, 16)
+    log.info(`window shown (fading up over ${WINDOW_FADE_MS}ms)`)
+  }
+
+  /**
+   * Chrome grew or shrank — the find bar opened, or auto-hide moved.
+   *
+   * Tweened rather than set, because the page is a **native view** and the
+   * chrome document is not. Animating the CSS rows alone made the bars fade in
+   * over a page that had already jumped 124px down to meet them, which reads
+   * worse than no animation at all. Both have to move together, so the inset is
+   * stepped here while the rows transition over the same duration.
+   *
+   * A step is one `setBounds` on a view Chromium is already compositing, and
+   * only while a transition is running - not a frame loop the browser pays for
+   * at rest.
+   */
   setChromeHeight(height: number): void {
-    this.layout.setChromeHeight(height)
-    this.applyLayout()
+    const from = this.layout.chromeHeightPx
+    const to = Math.max(0, Math.round(height))
+    if (this.chromeTween) {
+      clearInterval(this.chromeTween)
+      this.chromeTween = null
+    }
+    if (from === to) return
+
+    // A big move is a reveal or a hide and wants the animation; a small one is
+    // a notice bar appearing, where a tween would just look sluggish.
+    if (Math.abs(to - from) < 24) {
+      this.layout.setChromeHeight(to)
+      this.applyLayout()
+      return
+    }
+
+    const startedAt = Date.now()
+    this.chromeTween = setInterval(() => {
+      if (this.window.isDestroyed()) {
+        if (this.chromeTween) clearInterval(this.chromeTween)
+        this.chromeTween = null
+        return
+      }
+      const elapsed = Date.now() - startedAt
+      const progress = Math.min(1, elapsed / CHROME_TWEEN_MS)
+      // Cubic ease-out: quick to leave, gentle to arrive, which is what makes
+      // it read as deliberate rather than as lag.
+      const eased = 1 - Math.pow(1 - progress, 3)
+      this.layout.setChromeHeight(Math.round(from + (to - from) * eased))
+      this.applyLayout()
+
+      if (progress >= 1 && this.chromeTween) {
+        clearInterval(this.chromeTween)
+        this.chromeTween = null
+      }
+    }, 16)
+  }
+
+  /**
+   * Watches for the pointer returning to the top edge while auto-hide has the
+   * chrome collapsed.
+   *
+   * This has to live in main, and the reason is the one part of auto-hide that
+   * is not obvious. The natural implementation is a few pixels of real chrome
+   * left at the top with a `mouseenter` on it — and it cannot work here. The
+   * window is `titleBarStyle: 'hidden'`, which keeps the **native** frame, so
+   * the outermost pixels of every edge are the OS resize border. A pointer
+   * there belongs to the window manager, which shows a resize cursor; Chromium
+   * is never asked and no view receives anything. The strip was unreachable by
+   * a real mouse however it was styled.
+   *
+   * That was invisible to every in-process test, including a probe driving
+   * `webContents.sendInputEvent` — injecting an event into a view starts below
+   * the layer that was eating it, so the broken code passed. Only moving the
+   * actual system cursor showed it.
+   *
+   * `screen.getCursorScreenPoint()` reads the OS cursor directly and is not
+   * hit-tested, so it sees what the DOM cannot. It is a poll, which principle 1
+   * would normally rule out, and it is kept honest by being **narrow**: it runs
+   * only while auto-hide has actually hidden the chrome, stops the instant the
+   * chrome is back, and stops while the window is not focused. Idle browsing
+   * with the setting off never starts a timer.
+   */
+  setChromeAutoHidden(active: boolean, hidden: boolean): void {
+    this.chromeIsHidden = hidden
+
+    if (!active) {
+      this.stopChromeReveal()
+      return
+    }
+    if (this.chromeRevealTimer) return
+
+    this.chromeRevealTimer = setInterval(() => {
+      if (this.window.isDestroyed()) return this.stopChromeReveal()
+      // Minimised is the only state where the cursor's position tells us
+      // nothing. Focus deliberately is *not* required: this used to bail unless
+      // the window was focused, so moving the pointer to the top of a Slash
+      // window you had just clicked away from did nothing at all — which is
+      // most of what "sometimes it doesn't work" was. Hovering an unfocused
+      // window's chrome is a perfectly ordinary thing to do, and every other
+      // browser responds to it.
+      if (this.window.isMinimized()) return
+
+      // `getContentBounds`, never `getBounds`, and this is the whole reason
+      // auto-hide never came back on a maximised window.
+      //
+      // On Windows a maximised frame extends *past* every screen edge by the
+      // invisible resize border: measured here, `getBounds` returns
+      // `{x:-8, y:-8, width:1936, height:1048}` on a 1920x1032 work area while
+      // `getContentBounds` returns `{x:0, y:0, width:1920, height:1032}`. A
+      // reveal band of `[bounds.y, bounds.y + 8)` is therefore `[-8, 0)` —
+      // entirely above the screen, where no cursor can ever be. It worked in
+      // testing only because the test window happened to be restored.
+      const bounds = this.window.getContentBounds()
+      const point = screen.getCursorScreenPoint()
+      const insideX = point.x >= bounds.x && point.x < bounds.x + bounds.width
+
+      if (this.chromeIsHidden) {
+        if (insideX && point.y >= bounds.y && point.y < bounds.y + CHROME_REVEAL_BAND) {
+          this.chromeIsHidden = false
+          this.deps.ipc.broadcast('ui:command', { command: 'reveal-chrome' }, this.privilegedContents())
+        }
+        return
+      }
+
+      // Hiding is driven from here too, and that is the fix for chrome that
+      // felt twitchy. It used to be a DOM `mouseleave`, which fires the moment
+      // the pointer crosses into the page - so the bars vanished while the
+      // pointer was still a few pixels below them, on its way to a tab.
+      //
+      // The two thresholds are deliberately different. Revealing needs the very
+      // top edge; hiding needs the pointer well clear of the chrome's own
+      // bottom. That gap is hysteresis: with one threshold the pointer resting
+      // near the boundary flips the state every poll, which is the flicker.
+      const chromeBottom = bounds.y + this.layout.chromeHeightPx
+      if (!insideX || point.y > chromeBottom + CHROME_HIDE_MARGIN) {
+        this.chromeIsHidden = true
+        this.deps.ipc.broadcast('ui:command', { command: 'hide-chrome' }, this.privilegedContents())
+      }
+    }, CHROME_REVEAL_POLL_MS)
+  }
+
+  private stopChromeReveal(): void {
+    if (!this.chromeRevealTimer) return
+    clearInterval(this.chromeRevealTimer)
+    this.chromeRevealTimer = null
   }
 
   /**
@@ -674,9 +925,23 @@ export class BrowserWindowController {
    * overlay swallows every click inside its own bounds, so a full-window toast
    * would make the whole page inert for as long as it showed.
    */
-  showNotice(message: string, tone: 'info' | 'warn' = 'info'): void {
+  showNotice(
+    message: string,
+    tone: 'info' | 'warn' = 'info',
+    action: { label: string; downloadUrl?: string; openUrl?: string } | null = null
+  ): void {
     if (message.trim() === '') return
-    this.notice = { message, tone }
+    this.notice = {
+      message,
+      tone,
+      action: action
+        ? {
+            label: action.label,
+            downloadUrl: action.downloadUrl ?? '',
+            openUrl: action.openUrl ?? ''
+          }
+        : null
+    }
 
     const { width, height } = this.window.getContentBounds()
     const stripHeight = 92
@@ -695,11 +960,19 @@ export class BrowserWindowController {
   }
 
   /** What `notice:current` answers with. */
-  currentNotice(): { message: string; tone: 'info' | 'warn' } {
+  currentNotice(): {
+    message: string
+    tone: 'info' | 'warn'
+    action: { label: string; downloadUrl: string; openUrl: string } | null
+  } {
     return this.notice
   }
 
-  private notice: { message: string; tone: 'info' | 'warn' } = { message: '', tone: 'info' }
+  private notice: {
+    message: string
+    tone: 'info' | 'warn'
+    action: { label: string; downloadUrl: string; openUrl: string } | null
+  } = { message: '', tone: 'info', action: null }
 
   /**
    * Shows or hides the floating "download this video" chip.
@@ -848,6 +1121,8 @@ export class BrowserWindowController {
   }
 
   destroy(): void {
+    this.stopChromeReveal()
+    if (this.chromeTween) clearInterval(this.chromeTween)
     this.performance.stop()
     this.overlay.destroy()
     this.tabs.destroy()

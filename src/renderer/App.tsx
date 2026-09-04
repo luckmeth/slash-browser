@@ -289,6 +289,16 @@ export function App(): React.JSX.Element {
   const showSettings = activeTab?.url === SETTINGS_URL
   const showAdvertise = activeTab?.url === ADVERTISE_URL
   const showRewards = activeTab?.url === REWARDS_URL
+  // What this machine is, decided in main and applied here as one attribute.
+  // Every expensive effect keys off it in CSS, so there is one switch rather
+  // than a condition in twenty components.
+  useEffect(() => {
+    void window.browser.invoke('system:hardware', undefined).then((result) => {
+      if (!result.ok) return
+      document.documentElement.dataset.effects = result.value.effects
+    })
+  }, [])
+
   const showTerms = activeTab?.url === TERMS_URL
   const showPrivacy = activeTab?.url === PRIVACY_URL
   // Main insets the native page view to match; the two read the same constant.

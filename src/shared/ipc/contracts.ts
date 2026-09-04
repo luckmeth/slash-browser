@@ -1133,6 +1133,28 @@ export const invokeContracts = {
   'watch:markSeen': { request: z.void(), response: WatchStatusSchema },
 
   /** Update state. Reports `no-channel` when no feed is configured. */
+  /**
+   * What this machine is, and what Slash decided to do about it.
+   *
+   * Reported rather than inferred in the renderer: `os.totalmem()` and the
+   * processor count are main-process facts, and the chrome should draw what
+   * was decided rather than make a second, possibly different decision.
+   */
+  'system:hardware': {
+    request: z.void(),
+    response: z.object({
+      tier: z.enum(['low', 'modest', 'capable']),
+      effects: z.enum(['full', 'reduced']),
+      suggestedMode: z.enum(['off', 'balanced', 'aggressive']),
+      downloadConnections: z.number(),
+      embeddingsAdvisable: z.boolean(),
+      reasons: z.array(z.string()),
+      /** The switch, so the panel can show both the setting and the effect. */
+      enabled: z.boolean(),
+      said: z.string()
+    })
+  },
+
   'updates:status': { request: z.void(), response: UpdateStatusSchema },
   /**
    * Checks the configured feed. Never downloads or installs a package — this

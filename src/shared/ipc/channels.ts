@@ -245,6 +245,7 @@ export const INVOKE_CHANNELS = [
   'watch:markSeen',
 
   // --- updates ---
+  'system:hardware',
   'updates:status',
   'updates:check',
   'config:remote',

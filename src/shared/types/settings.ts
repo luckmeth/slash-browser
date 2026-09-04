@@ -567,6 +567,20 @@ export const SettingsSchema = z.object({
 
   // --- Phase 3: performance --------------------------------------------------
   performanceMode: z.enum(['off', 'balanced', 'aggressive']).default('balanced'),
+  /**
+   * Adapt to the machine Slash is running on.
+   *
+   * On by default. It measures memory, processor threads and whether the
+   * machine is on battery, and on a low-powered one it turns off background
+   * blur and animation, sleeps background tabs sooner, and uses fewer parallel
+   * download connections. On a comfortable machine it changes nothing at all.
+   *
+   * It never overrides a performance mode somebody chose by hand — it decides
+   * what happens when nobody has said. Turning it off gives every machine the
+   * full interface, which is the right switch to have when the measurement is
+   * wrong about yours.
+   */
+  hardwareOptimisation: z.boolean().default(true),
 
   // --- Phase 6: time machine -------------------------------------------------
   /** Keep automatic restore points for this many days. 0 = keep only manual ones. */

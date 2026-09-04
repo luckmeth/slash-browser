@@ -27,6 +27,22 @@ const STATE_STYLES: Record<PerformanceState, string> = {
  * advanced capability must not complicate the default interface.
  */
 export function PerformancePanel(): React.JSX.Element {
+  // What main decided about this machine, and the switch that governs it.
+  const [hardware, setHardware] = useState<{
+    tier: string
+    effects: string
+    enabled: boolean
+    embeddingsAdvisable: boolean
+    said: string
+  } | null>(null)
+
+  const readHardware = (): void => {
+    void window.browser.invoke('system:hardware', undefined).then((result) => {
+      if (result.ok) setHardware(result.value)
+    })
+  }
+  useEffect(readHardware, [])
+
   const tabs = useBrowserStore((s) => s.tabs)
   const settings = useBrowserStore((s) => s.settings)
   const [snapshot, setSnapshot] = useState<PerformanceSnapshot | null>(null)
@@ -54,6 +70,43 @@ export function PerformancePanel(): React.JSX.Element {
 
   return (
     <div className="space-y-5 p-4">
+      <section>
+        <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+          This machine
+        </h3>
+        <label className="flex cursor-default items-start gap-2.5 rounded-lg border border-[var(--color-border-subtle)] p-3">
+          <input
+            type="checkbox"
+            checked={hardware?.enabled ?? true}
+            onChange={(event) =>
+              void window.browser
+                .invoke('settings:update', { hardwareOptimisation: event.target.checked })
+                .then(readHardware)
+            }
+            className="mt-0.5"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-medium">Adapt to this machine</span>
+            <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
+              {hardware?.said ?? 'Measuring…'}
+            </span>
+          </span>
+        </label>
+        {hardware && hardware.enabled && hardware.effects === 'reduced' && (
+          <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
+            The window keeps its shape and its contrast — what is off is the blur behind panels, the
+            animated background and the entry animations, which is where the frame time goes on
+            integrated graphics.
+          </p>
+        )}
+        {hardware && hardware.enabled && !hardware.embeddingsAdvisable && (
+          <p className="mt-1.5 text-xs text-[var(--color-warn)]">
+            Semantic search loads a model into memory this machine has little of. Keyword search
+            does not, and works either way.
+          </p>
+        )}
+      </section>
+
       <section>
         <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
           Mode
@@ -249,7 +302,7 @@ function TabRow({ metric, title }: { metric: TabMetrics; title: string }): React
                 })
               }
             />
-            {metric.state === 'HIBERNATED' ? (
+            {metric.state === 'HIBERNATED' || metric.state === 'FROZEN' ? (
               <Action
                 label="Wake"
                 onClick={() =>
@@ -258,12 +311,28 @@ function TabRow({ metric, title }: { metric: TabMetrics; title: string }): React
               />
             ) : (
               metric.blockers.length === 0 && (
-                <Action
-                  label="Hibernate now"
-                  onClick={() =>
-                    void window.browser.invoke('performance:hibernate', { tabId: metric.tabId })
-                  }
-                />
+                <>
+                  {/*
+                    Freezing and hibernating are genuinely different and only one
+                    of them was reachable. Freezing detaches the view, throttles
+                    and mutes — the page keeps its memory and comes back
+                    instantly, so it costs nothing to undo. Hibernating destroys
+                    the renderer, which is the only thing that frees memory and
+                    the only thing that loses the page's in-memory state.
+                  */}
+                  <Action
+                    label="Freeze"
+                    onClick={() =>
+                      void window.browser.invoke('performance:freeze', { tabId: metric.tabId })
+                    }
+                  />
+                  <Action
+                    label="Hibernate now"
+                    onClick={() =>
+                      void window.browser.invoke('performance:hibernate', { tabId: metric.tabId })
+                    }
+                  />
+                </>
               )
             )}
           </div>
@@ -271,6 +340,17 @@ function TabRow({ metric, title }: { metric: TabMetrics; title: string }): React
           {metric.measuredSavingsBytes !== null && (
             <p className="text-xs text-[var(--color-good)]">
               Freed {formatBytes(metric.measuredSavingsBytes)} — measured
+            </p>
+          )}
+
+          {/*
+            No byte figure for freezing, deliberately: only hibernation frees
+            memory, and only hibernation can measure what it freed.
+          */}
+          {metric.state === 'FROZEN' && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Frozen — not rendering, and using no processor time. It still holds its memory, so
+              waking it is instant and nothing on the page is lost.
             </p>
           )}
         </div>

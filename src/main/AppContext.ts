@@ -105,6 +105,8 @@ import { UpdateService } from './updates/UpdateService'
 import { PageWatchService } from './snapshots/PageWatchService'
 import { MissionService } from './missions/MissionService'
 import { createLogger } from './logger'
+import { describeMachine, effectiveMode } from '@shared/hardwareProfile'
+import { readMachine } from './performance/readMachine'
 
 const log = createLogger('app')
 
@@ -801,7 +803,13 @@ export class AppContext {
       this.rewardsWasEnabled = next.rewardsEnabled
       // Keep each window's policy in step with the setting.
       for (const window of this.windows) {
-        window.performance.policy.setMode(next.performanceMode)
+        window.performance.policy.setMode(
+          effectiveMode(
+            next.performanceMode,
+            describeMachine(readMachine()),
+            next.hardwareOptimisation
+          )
+        )
         // Moving the tab strip changes how far the native page view is inset.
         // React redrawing alone would leave the page covering the new column.
         window.applySidebarWidth()

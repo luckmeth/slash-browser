@@ -341,3 +341,604 @@ textarea,
     outline-width: 3px;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Tab strip overflow
+   --------------------------------------------------------------------------
+   When the strip scrolls there is nothing to say more tabs exist off-screen —
+   the run simply stops at a hard edge, which reads as "that is all of them".
+   A short fade at each end says otherwise without adding a control.
+
+   Applied only while overflowing: on a centred, non-scrolling strip it would
+   dim the first and last tab for no reason. */
+.tab-strip-faded {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 18px,
+    #000 calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 18px,
+    #000 calc(100% - 18px),
+    transparent 100%
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+   --------------------------------------------------------------------------
+   One easing curve and three durations, applied broadly rather than per
+   component, so the whole chrome moves the same way. `cubic-bezier(0.22, 1,
+   0.36, 1)` leaves quickly and arrives gently — the thing that makes a
+   transition read as deliberate rather than as lag.
+
+   Everything here is inside `prefers-reduced-motion: no-preference`. The
+   blanket override above already neutralises durations, but declaring the
+   animation only when motion is welcome means nothing has to be undone. */
+
+:root {
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-quick: 140ms;
+  --motion-base: 220ms;
+  --motion-slow: 300ms;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Interactive chrome. Colour and elevation only — never `all`, which would
+     animate layout properties and make every list reflow visibly. */
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role='button'],
+  [role='option'],
+  [role='tab'] {
+    transition:
+      background-color var(--motion-quick) var(--ease-out-soft),
+      border-color var(--motion-quick) var(--ease-out-soft),
+      color var(--motion-quick) var(--ease-out-soft),
+      opacity var(--motion-quick) var(--ease-out-soft),
+      box-shadow var(--motion-base) var(--ease-out-soft),
+      transform var(--motion-quick) var(--ease-out-soft);
+  }
+
+  /* A press should feel like one. Small enough not to shift anything around
+     it, which is why it is a scale and not a translate. */
+  button:active:not(:disabled),
+  [role='button']:active {
+    transform: scale(0.97);
+  }
+
+  /* Rows arriving in a list — downloads, history, suggestions. */
+  .slash-enter {
+    animation: slash-enter var(--motion-base) var(--ease-out-soft) both;
+  }
+
+  /* Panels, which slide from the edge they are attached to. */
+  .slash-panel-enter {
+    animation: slash-panel-enter var(--motion-slow) var(--ease-out-soft) both;
+  }
+}
+
+@keyframes slash-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slash-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Startup
+   --------------------------------------------------------------------------
+   The mark is drawn entirely with strokes — two arcs and a line — so it can
+   draw itself with `stroke-dashoffset` rather than needing a second asset or a
+   video. 120 is comfortably longer than the longest of the three paths, so one
+   dasharray covers all of them.
+
+   The whole sequence overlaps work the browser is doing anyway: the window is
+   created transparent and shown on the chrome view's `did-finish-load`, which
+   is also when the first tab is created. Nothing here delays that. */
+
+@keyframes slash-draw {
+  from {
+    stroke-dashoffset: 120;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes slash-boot-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slash-boot-out {
+  to {
+    opacity: 0;
+    transform: scale(1.14);
+  }
+}
+
+@keyframes slash-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-mark-draw path,
+  .slash-mark-draw line {
+    stroke-dasharray: 120;
+    animation: slash-draw 760ms var(--ease-out-soft) both;
+  }
+
+  /* The slash itself lands last, which is what makes it read as cutting the
+     letter rather than being part of it. */
+  .slash-mark-draw > line {
+    animation-delay: 320ms;
+  }
+
+  /*
+    Timings raised deliberately after watching it: the first version was over
+    in under a second, most of it while the window was still fading in, and it
+    was invisible in practice — "I opened it and saw nothing" was accurate.
+    The browser is not usable in this window anyway (the chrome is painting and
+    the first tab is being created), so a reveal that can actually be seen costs
+    a few hundred milliseconds of genuine wait rather than a second.
+  */
+  .slash-boot {
+    animation:
+      slash-boot-in 620ms var(--ease-out-soft) both,
+      slash-boot-out 340ms var(--ease-out-soft) 1050ms forwards;
+  }
+
+  /* Chrome rows arrive in the order the eye reads them. */
+  /*
+    Early and quick. Pushing these behind the mark left the whole top of the
+    window blank for a full second, which reads as a browser that has failed to
+    paint rather than one that is arriving — the opposite of the intent. The
+    chrome assembles immediately and the mark plays over it.
+  */
+  .slash-row-1 {
+    animation: slash-row-in 420ms var(--ease-out-soft) 60ms both;
+  }
+  .slash-row-2 {
+    animation: slash-row-in 420ms var(--ease-out-soft) 150ms both;
+  }
+  .slash-row-3 {
+    animation: slash-row-in 420ms var(--ease-out-soft) 240ms both;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Depth and light
+   --------------------------------------------------------------------------
+   The "premium, restrained" half of the look: accents that glow rather than
+   merely colour, and surfaces that lift. Every one is a transition or a
+   one-shot — nothing here runs while the browser sits idle, which is the rule
+   principle 1 imposes on all of this. */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The active tab's halo, and the omnibox ring. Both animate `box-shadow`
+     and `background-color` only — never a layout property. */
+  .slash-glow {
+    transition:
+      box-shadow var(--motion-base) var(--ease-out-soft),
+      background-color var(--motion-quick) var(--ease-out-soft),
+      border-color var(--motion-quick) var(--ease-out-soft);
+  }
+
+  .slash-glow-on {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--color-accent) 70%, transparent),
+      0 0 22px -2px color-mix(in srgb, var(--color-accent) 75%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+
+  /* A tab arriving. Overshoot is what separates "appeared" from "opened". */
+  .slash-tab-in {
+    animation: slash-tab-in 260ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  }
+
+  /* Overlay surfaces — palette, media picker, dialogs. */
+  .slash-surface-in {
+    animation: slash-surface-in var(--motion-slow) var(--ease-out-soft) both;
+  }
+}
+
+@keyframes slash-tab-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slash-surface-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* The page-load beam. Runs *only* while a tab is loading — the class is
+   removed on load, so this is never an idle animation. */
+@keyframes slash-beam {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.slash-beam::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 0;
+  height: 1.5px;
+  width: 25%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent),
+    transparent
+  );
+  animation: slash-beam 1100ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slash-beam::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Placement previews
+   --------------------------------------------------------------------------
+   The one repeating animation in the browser, and it is deliberate: the
+   advertise page exists to draw the eye to exactly the rectangle an advertiser
+   would be buying, and a static highlight does not do that among five mockups
+   on one screen. It lives only on that page, so nothing pulses while anybody is
+   browsing. */
+
+@keyframes slash-ad-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-ad-pulse {
+    animation: slash-ad-pulse 2.2s ease-in-out infinite;
+  }
+}
+
+/* Without motion the region still has to be the thing you notice. */
+@media (prefers-reduced-motion: reduce) {
+  .slash-ad-pulse {
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Marketing surfaces: slash://rewards and slash://advertise
+   --------------------------------------------------------------------------
+   These two pages have a job the rest of the browser does not: somebody who has
+   never heard of Slash Coin, or who is deciding whether to spend money on a
+   placement, has to understand the offer from the page alone. That earns more
+   visual weight than a settings screen — but it is still *this* browser, so
+   everything below is transform and opacity only, nothing repeats except where
+   a repeat is the point, and every animation is inside a
+   `prefers-reduced-motion: no-preference` block with a static fallback that
+   leaves the page fully legible.
+
+   No images, no webfonts, no network. These pages render in the chrome
+   document, so anything fetched here would be a request made by the browser
+   itself on a page the user opened to read about the browser. */
+
+/* A slow aurora behind a hero. Two blurred radial blobs on their own layer,
+   animated with `transform` so the compositor carries them and no paint work
+   happens per frame. */
+.slash-aurora {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 70vh;
+  pointer-events: none;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 100%);
+}
+
+.slash-aurora::before,
+.slash-aurora::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(70px);
+  opacity: 0.5;
+  will-change: transform;
+}
+
+.slash-aurora::before {
+  width: 46rem;
+  height: 26rem;
+  left: 8%;
+  top: 12%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in srgb, var(--color-accent) 62%, transparent),
+    transparent 70%
+  );
+}
+
+.slash-aurora::after {
+  width: 34rem;
+  height: 22rem;
+  right: 6%;
+  top: 4%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in srgb, #b58cff 52%, transparent),
+    transparent 70%
+  );
+}
+
+@keyframes slash-drift-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, 6%, 0) scale(1.08);
+  }
+}
+
+@keyframes slash-drift-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.04);
+  }
+  50% {
+    transform: translate3d(-5%, 8%, 0) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-aurora::before {
+    animation: slash-drift-a 19s ease-in-out infinite;
+  }
+  .slash-aurora::after {
+    animation: slash-drift-b 23s ease-in-out infinite;
+  }
+}
+
+/* A faint dot grid, so a large dark hero is not an empty rectangle. */
+.slash-dotgrid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-text-primary) 13%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black, transparent 75%);
+}
+
+/* Text that carries the accent without becoming a different colour of shout. */
+.slash-gradient-text {
+  background: linear-gradient(
+    100deg,
+    var(--color-text-primary) 8%,
+    var(--color-accent) 52%,
+    #b58cff 92%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Scroll reveal. The class is applied by `useReveal`, which adds `is-in` once
+   the element has been seen — so content is never left invisible if the
+   observer does not run, because the reduced-motion and no-JS states below both
+   resolve to fully visible. */
+.slash-reveal {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-reveal {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+    transition:
+      opacity 0.55s var(--ease-out-soft),
+      transform 0.55s var(--ease-out-soft);
+  }
+  .slash-reveal.is-in {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A card that lifts slightly and picks up an accent edge on hover. Used where
+   the card is genuinely a target - a placement you can buy, a step you can
+   read - and nowhere else. */
+.slash-lift {
+  transition:
+    transform 0.28s var(--ease-out-soft),
+    border-color 0.28s var(--ease-out-soft),
+    box-shadow 0.28s var(--ease-out-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-lift:hover {
+    transform: translate3d(0, -3px, 0);
+    box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--color-accent) 65%, transparent);
+  }
+}
+
+/* The coin. A disc with a slow specular sweep, used once, at the top of the
+   rewards page - it is the only place a purely decorative element earns its
+   frame budget, because the page is explaining what a coin *is*. */
+.slash-coin {
+  position: relative;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), transparent 42%),
+    conic-gradient(
+      from 210deg,
+      color-mix(in srgb, var(--color-accent) 92%, white),
+      #b58cff,
+      color-mix(in srgb, var(--color-accent) 92%, white)
+    );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent),
+    0 18px 44px -16px color-mix(in srgb, var(--color-accent) 80%, transparent);
+}
+
+@keyframes slash-coin-bob {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-coin {
+    animation: slash-coin-bob 4.5s ease-in-out infinite;
+  }
+}
+
+/* A progress/'"live" hairline that sweeps once when revealed. */
+@keyframes slash-sweep {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(200%, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .slash-sweep::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--color-accent) 55%, transparent),
+      transparent
+    );
+    animation: slash-sweep 2.6s ease-in-out infinite;
+  }
+}
+
+/* ===========================================================================
+   Reduced effects — what a low-powered machine does without
+   ---------------------------------------------------------------------------
+   Set by `App.tsx` from the hardware profile decided in main:
+   `<html data-effects="reduced">`. One attribute, so the decision lives in one
+   place and every expensive thing keys off it, rather than twenty components
+   each testing a machine spec.
+
+   These three are what actually cost on integrated graphics, in the order they
+   cost:
+
+   - **backdrop-filter.** Every frame, every element carrying it, the compositor
+     re-samples what is behind. Eleven of them in this stylesheet. On a
+     two-core laptop this is the difference between a window that keeps up with
+     the pointer and one that does not.
+   - **The aurora and the dot grid.** Full-viewport animated gradients that
+     repaint continuously while a page is being read.
+   - **Entry animations.** Individually cheap; together they mean every panel,
+     row and dialog schedules compositor work on open.
+
+   Nothing here changes layout, colour or contrast. A reduced window has the
+   same shape and the same legibility as a full one — a person on an old
+   machine should get a browser that feels quick, not one that looks broken or
+   half-finished.
+   =========================================================================== */
+
+:root[data-effects='reduced'] .glass-page,
+:root[data-effects='reduced'] .glass-raised,
+:root[data-effects='reduced'] .glass,
+:root[data-effects='reduced'] [class*='backdrop-blur'] {
+  /* Substituted, not merely removed: these surfaces rely on what is behind
+     them for contrast, and dropping the blur without a solid ground leaves
+     text over whatever is underneath. */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background-color: var(--color-surface-raised, rgba(22, 24, 30, 0.96)) !important;
+}
+
+:root[data-effects='reduced'] .slash-aurora,
+:root[data-effects='reduced'] .slash-dotgrid {
+  display: none !important;
+}
+
+/* Motion, of every kind, including the pulses that never stop. */
+:root[data-effects='reduced'] *,
+:root[data-effects='reduced'] *::before,
+:root[data-effects='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Shadows are cheap individually and are drawn on every raised surface; the
+   large blurred ones are not. Kept as a hairline so depth still reads. */
+:root[data-effects='reduced'] .glass-raised,
+:root[data-effects='reduced'] .glass-page {
+  box-shadow: 0 0 0 1px var(--glass-edge, rgba(255, 255, 255, 0.08)) !important;
+}
