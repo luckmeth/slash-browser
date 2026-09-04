@@ -296,6 +296,8 @@ export class AppContext {
    * and the `window.open` defuser, and yields it to DevTools on demand.
    */
   readonly injector: ScriptletInjector
+  /** The script switches as they were, so a change can be noticed. */
+  private lastScriptSwitches = ''
   /** Hides the empty slots that blocked ads leave behind. */
   readonly cosmetics: CosmeticFilter
   private readonly gestures = new GestureTracker()
@@ -469,6 +471,12 @@ export class AppContext {
       this.settings,
       () => this.allWindows(),
       () => this.focusedWindow() ?? null
+    )
+    // The wire-level half of the same feature. The page script wins the first
+    // response cheaply; this one covers every response after it, which the
+    // page can otherwise take back by restoring its own natives.
+    this.injector.filterYouTubePlayer(
+      () => this.settings.getAll().blockAds && this.settings.getAll().blockYouTubeVideoAds
     )
     this.injector.register({
       id: 'youtube-ads',
@@ -794,6 +802,21 @@ export class AppContext {
     this.settings.onChange((next) => {
       this.broadcastAll('settings:changed', next)
       this.activity.sync()
+
+      // Which page scripts are installed is decided once per debugger
+      // attachment, so a tab already open would otherwise keep whatever was
+      // decided when it attached — a feature switched on and nothing happening.
+      const scriptSwitches = [
+        next.allowPageScripts,
+        next.blockAds,
+        next.blockYouTubeVideoAds,
+        next.restoreContextMenu,
+        next.blockPopups
+      ].join('|')
+      if (scriptSwitches !== this.lastScriptSwitches) {
+        this.lastScriptSwitches = scriptSwitches
+        this.injector.refresh(this.allPageContents())
+      }
       // Switching Slash Coin on is the first moment the browser is allowed to
       // ask the rewards service anything, so the rate and the daily maximum are
       // fetched here rather than at launch. Before this, the page deliberately
@@ -1524,6 +1547,18 @@ export class AppContext {
   /** One place that assembles the rewards status, since three callers push it. */
   broadcastRewards(): void {
     this.broadcastAll('rewards:changed', this.rewards.status(this.activity.earning, this.activity.note))
+  }
+
+  /** Every page view currently alive, across every window. */
+  private allPageContents(): Electron.WebContents[] {
+    const out: Electron.WebContents[] = []
+    for (const window of this.windows) {
+      for (const tab of window.tabs.allTabs()) {
+        const contents = tab.contents
+        if (contents && !contents.isDestroyed()) out.push(contents)
+      }
+    }
+    return out
   }
 
   focusedWindow(): BrowserWindowController | undefined {

@@ -161,6 +161,132 @@ async function watchOnce(
   return { adSeen, played }
 }
 
+/**
+ * What the **live** page actually contains, rather than what the hooks do to a
+ * fabricated object.
+ *
+ * The older probe proved the mechanism against objects it made up itself, and
+ * reported PASS while real adverts played — because "the strip works when
+ * called" and "the strip reached this page in time" are different claims, and
+ * only the second one matters. This reads the real player response and the
+ * real player, and reports which of the three possible explanations holds:
+ *
+ *  - the script never arrived (no accessor);
+ *  - it arrived and the fields are gone, yet an advert plays anyway (arriving
+ *    by a route the strip does not cover: a later fetch, or server-stitched);
+ *  - it arrived and the fields are still there (it lost the race with the
+ *    page's own parse).
+ */
+async function inspectLive(
+  window: BrowserWindowController,
+  label: string
+): Promise<Record<string, unknown>> {
+  const contents = window.tabs.activeTab?.contents
+  if (!contents) return { error: 'no contents' }
+
+  const state = (await contents.executeJavaScript(
+    `(() => {
+       const d = Object.getOwnPropertyDescriptor(window, 'ytInitialPlayerResponse');
+       const r = window.ytInitialPlayerResponse || {};
+       const cfg = r.playerConfig || {};
+       const player = document.querySelector('#movie_player');
+       return {
+         accessorInstalled: !!(d && d.set),
+         jsonParsePatched: String(JSON.parse).indexOf('[native code]') === -1,
+         responseJsonPatched: String(Response.prototype.json).indexOf('[native code]') === -1,
+         liveHasAdPlacements: Array.isArray(r.adPlacements) ? r.adPlacements.length : null,
+         liveHasPlayerAds: Array.isArray(r.playerAds) ? r.playerAds.length : null,
+         liveHasAdSlots: Array.isArray(r.adSlots) ? r.adSlots.length : null,
+         liveHasHeartbeat: !!r.adBreakHeartbeatParams,
+         liveHasSsap: !!cfg.ssap,
+         videoId: (r.videoDetails && r.videoDetails.videoId) || null,
+         playerSaysAdShowing: !!(player && player.classList.contains('ad-showing')),
+         adBadgeOnScreen: !!document.querySelector('.ytp-ad-badge__text, .ytp-ad-player-overlay, .ytp-ad-player-overlay-layout, .ytp-skip-ad-button'),
+         adSlotNodes: document.querySelectorAll('ytd-ad-slot-renderer, ytd-companion-slot-renderer').length
+       };
+     })()`,
+    true
+  )) as Record<string, unknown>
+
+  log.info(`yt-ad probe [${label}]: live state ${JSON.stringify(state)}`)
+  return state
+}
+
+/**
+ * One navigation, default settings, and a look at what arrived.
+ *
+ * Separate from the A/B run because that one *changes the settings* to make its
+ * control, and changing them is itself a variable: the injector registers its
+ * scripts once per debugger attachment, so a toggle between runs can leave the
+ * second run measuring a stale registration rather than the browser as shipped.
+ */
+export async function runYouTubeStateProbe(window: BrowserWindowController): Promise<void> {
+  log.info(`yt-state probe: navigating to ${TARGET} with settings untouched`)
+  const tabs = window.tabs
+  let activeId = tabs.snapshot().activeTabId
+  for (let i = 0; i < 40 && !activeId; i++) {
+    await delay(250)
+    activeId = tabs.snapshot().activeTabId
+  }
+  if (!activeId) {
+    log.error('yt-state probe: no tab')
+    app.quit()
+    return
+  }
+  tabs.navigate(activeId, TARGET)
+  await delay(12_000)
+  await inspectLive(window, 'first load')
+
+  // The case from the screenshot: a mix, where the *next* video's player
+  // response is fetched by the page rather than embedded in the HTML. That is
+  // the response the page-world hooks no longer cover, because YouTube has put
+  // its own JSON.parse back by then.
+  const contents = tabs.activeTab?.contents
+  if (contents) {
+    const clicked = (await contents.executeJavaScript(
+      `(() => {
+         const items = document.querySelectorAll('ytd-playlist-panel-video-renderer a#wc-endpoint, ytd-compact-video-renderer a#thumbnail');
+         const next = items[1] || items[0];
+         if (!next) return false;
+         next.click();
+         return true;
+       })()`,
+      true
+    )) as boolean
+    log.info(`yt-state probe: clicked the next item in the mix = ${clicked}`)
+
+    // Isolates the plumbing from whether YouTube happened to fetch anything:
+    // a request to the real endpoint, from the real page. If this does not
+    // appear as a paused response in the log, the interception is not matching
+    // and nothing about the click matters.
+    const probed = (await contents.executeJavaScript(
+      `fetch('/youtubei/v1/player?prettyPrint=false', {
+         method: 'POST',
+         headers: { 'content-type': 'application/json' },
+         body: JSON.stringify({ videoId: 'MyUVoJqlc4s' })
+       }).then(r => r.status).catch(e => String(e))`,
+      true
+    )) as unknown
+    log.info(`yt-state probe: direct call to the player endpoint returned ${String(probed)}`)
+    await delay(10_000)
+
+    const after = await inspectLive(window, 'after in-page navigation')
+    const playing = (await contents.executeJavaScript(
+      `(() => { const v = document.querySelector('video'); return v ? Math.round(v.currentTime) : -1 })()`,
+      true
+    )) as number
+    log.info(`yt-state probe: video position after navigation = ${playing}s`)
+
+    if (after.liveHasAdPlacements === null && after.liveHasPlayerAds === null) {
+      log.info('yt-state probe: PASS — the fetched response carries no ad fields either')
+    } else {
+      log.error('yt-state probe: FAIL — the fetched response still carries ad fields')
+    }
+  }
+
+  app.quit()
+}
+
 export async function runYouTubeAdProbe(
   window: BrowserWindowController,
   context: AppContext
@@ -177,7 +303,35 @@ export async function runYouTubeAdProbe(
   await delay(800)
   const on = await watchOnce(window, 'blocker ON')
 
+  const live = await inspectLive(window, 'blocker ON')
+
   log.info('yt-ad probe: ================ RESULT ================')
+  log.info(`yt-ad probe: live page state ${JSON.stringify(live)}`)
+
+  // The decision tree the screenshot demanded: an advert reached a user, so
+  // the question is by which route.
+  if (live.accessorInstalled !== true) {
+    log.error(
+      'yt-ad probe: DIAGNOSIS — the script never reached the page. Everything downstream ' +
+        'is irrelevant until that is fixed.'
+    )
+  } else if (
+    (live.liveHasAdPlacements ?? null) !== null ||
+    (live.liveHasPlayerAds ?? null) !== null ||
+    (live.liveHasAdSlots ?? null) !== null
+  ) {
+    log.error(
+      'yt-ad probe: DIAGNOSIS — the script is installed and the live response STILL carries ' +
+        'ad fields. It lost the race with the page, or the response arrived by a path the ' +
+        'hooks do not cover.'
+    )
+  } else {
+    log.info(
+      'yt-ad probe: DIAGNOSIS — installed, and the live response carries no ad fields. ' +
+        'An advert appearing now is arriving by another route.'
+    )
+  }
+
   log.info(`yt-ad probe: blocker OFF -> advert seen: ${off.adSeen}`)
   log.info(`yt-ad probe: blocker ON  -> advert seen: ${on.adSeen}`)
 

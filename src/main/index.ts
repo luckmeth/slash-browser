@@ -372,6 +372,11 @@ if (!app.requestSingleInstanceLock()) {
       void import('./dev/googleUaProbe').then(({ runGoogleUaProbe }) => runGoogleUaProbe(window))
     }
 
+    if (process.env['SLASH_YT_STATE_PROBE']) {
+      void import('./dev/youtubeAdProbe').then(({ runYouTubeStateProbe }) =>
+        runYouTubeStateProbe(window)
+      )
+    }
     if (process.env['SLASH_YT_ADS_PROBE']) {
       void import('./dev/youtubeAdProbe').then(({ runYouTubeAdProbe }) =>
         runYouTubeAdProbe(window, context)
