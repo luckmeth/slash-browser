@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { mkdir, rm, stat } from 'node:fs/promises'
@@ -56,6 +57,14 @@ const CHECK_TIMEOUT_MS = 15_000
 const FIRST_CHECK_DELAY_MS = 45_000
 /** Four times a day is plenty for a browser somebody leaves open for weeks. */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Long enough for the renderer to paint "Installing…" before the window goes.
+ *
+ * Quitting in the same tick as the click makes the browser vanish under the
+ * pointer, which reads as a crash rather than as an update starting.
+ */
+const INSTALL_QUIT_DELAY_MS = 1_200
 /** A package download is not a page load; it is allowed to take its time. */
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -354,6 +363,29 @@ export class UpdateService {
   }
 
   /**
+   * Runs the NSIS package with no interface, detached from this process.
+   *
+   * Detached and with its streams released, because the installer outlives the
+   * browser that started it: `app.quit()` follows immediately, and a child
+   * still tied to this process's stdio would be killed with it, leaving Slash
+   * uninstalled halfway.
+   */
+  private launchInstaller(packagePath: string): boolean {
+    try {
+      const child = spawn(packagePath, ['/S', '--force-run'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      child.unref()
+      return true
+    } catch (error) {
+      log.warn(`could not spawn the installer: ${String(error)}`)
+      return false
+    }
+  }
+
+  /**
    * Downloads and installs the available update.
    *
    * Gated on the build carrying a valid Authenticode signature, checked against
@@ -404,19 +436,43 @@ export class UpdateService {
       const packagePath = this.packagePath
       if (!packagePath) return { ok: false, detail: 'The update package is not on disk.' }
 
-      const failure = await shell.openPath(packagePath)
-      if (failure !== '') {
-        log.warn(`could not start the installer: ${failure}`)
-        return { ok: false, detail: 'The installer could not be started.' }
+      // Silent, because an update is not a first install and should not read
+      // like one. `oneClick: false` gives a full wizard -- welcome page,
+      // install location, progress, finish -- which is right for somebody
+      // installing Slash and wrong for somebody who has already agreed to
+      // update inside the browser. `/S` runs the same NSIS package with no UI
+      // and `--force-run` starts Slash again afterwards, so the update looks
+      // like a restart rather than a reinstallation.
+      //
+      // The consent is the Update button. Nothing is silent that the user did
+      // not ask for, and the bytes were checked against the published checksum
+      // before this point.
+      const started = this.launchInstaller(packagePath)
+      if (!started) {
+        // Falls back to the visible wizard rather than failing: a wizard is a
+        // worse experience than a silent update and a far better one than an
+        // update that cannot happen at all.
+        const failure = await shell.openPath(packagePath)
+        if (failure !== '') {
+          log.warn(`could not start the installer: ${failure}`)
+          return { ok: false, detail: 'The installer could not be started.' }
+        }
+        return {
+          ok: true,
+          detail: 'The installer has been started. Slash will close when it asks you to.'
+        }
       }
 
-      log.info(`starting the installer for ${this.plan.version}`)
-      // Left running deliberately: the NSIS installer asks the user to close
-      // Slash itself, and quitting here would take the window away before they
-      // have seen what they are agreeing to.
+      log.info(`installing ${this.plan.version} silently`)
+      // NSIS cannot replace files that are open, so the browser has to go.
+      // Given a moment first so the renderer can paint "Installing…" -- quitting
+      // in the same tick makes the window vanish mid-click, which reads as a
+      // crash rather than as an update.
+      setTimeout(() => app.quit(), INSTALL_QUIT_DELAY_MS)
+
       return {
         ok: true,
-        detail: 'The installer has been started. Slash will close when it asks you to.'
+        detail: 'Installing. Slash will close and reopen on the new version.'
       }
     }
 
