@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, net, shell } from 'electron'
 import { isSignedBuild } from './buildSignature'
@@ -9,6 +9,7 @@ import { z } from 'zod'
 import type { UpdateStatus } from '@shared/types/updates'
 import { createLogger } from '../logger'
 import { installGate } from './installGate'
+import { packagesToRemove } from './prunePackages'
 import { planInstall, type InstallPlan } from './updatePlan'
 import { REWARDS_ANON_KEY_DEFAULT } from '@shared/types/rewards'
 
@@ -188,6 +189,11 @@ export class UpdateService {
       this.status = { ...this.status, notes: parsed.data.notes ?? '', progress: 0 }
 
       if (!newer) {
+        // The moment after a successful update: the browser has relaunched on
+        // the new version and nothing is pending, so every package in the
+        // folder has already been run. This is what actually reclaims the
+        // space, and it needs no user action and no button.
+        void this.prunePackages(null)
         return this.settle('up-to-date', latest, null, `You are running the newest version (${latest}).`)
       }
 
@@ -293,6 +299,10 @@ export class UpdateService {
       }
 
       this.packagePath = target
+      // Every package fetched used to be kept for ever: 168 MB each, and six
+      // updates in one evening left 673 MB in the profile that nothing would
+      // read again. An installer that has been run has no further use.
+      void this.prunePackages(plan.fileName)
       this.settle(
         'ready',
         plan.version,
@@ -359,6 +369,28 @@ export class UpdateService {
       })
     } finally {
       clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Deletes update packages that are no longer needed.
+   *
+   * Best-effort by design: a file that will not delete -- open, locked by an
+   * antivirus scan, on a volume that has gone away -- is a housekeeping
+   * failure, and housekeeping must never break updating. Every error is
+   * swallowed after a log line.
+   */
+  private async prunePackages(keep: string | null): Promise<void> {
+    const folder = join(app.getPath('userData'), 'updates')
+    try {
+      const files = await readdir(folder)
+      const stale = packagesToRemove(files, keep)
+      for (const name of stale) {
+        await rm(join(folder, name), { force: true }).catch(() => undefined)
+      }
+      if (stale.length > 0) log.info(`removed ${stale.length} update package(s) no longer needed`)
+    } catch {
+      // No folder yet, which is the ordinary case before a first download.
     }
   }
 
