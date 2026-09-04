@@ -1,3 +1,4 @@
+import { PLACEMENTS, SponsorBatchSchema, SponsoredTileSchema } from '@shared/types/sponsor'
 import { describe, it, expect } from 'vitest'
 import { acceptCreative, isLive, reportUrlFor, selectLive, selectTile } from './sponsorRules'
 
@@ -190,5 +191,46 @@ describe('acceptCreative — scheduling', () => {
 
   it('refuses a zero-length window', () => {
     expect(acceptCreative({ ...good, startsAt: 1000, endsAt: 1000 }).ok).toBe(false)
+  })
+})
+
+describe('placement definitions', () => {
+  it('every placement survives a round trip through the batch schema', () => {
+    // These two schemas used to carry their own copies of the placement list.
+    // The moment one gained a value the other rejected **the whole batch** —
+    // not the unknown creative, the entire fetch — so every campaign vanished
+    // at once and the only trace was a single line in a log.
+    for (const placement of PLACEMENTS) {
+      const batch = SponsorBatchSchema.safeParse({
+        expiresAt: Date.now() + 1000,
+        tiles: [
+          {
+            id: `id-${placement}`,
+            sponsor: 'Example Co',
+            headline: 'A headline',
+            clickUrl: 'https://example.com/',
+            placement
+          }
+        ]
+      })
+      expect(batch.success, `batch rejected placement "${placement}"`).toBe(true)
+      if (!batch.success) continue
+
+      const stored = SponsoredTileSchema.safeParse(batch.data.tiles[0])
+      expect(stored.success, `stored schema rejected placement "${placement}"`).toBe(true)
+    }
+  })
+
+  it('one unknown placement does not discard the whole batch silently', () => {
+    // Documents the failure mode: the batch is rejected wholesale rather than
+    // per creative, which is why the two lists must stay one list.
+    const batch = SponsorBatchSchema.safeParse({
+      expiresAt: Date.now() + 1000,
+      tiles: [
+        { id: 'a', sponsor: 'Co', headline: 'H', clickUrl: 'https://example.com/' },
+        { id: 'b', sponsor: 'Co', headline: 'H', clickUrl: 'https://example.com/', placement: 'skywriting' }
+      ]
+    })
+    expect(batch.success).toBe(false)
   })
 })

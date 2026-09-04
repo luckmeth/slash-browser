@@ -6,6 +6,7 @@ import {
   type AiProviderId,
   type AiProviderInfo
 } from '@shared/types/aiHub'
+import { endpointHost, loopbackVerdict } from '@shared/ai/loopback'
 import type { Database } from '../db/Database'
 import type { SettingsStore } from '../settings/SettingsStore'
 import { createLogger } from '../logger'
@@ -43,6 +44,27 @@ interface CredentialRow {
  *  - **Each provider keeps its own model.** One global model name is wrong for
  *    every provider but the one it was typed for.
  */
+/**
+ * The host a cloud provider is contacted on.
+ *
+ * Hard-coded per provider because these endpoints are fixed by the provider
+ * classes in `LLMProvider.ts` and are not user-editable. Naming the host is
+ * better than "a third party" — somebody deciding whether to send their
+ * browsing history somewhere deserves to be told where.
+ */
+function hostOfCatalogue(id: AiProviderId): string {
+  switch (id) {
+    case 'anthropic':
+      return 'api.anthropic.com'
+    case 'openai':
+      return 'api.openai.com'
+    case 'google':
+      return 'generativelanguage.googleapis.com'
+    default:
+      return ''
+  }
+}
+
 export class ProviderRegistry {
   constructor(
     private readonly db: Database,
@@ -55,6 +77,13 @@ export class ProviderRegistry {
 
     const providers: AiProviderInfo[] = AI_PROVIDER_CATALOGUE.map((entry) => {
       const row = rows.get(entry.id)
+      const baseUrl = entry.local ? (row?.base_url ?? DEFAULT_LOCAL_BASE_URL) : null
+      // Checked, not assumed. `entry.local` says this provider *id* is the
+      // OpenAI-compatible one; the endpoint beside it is free text the user can
+      // point anywhere, and the UI used to render the id as a promise about the
+      // destination. A cloud provider has a fixed remote endpoint by definition.
+      const destination = entry.local ? loopbackVerdict(baseUrl) : 'remote'
+
       return {
         id: entry.id,
         name: entry.name,
@@ -64,9 +93,11 @@ export class ProviderRegistry {
         model: row?.model || entry.defaultModel,
         suggestedModels: [...entry.suggestedModels],
         requiresKey: entry.requiresKey,
-        baseUrl: entry.local ? (row?.base_url ?? DEFAULT_LOCAL_BASE_URL) : null,
+        baseUrl,
         keyUrl: entry.keyUrl,
-        local: entry.local
+        local: entry.local,
+        destination,
+        destinationHost: entry.local ? endpointHost(baseUrl) : hostOfCatalogue(entry.id)
       }
     })
 

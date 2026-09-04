@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MIN_SEGMENT_BYTES } from '@shared/types/downloadEngine'
+import { MAX_SEGMENTS, MIN_SEGMENT_BYTES } from '@shared/types/downloadEngine'
 import {
   categorise,
   estimateSecondsRemaining,
@@ -157,8 +157,20 @@ describe('planConnections', () => {
   })
 
   it('clamps to the hard ceiling', () => {
-    expect(planConnections(caps({ totalBytes: 10_000 * 1024 * 1024 }), 999).connections).toBe(8)
+    // Against the constant, not a literal. This asserts "a caller cannot ask
+    // for more connections than the ceiling allows", which is the property
+    // worth pinning; it used to say `toBe(8)` and so failed the moment the
+    // ceiling moved, for a reason that had nothing to do with clamping.
+    expect(planConnections(caps({ totalBytes: 10_000 * 1024 * 1024 }), 999).connections).toBe(MAX_SEGMENTS)
     expect(planConnections(caps(), 0).connections).toBeGreaterThanOrEqual(1)
+  })
+
+  it('never opens more connections than there are whole segments to fill', () => {
+    // A 6 MB file against a 2 MB floor affords three, however many are asked
+    // for. This is what stops a raised ceiling turning small files into a burst
+    // of connections that each fetch a sliver.
+    const plan = planConnections(caps({ totalBytes: 6 * MIN_SEGMENT_BYTES }), MAX_SEGMENTS)
+    expect(plan.connections).toBe(6)
   })
 })
 

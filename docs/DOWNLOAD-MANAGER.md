@@ -9,17 +9,24 @@ which gaps are decisions rather than omissions.
 |---|---|---|
 | Multi-connection accelerated downloads | **Yes** — 1–8 connections per file, configurable | `SegmentedDownload`, `planConnections` |
 | Takes over downloads from the browser | **Yes**, over 4 MB | `takeover.ts`, `DownloadManager.attachToSession` |
-| Pause / resume | **Yes**, with a safety check before resuming | `resumeIsSafe` |
-| Resume after a crash or restart | **Yes** — partial segments are kept and verified | `DownloadRepository`, `resumeIsSafe` |
-| Automatic retry with backoff | **Yes** | `retryDelayMs` |
+| Pause / resume | **Yes** — continues from the bytes on disk, with a validator check first | `DownloadQueue.beginResume`, `resumeIsSafe` |
+| Resume after a crash or restart | **Yes** — written to SQLite, restored paused, continues from disk | `EngineDownloadRepository`, `DownloadQueue.restore` |
+| Automatic retry with backoff | **Yes** — jittered, capped, cancellation-aware | `retryPolicy.ts` |
 | Speed limiter | **Yes**, across all downloads | `downloadBandwidthLimit` |
-| Queue with priorities | **Yes** — high / normal / low, plus "start now" | `DownloadQueue.setPriority` |
+| Queue with priorities | **Yes** — high / normal / low, plus "start now", reachable from the Downloads Center | `DownloadQueue.setPriority`, `DownloadsCenter.tsx` |
 | Scheduler ("download later") | **Yes** — `startAfter`, an epoch time the queue honours | `DownloadQueue` |
 | Categories by file type | **Yes** | `categorise` |
 | Video grabber over the player | **Yes** — a chip over the page, then a quality picker | `MediaOfferChip`, `MediaPicker` |
 | Batch "download all links" | **Yes**, excluding flagged links | `GuardianPanel` |
+| Site grabber — crawl a site for its files | **Yes** — same-origin, depth-capped, honours robots.txt | `SiteGrabber`, `crawlPlan.ts` |
+| Notices a download link you copied | **Yes**, off by default, only while focused | `ClipboardWatcher` |
 | Checks a link before you click it | **Yes**, and IDM has no equivalent | `linkAnalysis.ts` |
 | Reassembles HLS streams into one file | **Yes** | `hlsPlaylist.ts`, `StreamDownload` |
+| Reassembles MPEG-DASH (VOD) into one file | **Yes** — SegmentTemplate, SegmentList, SegmentBase | `media/dash/mpdParser.ts` |
+| Lists the qualities a stream offers | **Yes** — one row per variant, HLS and DASH | `readStreamVariants` |
+| Chooses where each file goes | **Yes**, without falling back to Chromium | `chooseDownloadFolder`, `confinedPath` |
+| Retries only what is worth retrying | **Yes** — 404 fails at once; 429 honours `Retry-After` | `retryPolicy.ts` |
+| One row per video, not one per token | **Yes** | `mediaIdentity.ts` |
 | Joins separate video and audio | **Yes**, bundled ffmpeg | `Muxer`, `DownloadQueue.enqueueJoined` |
 
 ## Streams and joining, which used to be the gap
@@ -43,10 +50,49 @@ re-encoded — so a two-hour film joins in seconds and is bit-identical to what 
 If the join fails, or ffmpeg is absent from the build, both parts are kept and the row says so. Two
 files that play beat one error where a download should be.
 
+## Surviving a restart
+
+Engine downloads are written to SQLite — `engine_downloads` and `engine_download_segments`, added in
+migration 24 — with enough to pick the transfer up again: the segment table, the validator the server
+gave us, and the request context.
+
+**Nothing resumes by itself.** A transfer that was running when Slash closed comes back **paused**,
+because quietly restarting several large downloads the moment somebody opens their browser is a
+decision to spend their bandwidth without asking. Queued and scheduled downloads come back as they
+were, since those were already instructions to start.
+
+**No credential is stored.** The request context is a session partition *name*, a referrer and a user
+agent; cookies are asked of Chromium's own jar by partition when the download is picked up again. A
+cookie copied into a database row is a live credential outliving the tab it came from. Downloads made
+in a private window are not written at all.
+
+## Pause and resume, and what it used to do
+
+Pausing stops the transfer and keeps every byte already written. Resuming re-probes the server,
+checks the file has not changed underneath — a strong `ETag`, or failing that `Last-Modified`, and
+**no validator means no resume** — then fetches only the ranges still missing, into the same file.
+
+Two things it deliberately does not do. It does not choose a new destination: `uniquePath` refuses to
+overwrite an existing file, which is right the first time and wrong every time after, because the
+file it collides with is the download's own partial one. And it does not truncate: continuing opens
+the destination `r+` and writes at offsets.
+
+This is worth stating because until recently none of it was true. `resume()` only set the state back
+to `queued`; the queue then chose a *new* path (`film (1).mp4`), opened it with `'w'`, and downloaded
+the whole file again. `SegmentedDownload.resume` existed, was correct, and was never called from
+anywhere. Nothing in the UI could show the difference — the state went paused, then completed, and
+the file was right. `SLASH_RESUME_PROBE` counts the bytes the server was asked for, which is the only
+place the difference is visible.
+
 ## What is not built, and why
 
-**DASH (`.mpd`) manifests.** HLS covers most of the web; DASH is the same idea in XML and is the
-obvious next step. Refused with an explanation for now rather than half-done.
+**Pausing a stream.** HLS and DASH downloads cannot be paused: there is no byte offset to come back
+to, only a position in a list of segments and a part-written file that is not a valid video. Refused
+with that reason rather than offering a Resume that would silently restart.
+
+**Live and multi-period DASH.** A live manifest has no end, so saving one means choosing a moment to
+stop — that is recording. Multi-period splices several presentations together and needs
+concatenation rules this does not implement. Both are refused *by name*, not with an empty list.
 
 **Encrypted HLS.** `#EXT-X-KEY` with any method but `NONE` is refused. The key is usually fetched
 openly and unpicking it would be easy, which is exactly why the line is drawn at "we do not decrypt"

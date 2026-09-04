@@ -31,6 +31,9 @@ const paths = {
   // toolbar buttons sharing an icon is a genuine navigation hazard.
   activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
   bookmarks: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
+  // A bar across the top with arrows under it: the toolbar, and the two
+  // directions it can go. Used for the auto-hide toggle.
+  expand: 'M3 4h18M8 11l4-4 4 4M8 17l4 4 4-4',
   zoomIn: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M11 8v6M8 11h6',
   zoomOut: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M8 11h6',
   menu: 'M3 12h18M3 6h18M3 18h18',

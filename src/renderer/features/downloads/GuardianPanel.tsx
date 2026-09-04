@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { DownloadScan, LinkVerdict, MediaScan } from '@shared/types/downloadGuardian'
+import type { DownloadScan, LinkVerdict, MediaScan, SiteGrab } from '@shared/types/downloadGuardian'
 import { Icon } from '../../components/Icon'
 import { useBrowserStore } from '../../stores/browserStore'
 
@@ -44,7 +44,12 @@ function batchable(candidates: DownloadScan['candidates']): DownloadScan['candid
 export function GuardianPanel(): React.JSX.Element {
   const [scan, setScan] = useState<DownloadScan | null>(null)
   const [media, setMedia] = useState<MediaScan | null>(null)
-  const [busy, setBusy] = useState<'links' | 'media' | null>(null)
+  const [busy, setBusy] = useState<'links' | 'media' | 'grab' | null>(null)
+  const [grab, setGrab] = useState<SiteGrab | null>(null)
+  const [grabbed, setGrabbed] = useState<number | null>(null)
+  /** Crawl settings, shown before the grab rather than hidden in preferences. */
+  const [depth, setDepth] = useState(1)
+  const [filter, setFilter] = useState('')
   const [batched, setBatched] = useState<number | null>(null)
   const detectedMedia = useBrowserStore((s) => s.detectedMedia)
 
@@ -78,6 +83,26 @@ export function GuardianPanel(): React.JSX.Element {
     })
   }, [detectedMedia])
 
+  const grabSite = (): void => {
+    setBusy('grab')
+    setGrabbed(null)
+    setGrab(null)
+    void window.browser
+      .invoke('guardian:grabSite', {
+        depth,
+        maxPages: 50,
+        extensions: filter
+          .split(/[\s,]+/)
+          .map((value) => value.trim())
+          .filter((value) => value !== ''),
+        respectRobots: true
+      })
+      .then((result) => {
+        setBusy(null)
+        if (result.ok) setGrab(result.value)
+      })
+  }
+
   const download = (url: string): void => {
     void window.browser.invoke('downloadEngine:enqueue', {
       url,
@@ -106,6 +131,113 @@ export function GuardianPanel(): React.JSX.Element {
           {busy === 'media' ? 'Scanning…' : 'Find media'}
         </button>
       </div>
+
+      {/*
+        The site grab. Its settings sit next to the button rather than in
+        preferences, because depth is a decision about *this* site — how far to
+        follow it — not a standing preference, and a crawl whose reach is
+        invisible at the moment you start it is one nobody can consent to.
+      */}
+      <section className="rounded-lg border border-[var(--color-border-subtle)] p-2.5">
+        <p className="text-[11px] font-medium">Grab files from this site</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+          Follows links on this site only, reads their HTML without running any scripts, and
+          honours the site’s robots.txt.
+        </p>
+
+        <div className="mt-2 flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
+            Depth
+            <select
+              value={depth}
+              onChange={(event) => setDepth(Number(event.currentTarget.value))}
+              disabled={busy !== null}
+              className="cursor-default rounded border border-[var(--color-border-subtle)] bg-transparent px-1 py-0.5 text-[11px]"
+            >
+              <option value={0}>this page</option>
+              <option value={1}>1 link deep</option>
+              <option value={2}>2 links deep</option>
+              <option value={3}>3 links deep</option>
+            </select>
+          </label>
+          <input
+            value={filter}
+            onChange={(event) => setFilter(event.currentTarget.value)}
+            disabled={busy !== null}
+            placeholder="pdf, zip — blank for all"
+            aria-label="File types to collect"
+            className="min-w-0 flex-1 rounded border border-[var(--color-border-subtle)] bg-transparent px-1.5 py-0.5 text-[11px] outline-none focus:border-[var(--color-accent)]"
+          />
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={grabSite}
+            className="shrink-0 cursor-default rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+          >
+            {busy === 'grab' ? 'Grabbing…' : 'Grab'}
+          </button>
+        </div>
+
+        {grab && (
+          <div className="mt-2">
+            <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">{grab.note}</p>
+
+            {grab.candidates.length > 0 && (
+              <>
+                <div className="mt-2 flex items-center gap-2">
+                  <p className="min-w-0 flex-1 text-[11px] text-[var(--color-text-muted)]">
+                    {batchable(grab.candidates).length} of {grab.candidates.length} look like
+                    ordinary files
+                  </p>
+                  <button
+                    type="button"
+                    disabled={grabbed !== null}
+                    onClick={() => {
+                      const targets = batchable(grab.candidates)
+                      for (const candidate of targets) download(candidate.url)
+                      setGrabbed(targets.length)
+                    }}
+                    className="shrink-0 cursor-default rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[10px] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+                  >
+                    {grabbed === null ? 'Download all' : `Queued ${grabbed}`}
+                  </button>
+                </div>
+
+                <ul className="mt-1.5 max-h-64 space-y-1 overflow-y-auto">
+                  {grab.candidates.map((candidate) => (
+                    <li
+                      key={candidate.url}
+                      className="flex items-center gap-2 rounded border border-[var(--color-border-subtle)] p-1.5"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px]">
+                          {candidate.label || candidate.url.split('/').pop()}
+                        </span>
+                        <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
+                          {candidate.host}
+                          {candidate.extension ? ` · ${candidate.extension}` : ''}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 rounded border px-1 py-0.5 text-[9px] ${VERDICT_TONE[candidate.verdict]}`}
+                      >
+                        {VERDICT_LABEL[candidate.verdict]}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => download(candidate.url)}
+                        className="shrink-0 cursor-default rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                      >
+                        Download
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
       {scan && (
         <section>

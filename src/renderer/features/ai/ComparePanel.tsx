@@ -108,7 +108,14 @@ export function ComparePanel({
             {preview.recipients.map((recipient) => (
               <li key={recipient.provider} className="text-[11px] text-[var(--color-text-muted)]">
                 · {recipient.name}
-                {recipient.local ? ' — stays on this machine' : ' — leaves your machine'}
+                {/*
+                  Named, not implied. "Leaves your machine" tells somebody that
+                  something happened; the host tells them what they are agreeing
+                  to. Driven by the verified verdict — see the handler.
+                */}
+                {recipient.local
+                  ? ` — stays on this machine${recipient.host ? ` (${recipient.host})` : ''}`
+                  : ` — sent to ${recipient.host || 'a third party'}`}
               </li>
             ))}
           </ul>

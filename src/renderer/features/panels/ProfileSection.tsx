@@ -20,6 +20,9 @@ export function ProfileSection(): React.JSX.Element {
   const [activeId, setActiveId] = useState('default')
   const [newName, setNewName] = useState('')
   const [problem, setProblem] = useState('')
+  /** Which row is being renamed, and the draft name. Null when none is. */
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
 
   const load = useCallback((): void => {
     void window.browser.invoke('profiles:list', undefined).then((result) => {
@@ -41,15 +44,56 @@ export function ProfileSection(): React.JSX.Element {
               key={profile.id}
               className="flex items-center justify-between gap-2 rounded-lg border border-[var(--glass-edge)] px-2.5 py-2"
             >
-              <div className="min-w-0">
-                <p className="truncate text-xs">
-                  {profile.name}
-                  {isActive && (
-                    <span className="ml-1.5 text-[10px] text-[var(--color-accent)]">in use</span>
-                  )}
-                </p>
+              <div className="min-w-0 flex-1">
+                {renaming === profile.id ? (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      const name = renameDraft.trim()
+                      setRenaming(null)
+                      // An empty name would leave a row nobody can identify.
+                      if (name === '' || name === profile.name) return
+                      void window.browser
+                        .invoke('profiles:rename', { id: profile.id, name })
+                        .then(load)
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={renameDraft}
+                      onChange={(event) => setRenameDraft(event.currentTarget.value)}
+                      onBlur={() => setRenaming(null)}
+                      aria-label={`Rename ${profile.name}`}
+                      className="w-full rounded border border-[var(--color-accent)] bg-transparent px-1.5 py-0.5 text-xs outline-none"
+                    />
+                  </form>
+                ) : (
+                  <p className="truncate text-xs">
+                    {profile.name}
+                    {isActive && (
+                      <span className="ml-1.5 text-[10px] text-[var(--color-accent)]">in use</span>
+                    )}
+                  </p>
+                )}
               </div>
               <div className="flex shrink-0 gap-1">
+                {/*
+                  Outside the `!isActive` branch on purpose: the profile you are
+                  using is the one you are most likely to want to name, and
+                  renaming does not touch its data, so there is no reason to
+                  make somebody switch away to do it.
+                */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProblem('')
+                    setRenaming(profile.id)
+                    setRenameDraft(profile.name)
+                  }}
+                  className="cursor-default rounded border border-[var(--glass-edge)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                >
+                  Rename
+                </button>
                 {!isActive && (
                   <>
                     <button

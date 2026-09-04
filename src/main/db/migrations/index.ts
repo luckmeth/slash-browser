@@ -774,6 +774,124 @@ const m023_sponsor_placement: Migration = {
   `
 }
 
+const m024_engine_downloads: Migration = {
+  version: 24,
+  name: 'engine_downloads',
+  sql: /* sql */ `
+    -- The accelerated engine's own downloads.
+    --
+    -- Separate from \`downloads\`, which holds Chromium's. They are different
+    -- things: a Chromium download cannot be resumed once the process exits — the
+    -- request went with it — so that table is a history list. These can be
+    -- resumed, which is the entire reason for writing them down, and doing that
+    -- needs a segment table and the validator the server gave us.
+    --
+    -- Nothing here is a credential. The request context is a session partition
+    -- *name*, a referrer and a user agent; cookies are asked of Chromium's own
+    -- jar by partition when the download is picked up again. Private-window
+    -- downloads are never written at all.
+    CREATE TABLE engine_downloads (
+      id               TEXT    PRIMARY KEY,
+      url              TEXT    NOT NULL,
+      source_host      TEXT    NOT NULL DEFAULT '',
+      filename         TEXT    NOT NULL,
+      save_path        TEXT    NOT NULL,
+      category         TEXT    NOT NULL DEFAULT 'other',
+      state            TEXT    NOT NULL,
+      priority         TEXT    NOT NULL DEFAULT 'normal',
+      total_bytes      INTEGER,
+      received_bytes   INTEGER NOT NULL DEFAULT 0,
+      connection_note  TEXT    NOT NULL DEFAULT '',
+      start_after      INTEGER,
+      attempts         INTEGER NOT NULL DEFAULT 0,
+      error            TEXT,
+
+      -- What the server said at the start. Without a validator a partial file
+      -- cannot be continued safely, so these are not optional extras.
+      accepts_ranges   INTEGER NOT NULL DEFAULT 0,
+      suggested_name   TEXT,
+      mime_type        TEXT,
+      etag             TEXT,
+      last_modified    TEXT,
+
+      -- Enough to make the page's own request again. No cookies, no auth.
+      partition        TEXT,
+      referer          TEXT,
+      origin           TEXT,
+      user_agent       TEXT,
+
+      -- Two-part downloads, playlists, and what a master playlist declared.
+      join_audio_url   TEXT,
+      is_stream        INTEGER NOT NULL DEFAULT 0 CHECK (is_stream IN (0, 1)),
+      stream_bandwidth INTEGER,
+      stream_quality   TEXT,
+
+      started_at       INTEGER NOT NULL,
+      updated_at       INTEGER NOT NULL,
+      completed_at     INTEGER
+    );
+    CREATE INDEX idx_engine_downloads_started ON engine_downloads (started_at DESC);
+
+    -- One row per byte range. The download is resumable only if these add up to
+    -- the file, which is checked on load rather than assumed.
+    CREATE TABLE engine_download_segments (
+      download_id    TEXT    NOT NULL REFERENCES engine_downloads (id) ON DELETE CASCADE,
+      idx            INTEGER NOT NULL,
+      start_byte     INTEGER NOT NULL,
+      end_byte       INTEGER NOT NULL,
+      received_bytes INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (download_id, idx)
+    );
+  `
+}
+
+const m025_download_queues: Migration = {
+  version: 25,
+  name: 'download_queues',
+  sql: /* sql */ `
+    -- Which named queue a download belongs to.
+    --
+    -- A column with a default rather than a table, because a queue is a label:
+    -- the queues themselves are a handful of preferences and live in settings,
+    -- and nothing here references them by key. A queue the user deletes leaves
+    -- its downloads pointing at a name that no longer exists, which
+    -- \`selectStartable\` handles by falling back to the first queue - so this
+    -- deliberately has no foreign key to break.
+    ALTER TABLE engine_downloads ADD COLUMN queue TEXT NOT NULL DEFAULT 'main';
+  `
+}
+
+const m026_rewards: Migration = {
+  version: 26,
+  name: 'rewards',
+  sql: /* sql */ `
+    -- Qualifying browsing time waiting to be reported.
+    --
+    -- A local outbox, not a balance. The server is the authority on what has
+    -- been earned; this table holds only closed intervals that have not yet
+    -- been accepted, so a browser that is offline for a week does not lose the
+    -- week. Rows are deleted once the server has taken them.
+    --
+    -- \`reported_at\` is set only after the server *accepted* the batch, never
+    -- when it was merely sent. A row marked reported on send would be lost
+    -- whenever a response went missing, which is the one failure mode a user
+    -- would notice and could never explain.
+    CREATE TABLE coin_intervals (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at   INTEGER NOT NULL,
+      ended_at     INTEGER NOT NULL,
+      seconds      INTEGER NOT NULL,
+      reported_at  INTEGER,
+      -- Which account the time was earned under. Signing into a different
+      -- account must not hand it somebody else's unreported hours.
+      account      TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX idx_coin_intervals_pending
+      ON coin_intervals (reported_at, started_at);
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -797,7 +915,10 @@ export const migrations: readonly Migration[] = [
   m020_snapshot_windows,
   m021_sync,
   m022_addresses,
-  m023_sponsor_placement
+  m023_sponsor_placement,
+  m024_engine_downloads,
+  m025_download_queues,
+  m026_rewards
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

@@ -45,7 +45,17 @@ export const ComparePreviewSchema = z.object({
     z.object({
       provider: AiProviderIdSchema,
       name: z.string(),
-      local: z.boolean()
+      /**
+       * Whether this recipient is **verified** to be on this machine.
+       *
+       * Derived from the endpoint by `loopbackVerdict`, not from the provider
+       * catalogue. A provider catalogued as local can be pointed at a remote
+       * box, and this list is a disclosure shown immediately before text is
+       * sent — the one place a wrong answer here is most expensive.
+       */
+      local: z.boolean(),
+      /** The host that will be contacted, so it can be named rather than implied. */
+      host: z.string()
     })
   ),
   /** How many of the recipients are third parties rather than on-device. */

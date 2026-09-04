@@ -95,9 +95,30 @@ export type CreativeVerdict = { ok: true } | { ok: false; reason: string }
  * Enforced here rather than trusted to the renderer, because a creative that
  * slips through is not a rendering bug — it is a privacy promise broken.
  */
+/**
+ * Longest a creative's inlined image may be, as base64 characters.
+ *
+ * 700 KB encoded is roughly 512 KB of image — ample for a full-width backdrop
+ * at sensible compression, and small enough that a full batch stays a
+ * reasonable thing to hold in memory and write to a row.
+ */
+const MAX_IMAGE_CHARS = 700 * 1024
+
 export function acceptCreative(creative: Creative): CreativeVerdict {
   if (creative.image !== '' && !creative.image.startsWith('data:image/')) {
     return { ok: false, reason: 'image is not a data: URL' }
+  }
+  // Inlined images are what keeps a creative from being a tracking pixel — the
+  // batch is fetched once every few hours and nothing is requested per
+  // impression — but inlining is also unbounded by construction. A batch is
+  // parsed into memory and written to SQLite, so an operator who pastes a 40 MB
+  // photograph would hand every copy of the browser a 40 MB row and a stall on
+  // the start page. Capped at a size a real advert comfortably fits in.
+  if (creative.image.length > MAX_IMAGE_CHARS) {
+    return {
+      ok: false,
+      reason: `image is ${Math.round(creative.image.length / 1024)} KB encoded; the limit is ${Math.round(MAX_IMAGE_CHARS / 1024)} KB`
+    }
   }
   if (!/^https:\/\//i.test(creative.clickUrl)) {
     return { ok: false, reason: 'click target is not https' }

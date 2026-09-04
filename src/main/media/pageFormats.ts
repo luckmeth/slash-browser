@@ -146,8 +146,20 @@ export function analyseFormats(data: RawStreamingData | null | undefined): {
   choices: MediaChoice[]
   /** Formats skipped because their address is signed rather than given. */
   signed: number
+  /**
+   * Formats with no address at all — not a signed one, none.
+   *
+   * A separate count because it is a separate fact, and the difference decides
+   * what the user is told. A signed address exists and is withheld behind the
+   * site's own code. These have neither: the page lists the *format* and the
+   * player then negotiates the bytes with the server as it goes, so there is no
+   * URL anywhere on the page for anything to fetch. Measured on a real watch
+   * page, where all thirty formats were this shape and the old count reported
+   * zero of everything — which read as "this page has no video on it".
+   */
+  serverDriven: number
 } {
-  if (!data || typeof data !== 'object') return { choices: [], signed: 0 }
+  if (!data || typeof data !== 'object') return { choices: [], signed: 0, serverDriven: 0 }
 
   const progressive = Array.isArray(data.formats) ? (data.formats as RawFormat[]) : []
   const adaptive = Array.isArray(data.adaptiveFormats) ? (data.adaptiveFormats as RawFormat[]) : []
@@ -157,8 +169,9 @@ export function analyseFormats(data: RawStreamingData | null | undefined): {
     .map((format, index) => toChoice(format, index < progressive.length))
     .filter((choice): choice is MediaChoice => choice !== null)
 
-  const signed = all.filter(
-    (format) => str(format.url) === '' && (format.signatureCipher !== undefined || format.cipher !== undefined)
+  const withoutUrl = all.filter((format) => str(format.url) === '')
+  const signed = withoutUrl.filter(
+    (format) => format.signatureCipher !== undefined || format.cipher !== undefined
   ).length
 
   const byUrl = new Map<string, MediaChoice>()
@@ -166,6 +179,7 @@ export function analyseFormats(data: RawStreamingData | null | undefined): {
 
   return {
     signed,
+    serverDriven: withoutUrl.length - signed,
     choices: [...byUrl.values()].sort((a, b) => {
       if (a.complete !== b.complete) return a.complete ? -1 : 1
       if (a.hasVideo !== b.hasVideo) return a.hasVideo ? -1 : 1
@@ -175,25 +189,84 @@ export function analyseFormats(data: RawStreamingData | null | undefined): {
 }
 
 /**
- * What to say when a page listed formats but none can be offered.
+ * Said when every option on offer is one half of a pair.
+ *
+ * Exported because whether it is true depends on something this module cannot
+ * see: with a muxer present a picture-only stream downloads as one finished
+ * file, and the sentence then describes a limitation that no longer applies.
+ * The caller that knows drops it by identity rather than by matching a
+ * substring of prose that will be reworded one day.
+ */
+export const SEPARATE_STREAMS_NOTE =
+  'Only separate video and audio streams are available here. Slash does not combine them ' +
+  'into one file, so each downloads on its own.'
+
+/**
+ * What to say about the formats a page listed and this cannot offer.
  *
  * Null when there is nothing to explain.
+ *
+ * The signed count is reported **whether or not anything else was offerable**,
+ * and that is the fix for the complaint that started this: a page listing one
+ * 360p file and twenty signed higher resolutions used to show a single row and
+ * no explanation, which reads as "360p is all this video has". It is not — it
+ * is all this browser can reach without running the site's own signature code,
+ * and saying so is the difference between a known limit and a broken feature.
  */
-export function formatsNote(analysis: { choices: MediaChoice[]; signed: number }): string | null {
-  if (analysis.choices.length > 0) {
-    return analysis.choices.some((choice) => choice.complete)
-      ? null
-      : 'Only separate video and audio streams are available here. Slash does not combine them ' +
-          'into one file, so each downloads on its own.'
+export function formatsNote(analysis: {
+  choices: MediaChoice[]
+  signed: number
+  serverDriven?: number
+}): string | null {
+  const parts: string[] = []
+  const serverDriven = analysis.serverDriven ?? 0
+  const offerable = analysis.choices.length > 0
+  const plural = (count: number, one: string, many: string): string =>
+    `${count} ${count === 1 ? one : many}`
+
+  if (offerable && !analysis.choices.some((choice) => choice.complete)) {
+    parts.push(SEPARATE_STREAMS_NOTE)
   }
+
   if (analysis.signed > 0) {
-    return (
-      `This video's ${analysis.signed} formats all have signed addresses, which have to be built by ` +
-      'running the site’s own code. Slash does not do that, so there is nothing here it can ' +
-      'download honestly.'
+    parts.push(
+      offerable
+        ? `${plural(analysis.signed, 'other format', 'other formats')} on this page — usually the ` +
+            `higher resolutions — ${analysis.signed === 1 ? 'has a signed address' : 'have signed addresses'}, ` +
+            'which has to be built by running the site’s own code. Slash does not do that, so it ' +
+            `${analysis.signed === 1 ? 'is' : 'they are'} not listed here.`
+        : `${plural(analysis.signed, 'format on this page has', 'formats on this page have')} a ` +
+            'signed address, which has to be built by running the site’s own code. Slash does not ' +
+            'do that.'
     )
   }
-  return null
+
+  if (serverDriven > 0) {
+    // The honest version of what used to be an empty list. This is not a
+    // limitation of the extractor: the page genuinely does not contain an
+    // address for these, because the player asks the server for each piece as
+    // it plays. Saying "nothing found" invited somebody to go and check whether
+    // the feature was broken.
+    //
+    // Worded so it reads as one sentence beside the signed note above rather
+    // than colliding with it — the two are very often both true, and the first
+    // version of this produced "This video's 1 formats all have signed
+    // addresses… This page lists 26 formats, but no address at all", which
+    // contradicts itself twice in three lines.
+    parts.push(
+      `${plural(serverDriven, 'format carries', 'formats carry')} no address at all: the player ` +
+        'negotiates each piece with the server as it plays, so there is no file here for any ' +
+        'browser to fetch. Nothing is being withheld from Slash — the address does not exist ' +
+        'until the player asks for it.'
+    )
+  }
+
+  // Said once, at the end, rather than implied by each part separately.
+  if (!offerable && parts.length > 0) {
+    parts.push('There is nothing on this page Slash can download.')
+  }
+
+  return parts.length === 0 ? null : parts.join(' ')
 }
 
 /**

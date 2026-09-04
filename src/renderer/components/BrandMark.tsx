@@ -20,10 +20,19 @@
  */
 export function BrandMark({
   size = 64,
-  className = ''
+  className = '',
+  draw = false
 }: {
   size?: number
   className?: string
+  /**
+   * Draw the mark stroke by stroke rather than showing it whole.
+   *
+   * Free to do here because every shape below is a *stroke* — two arcs and a
+   * line — so `stroke-dashoffset` animates them directly. A filled logo would
+   * have needed a second asset.
+   */
+  draw?: boolean
 }): React.JSX.Element {
   return (
     <svg
@@ -32,7 +41,7 @@ export function BrandMark({
       viewBox="0 0 64 64"
       fill="none"
       aria-hidden="true"
-      className={className}
+      className={`${draw ? 'slash-mark-draw ' : ''}${className}`}
     >
       <defs>
         {/*

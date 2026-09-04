@@ -77,7 +77,7 @@ export function SidePanel(): React.JSX.Element | null {
   return (
     <aside
       style={{ width: SIDE_PANEL_WIDTH }}
-      className="glass-page flex h-full shrink-0 flex-col border-l border-[var(--glass-edge)]"
+      className="slash-panel-enter glass-page flex h-full shrink-0 flex-col border-l border-[var(--glass-edge)] shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.5)]"
       aria-label={title}
     >
       <header className="glass-divide-b flex items-center justify-between px-4 py-3">

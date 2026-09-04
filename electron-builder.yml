@@ -124,6 +124,39 @@ win:
   verifyUpdateCodeSignature: true
   artifactName: ${productName}-${version}-${arch}.${ext}
 
+# File types Slash offers to open.
+#
+# Being the default *browser* registers http and https, and nothing else — which
+# is why a PDF kept opening in Edge even after Slash was made the default. A PDF
+# is a file association, a separate registration from a protocol one, and
+# Windows will not infer it.
+#
+# These make Slash *choosable* for each type in Settings → Default apps and in
+# "Open with". As with the browser association itself, Windows does not let an
+# application select itself; the installer can only put it on the list.
+fileAssociations:
+  - ext: pdf
+    name: PDF Document
+    description: Portable Document Format
+    role: Viewer
+    icon: build/icon.ico
+  - ext: htm
+    name: HTML Document
+    role: Viewer
+    icon: build/icon.ico
+  - ext: html
+    name: HTML Document
+    role: Viewer
+    icon: build/icon.ico
+  - ext: svg
+    name: SVG Image
+    role: Viewer
+    icon: build/icon.ico
+  - ext: webp
+    name: WebP Image
+    role: Viewer
+    icon: build/icon.ico
+
 nsis:
   oneClick: false
   perMachine: false

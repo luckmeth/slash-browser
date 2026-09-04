@@ -5,14 +5,15 @@ import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { BrandMark } from '../../components/BrandMark'
 import { Icon } from '../../components/Icon'
-import { SlashSummary } from './SlashSummary'
 import { RecentlyClosed } from './RecentlyClosed'
 import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
 import { AdvertiseCard } from './AdvertiseCard'
+import { RewardsCard } from './RewardsCard'
 import { DefaultBrowserCard } from './DefaultBrowserCard'
 import { SponsoredBackground } from './SponsoredBackground'
 import { SponsoredBanner } from './SponsoredBanner'
+import { SponsoredRail } from './SponsoredRail'
 import { PublisherNotice } from './PublisherNotice'
 import { backgroundCss } from './backgrounds'
 
@@ -32,6 +33,8 @@ export function NewTabPage(): React.JSX.Element {
   const [topSites, setTopSites] = useState<HistoryEntry[]>([])
   const [customBackground, setCustomBackground] = useState<string | null>(null)
   const requestOmniboxFocus = useBrowserStore((s) => s.requestOmniboxFocus)
+  const activeTabId = useBrowserStore((s) => s.activeTab()?.id ?? null)
+  const [draft, setDraft] = useState('')
   const workspaces = useBrowserStore((s) => s.workspaces)
   const activeWorkspaceId = useBrowserStore((s) => s.activeWorkspaceId)
   const tabs = useBrowserStore((s) => s.tabs)
@@ -49,6 +52,7 @@ export function NewTabPage(): React.JSX.Element {
    */
   const [sponsoredBackground, setSponsoredBackground] = useState<SponsoredCreative | null>(null)
   const [sponsoredBanner, setSponsoredBanner] = useState<SponsoredCreative | null>(null)
+  const [sponsoredRails, setSponsoredRails] = useState<SponsoredCreative[]>([])
   const [backgroundDismissed, setBackgroundDismissed] = useState(false)
 
   useEffect(() => {
@@ -78,11 +82,21 @@ export function NewTabPage(): React.JSX.Element {
   }, [backgroundId, settings?.newTabCustomBackground])
 
   useEffect(() => {
-    void window.browser.invoke('sponsor:status', undefined).then((result) => {
-      if (!result.ok) return
-      setSponsoredBackground(result.value.background)
-      setSponsoredBanner(result.value.banner)
-    })
+    const read = (): void => {
+      void window.browser.invoke('sponsor:status', undefined).then((result) => {
+        if (!result.ok) return
+        setSponsoredBackground(result.value.background)
+        setSponsoredBanner(result.value.banner)
+        setSponsoredRails(result.value.rails)
+      })
+    }
+    read()
+    // Read once on mount was not enough, and the gap was invisible because it
+    // only showed on a placement somebody had paid for. This page is drawn by
+    // the chrome document, which mounts at launch — before any batch has been
+    // fetched — so a batch arriving seconds later never reached it and the
+    // banner and background stayed empty until the next restart.
+    return window.browser.on('sponsor:changed', read)
   }, [])
 
   const background = backgroundCss(backgroundId, customBackground)
@@ -124,6 +138,12 @@ export function NewTabPage(): React.JSX.Element {
         />
       )}
 
+      {/* The gutters. Positioned against the scrolling container rather than
+          inside the column, so they occupy the space the column does not use
+          instead of narrowing it. */}
+      {sponsoredRails[0] && <SponsoredRail creative={sponsoredRails[0]} side="left" />}
+      {sponsoredRails[1] && <SponsoredRail creative={sponsoredRails[1]} side="right" />}
+
       <div className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col items-center px-8 pt-[12vh] pb-16">
         <div className="animate-rise flex flex-col items-center">
           <BrandMark size={50} className="text-[var(--color-text-primary)]" />
@@ -146,29 +166,57 @@ export function NewTabPage(): React.JSX.Element {
           )}
         </div>
 
-        {/* Focuses the real omnibox rather than being a second input that would
-            then have to duplicate suggestions, history and URL resolution. */}
-        <button
-          type="button"
-          onClick={requestOmniboxFocus}
-          className="glass-raised animate-rise mt-8 flex w-full max-w-xl cursor-text items-center gap-3 rounded-2xl px-4 py-3 text-left transition hover:border-[var(--glass-edge-strong)]"
+        {/*
+          A real input, not a button that redirects focus.
+
+          It used to be a button whose only job was to focus the omnibox at the
+          top — reasonable in principle, since duplicating suggestions and URL
+          resolution would be worse, but in practice you click a search box and
+          nothing you type appears in it. Typing here now navigates, using the
+          same resolver the omnibox uses, so the two agree about what "wiki" or
+          "example.com/x" means. Suggestions stay in the omnibox: Ctrl+L is one
+          key away and is still shown on the right.
+        */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            const query = draft.trim()
+            if (query === '' || !activeTabId) return
+            setDraft('')
+            // The same channel the omnibox uses for typed text, so the two
+            // agree about what "wiki" or "example.com/x" resolves to.
+            void window.browser.invoke('nav:navigate', { tabId: activeTabId, input: query })
+          }}
+          className="glass-raised animate-rise mt-8 flex w-full max-w-xl items-center gap-3 rounded-2xl px-4 py-3 transition focus-within:border-[var(--glass-edge-strong)]"
         >
           <Icon name="search" size={16} className="shrink-0 text-[var(--color-text-muted)]" />
-          <span className="text-sm text-[var(--color-text-muted)]">Search or enter address</span>
-          <span className="ml-auto flex shrink-0 items-center gap-1">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Search or enter address"
+            aria-label="Search or enter address"
+            spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
+          />
+          <button
+            type="button"
+            onClick={requestOmniboxFocus}
+            title="Use the address bar, which also offers suggestions"
+            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1"
+          >
             <Key>Ctrl</Key>
             <Key>L</Key>
-          </span>
-        </button>
+          </button>
+        </form>
 
-        <SlashSummary />
-
-        <PublisherNotice />
-        {sponsoredBanner && <SponsoredBanner creative={sponsoredBanner} />}
-        <SponsoredTile />
-        <DefaultBrowserCard />
-        <AdvertiseCard />
-
+        {/*
+          The counters and the restore-point list used to sit here. Both were
+          removed on purpose: "15 blocked, 3 restore points" is a dashboard, and
+          a new tab is a place you pass through on the way somewhere — what
+          belongs under the search box is the two things that get you there,
+          which are the sites you actually visit and the tab you just closed.
+          The dashboard still exists behind the panels for anyone who wants it.
+        */}
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">
             <h2 className="mb-3 text-[11px] font-medium tracking-[0.12em] text-[var(--color-text-muted)] uppercase">
@@ -218,10 +266,25 @@ export function NewTabPage(): React.JSX.Element {
 
         <RecentlyClosed />
 
+        <PublisherNotice />
+        {sponsoredBanner && <SponsoredBanner creative={sponsoredBanner} />}
+        <SponsoredTile />
+        <DefaultBrowserCard />
+        <RewardsCard />
+        <AdvertiseCard />
+
+
+
         <div className="flex-1" />
 
+        {/*
+          Narrowed from "everything here stays on this device", which was true
+          until sponsored placements became always-on and the browser began
+          fetching advert batches without being asked. What is left is the part
+          that is still exactly true.
+        */}
         <p className="mt-10 text-[11px] text-[var(--color-text-muted)]">
-          Everything here stays on this device.
+          Your history and bookmarks stay on this device.
         </p>
       </div>
     </div>

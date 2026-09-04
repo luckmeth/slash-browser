@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { destinationLabel } from '@shared/ai/loopback'
 import type { AiHubStatus, AiProviderId, AiProviderInfo } from '@shared/types/aiHub'
 import { Icon } from '../../components/Icon'
 import { ComparePanel } from './ComparePanel'
@@ -14,9 +15,13 @@ import { ComparePanel } from './ComparePanel'
  *
  *  - **It never displays a key**, because no channel returns one. Keys go to the
  *    main process once and are encrypted with the OS keychain immediately.
- *  - **It marks which providers leave the machine.** A local model and a cloud
- *    API look identical in a list, and that difference is the whole reason
- *    someone would choose one.
+ *  - **It marks which providers leave the machine — by checking, not by label.**
+ *    A local model and a cloud API look identical in a list, and that difference
+ *    is the whole reason someone would choose one. The badge is driven by
+ *    `loopbackVerdict` over the stored endpoint, because the endpoint is a
+ *    free-text field: this panel used to render the catalogue's `local` flag as
+ *    "nothing is sent to a third party" beside a URL the user could point
+ *    anywhere.
  */
 export function AiHubPanel(): React.JSX.Element {
   const [status, setStatus] = useState<AiHubStatus | null>(null)
@@ -64,12 +69,34 @@ export function AiHubPanel(): React.JSX.Element {
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   {provider.name}
-                  {provider.local && (
+                  {/*
+                    Driven by the *verified* destination, never by
+                    `provider.local`. That flag names a provider id; the endpoint
+                    beside it is a free-text field, so a "local" provider pointed
+                    at a remote box used to carry this badge and its promise.
+                  */}
+                  {provider.destination === 'loopback' && (
                     <span
-                      title="Runs on this machine — nothing is sent to a third party"
+                      title={`Runs on this machine (${provider.destinationHost}) — nothing is sent to a third party`}
                       className="rounded border border-[var(--color-good)] px-1 py-0.5 text-[9px] text-[var(--color-good)]"
                     >
                       on-device
+                    </span>
+                  )}
+                  {provider.local && provider.destination === 'remote' && (
+                    <span
+                      title={`This endpoint is not on your machine. Requests go to ${provider.destinationHost}.`}
+                      className="rounded border border-[var(--color-bad)] px-1 py-0.5 text-[9px] text-[var(--color-bad)]"
+                    >
+                      off-device
+                    </span>
+                  )}
+                  {provider.local && provider.destination === 'unparseable' && (
+                    <span
+                      title="Slash cannot tell where this endpoint is, so it will not claim anything about it."
+                      className="rounded border border-[var(--color-border-subtle)] px-1 py-0.5 text-[9px] text-[var(--color-text-muted)]"
+                    >
+                      unknown endpoint
                     </span>
                   )}
                 </p>
@@ -92,6 +119,16 @@ export function AiHubPanel(): React.JSX.Element {
               <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
                 Model: <span className="text-[var(--color-text-primary)]">{provider.model}</span>
                 {provider.baseUrl ? ` · ${provider.baseUrl}` : ''}
+                {' · '}
+                <span
+                  className={
+                    provider.destination === 'loopback'
+                      ? 'text-[var(--color-good)]'
+                      : 'text-[var(--color-text-muted)]'
+                  }
+                >
+                  {destinationLabel(provider.destination, provider.destinationHost)}
+                </span>
               </p>
             )}
 

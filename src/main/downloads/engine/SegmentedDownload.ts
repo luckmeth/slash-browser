@@ -1,14 +1,24 @@
 import { createWriteStream, promises as fs } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { net } from 'electron'
+import type { net } from 'electron'
 import type { Segment, ServerCapabilities } from '@shared/types/downloadEngine'
 import { createLogger } from '../../logger'
-import { planSegments, readCapabilities, resumeIsSafe } from './planning'
+import { sendMediaRequest, type MediaRequestContext } from './requestContext'
+import { planSegments, readCapabilities, resumeIsSafe, segmentIsComplete } from './planning'
+import { classifyFailure } from './retryPolicy'
+import { planSplit } from './segmentSplitting'
 
 const log = createLogger('download')
 
 /** Redirect hops before we assume a loop. */
 const MAX_REDIRECTS = 10
+
+/** Attempts for one segment before its failure becomes the transfer's failure. */
+const SEGMENT_ATTEMPTS = 3
+const SEGMENT_RETRY_BASE_MS = 500
+const SEGMENT_RETRY_CAP_MS = 5_000
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 export interface SegmentedDownloadOptions {
   url: string
@@ -16,6 +26,13 @@ export interface SegmentedDownloadOptions {
   connections: number
   /** Bytes per second across the whole transfer, or 0 for unlimited. */
   bandwidthLimit?: number
+  /**
+   * The page this came from, so the request looks like the page's own.
+   *
+   * Optional because an ordinary file from an ordinary server needs none of it.
+   * Absent for media it means a 403 — see `requestContext.ts`.
+   */
+  context?: MediaRequestContext
   onProgress: (receivedBytes: number, segments: readonly Segment[]) => void
 }
 
@@ -41,6 +58,15 @@ export class SegmentedDownload {
   private paused = false
   private readonly requests = new Set<ReturnType<typeof net.request>>()
   private segments: Segment[] = []
+  /**
+   * Identity for the next segment work-stealing creates.
+   *
+   * Monotonic rather than `segments.length`, because a restored transfer starts
+   * with segments whose indices were assigned in an earlier session - reusing
+   * the length would hand two segments the same identity and make the progress
+   * rows collide.
+   */
+  private nextSegmentIndex = 0
   private capabilities: ServerCapabilities | null = null
   /** Resolved after redirects — the URL segments are actually fetched from. */
   private effectiveUrl: string
@@ -107,6 +133,7 @@ export class SegmentedDownload {
     }
 
     this.segments = planSegments(totalBytes, connections)
+    this.nextSegmentIndex = this.segments.length
     // Preallocate so the filesystem can lay the file out contiguously and so a
     // sparse write at a high offset cannot fail late with ENOSPC.
     const handle = await fs.open(this.options.destination, 'w')
@@ -116,7 +143,7 @@ export class SegmentedDownload {
       await handle.close()
     }
 
-    await Promise.all(this.segments.map((segment) => this.fetchSegment(segment)))
+    await this.drive(connections)
   }
 
   /**
@@ -134,11 +161,19 @@ export class SegmentedDownload {
     this.segments = segments.map((segment) => ({ ...segment }))
     this.aborted = false
     this.paused = false
-    await Promise.all(
-      this.segments
-        .filter((segment) => segment.receivedBytes <= segment.end - segment.start)
-        .map((segment) => this.fetchSegment(segment))
+
+    this.nextSegmentIndex = this.segments.reduce(
+      (highest, segment) => Math.max(highest, segment.index + 1),
+      0
     )
+
+    // Through the same worker pool as a fresh run, and that matters more than
+    // it looks: a transfer that was work-stolen before it was paused comes back
+    // with far more segments than the connection limit. Fetching every
+    // incomplete one - which is what this did - opened a connection per
+    // segment, so resuming a download configured for 8 connections could hit
+    // the server with thirty at once.
+    await this.drive(this.options.connections)
     return { resumed: true, reason: verdict.reason }
   }
 
@@ -169,8 +204,88 @@ export class SegmentedDownload {
     return hash.digest('hex')
   }
 
-  /** One segment, written at its own offset in the destination file. */
+  /**
+   * Runs the segment list over a fixed pool of connections.
+   *
+   * The pool is the point. Handing every segment its own connection - which is
+   * what `Promise.all` over the segment array did - makes the download exactly
+   * as fast as its slowest range: seven connections finish, go idle, and wait
+   * for the eighth. Here a connection that runs out of work steals half of
+   * whatever is furthest from done instead, so the transfer stays N-ways
+   * parallel to the very end and no single slow range can hold it up.
+   *
+   * This is what a download manager means by dynamic segmentation, and it is
+   * most of why one is faster than a browser's built-in download.
+   */
+  private async drive(connections: number): Promise<void> {
+    const queue = this.segments.filter((segment) => !segmentIsComplete(segment))
+    if (queue.length === 0) return
+
+    const workers = Math.max(1, Math.min(Math.floor(connections), queue.length))
+    await Promise.all(Array.from({ length: workers }, () => this.work(queue)))
+  }
+
+  /** One connection: take a segment, fetch it, then take or steal another. */
+  private async work(queue: Segment[]): Promise<void> {
+    for (;;) {
+      if (this.aborted || this.paused) return
+      const next = queue.shift() ?? this.steal()
+      // Nothing queued and nothing left large enough to divide: this connection
+      // is genuinely finished, and the pool drains one worker at a time.
+      if (!next) return
+      await this.fetchSegment(next)
+    }
+  }
+
+  /**
+   * Cuts the least-finished segment in half and claims the tail.
+   *
+   * Synchronous from the read of `segments` to the write of the donor's new
+   * `end`, and that is load-bearing rather than incidental: the donor is
+   * streaming, so its `receivedBytes` moves between ticks. Doing the arithmetic
+   * and shrinking the donor in the same tick means the donor cannot have
+   * written past the boundary by the time the boundary exists. The arithmetic
+   * itself is in `planSplit`, where it is tested against the coverage
+   * invariant - a gap or an overlap here produces a file that reaches 100%,
+   * opens, and is corrupt in the middle.
+   */
+  private steal(): Segment | null {
+    const plan = planSplit(this.segments, this.nextSegmentIndex)
+    if (!plan) return null
+
+    this.segments[plan.donorPosition]!.end = plan.donorNewEnd
+    this.nextSegmentIndex += 1
+    this.segments.push(plan.fresh)
+    return plan.fresh
+  }
+
+  /**
+   * One segment, written at its own offset in the destination file.
+   *
+   * Retries itself rather than failing the transfer. A single connection dying
+   * on a long download is ordinary - a CDN node drops it, a proxy times out -
+   * and letting that reject the whole run threw away every other connection's
+   * progress to start the file again from zero. Only failures `classifyFailure`
+   * calls retryable are retried; a 403 still fails at once, because trying it
+   * three more times is how an address gets rate-limited.
+   */
   private async fetchSegment(segment: Segment): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.fetchSegmentOnce(segment)
+        return
+      } catch (error) {
+        if (this.aborted || this.paused) return
+        const verdict = classifyFailure(error)
+        if (!verdict.retryable || attempt >= SEGMENT_ATTEMPTS) throw error
+        log.debug(`segment ${segment.index} failed (attempt ${attempt}): ${verdict.reason}`)
+        await delay(Math.min(SEGMENT_RETRY_BASE_MS * attempt, SEGMENT_RETRY_CAP_MS))
+        if (this.aborted || this.paused) return
+      }
+    }
+  }
+
+  private async fetchSegmentOnce(segment: Segment): Promise<void> {
     const from = segment.start + segment.receivedBytes
     if (from > segment.end) return
 
@@ -179,25 +294,52 @@ export class SegmentedDownload {
     })
 
     if (response.statusCode !== 206) {
+      const retryAfter = headerValue(response.headers, 'retry-after')
       this.discard(request)
-      throw new Error(
-        `Server ignored the range request for segment ${segment.index} (status ${response.statusCode})`
+      throw describeFailure(
+        `Server ignored the range request for segment ${segment.index} (status ${response.statusCode})`,
+        response.statusCode,
+        retryAfter
       )
     }
 
     const handle = await fs.open(this.options.destination, 'r+')
+    let surrendered = false
     try {
       let offset = from
       for await (const chunk of response as unknown as AsyncIterable<Buffer>) {
         if (this.aborted || this.paused) break
-        await handle.write(chunk, 0, chunk.length, offset)
-        offset += chunk.length
-        segment.receivedBytes += chunk.length
+
+        // `segment.end` moves. An idle connection may have taken this segment's
+        // tail while this response was in flight, so the range being streamed is
+        // now longer than the range still owned. Write only what is still ours
+        // and stop - the thief is already fetching the rest, and writing past
+        // the boundary would put the same bytes down twice from two connections
+        // at once.
+        const room = segment.end - offset + 1
+        if (room <= 0) {
+          surrendered = true
+          break
+        }
+        const usable = chunk.length > room ? chunk.subarray(0, room) : chunk
+
+        await handle.write(usable, 0, usable.length, offset)
+        offset += usable.length
+        segment.receivedBytes += usable.length
         this.options.onProgress(this.receivedBytes, this.segments)
-        await this.throttle(chunk.length)
+
+        if (usable.length < chunk.length) {
+          surrendered = true
+          break
+        }
+        await this.throttle(usable.length)
       }
     } finally {
       await handle.close()
+      // Stopping early leaves the server streaming a range nobody will read.
+      // Abort it rather than letting it drain - those are bytes off the same
+      // bandwidth the rest of the transfer is competing for.
+      if (surrendered || this.aborted || this.paused) this.discard(request)
     }
   }
 
@@ -225,48 +367,31 @@ export class SegmentedDownload {
   }
 
   /**
-   * A single request, following redirects manually.
+   * A single request, whose redirects are followed and recorded.
    *
-   * Manual because the destination after a redirect chain is something the
-   * download UI has to be able to show — an automatic follow would hide which
-   * host actually served the bytes, which is precisely what Redirect X-Ray and
-   * the Download Guardian exist to surface.
+   * The hop chain matters — the download UI has to be able to show which host
+   * actually served the bytes, which is what Redirect X-Ray and the Download
+   * Guardian exist to surface — so the mode stays manual and `sendMediaRequest`
+   * follows each hop by hand. This used to be a `statusCode >= 300` branch that
+   * could never run: with `redirect: 'manual'` a 3xx never arrives as a
+   * response, it arrives as a cancellation.
    */
   private async requestOnce(
     url: string,
-    headers: Record<string, string>,
-    hop = 0
+    headers: Record<string, string>
   ): Promise<{
     response: Electron.IncomingMessage
     request: ReturnType<typeof net.request>
     finalUrl: string
   }> {
-    if (hop > MAX_REDIRECTS) throw new Error('Too many redirects')
+    const sent = await sendMediaRequest(url, this.options.context, headers, MAX_REDIRECTS)
+    this.requests.add(sent.request)
 
-    const request = net.request({ url, method: 'GET', redirect: 'manual' })
-    for (const [name, value] of Object.entries(headers)) request.setHeader(name, value)
-    this.requests.add(request)
-
-    const response = await new Promise<Electron.IncomingMessage>((resolve, reject) => {
-      request.on('response', resolve)
-      request.on('error', reject)
-      request.on('abort', () => reject(new Error('aborted')))
-      request.end()
-    })
-
-    if (response.statusCode >= 300 && response.statusCode < 400) {
-      const location = headerValue(response.headers, 'location')
-      this.discard(request)
-      if (!location) throw new Error(`Redirect with no location (status ${response.statusCode})`)
-      return this.requestOnce(new URL(location, url).toString(), headers, hop + 1)
+    if (sent.response.statusCode >= 400) {
+      this.discard(sent.request)
+      throw new Error(`Server returned ${sent.response.statusCode}`)
     }
-
-    if (response.statusCode >= 400) {
-      this.discard(request)
-      throw new Error(`Server returned ${response.statusCode}`)
-    }
-
-    return { response, request, finalUrl: url }
+    return sent
   }
 
   /** Drops a response we are not going to read. */
@@ -304,6 +429,18 @@ export class SegmentedDownload {
     }
     this.requests.clear()
   }
+}
+
+/** An error the retry policy can read: what the status was, and any Retry-After. */
+export function describeFailure(
+  message: string,
+  status: number,
+  retryAfter: string | null
+): Error & { status: number; retryAfter: string | null } {
+  const failure = new Error(message) as Error & { status: number; retryAfter: string | null }
+  failure.status = status
+  failure.retryAfter = retryAfter
+  return failure
 }
 
 function headerValue(

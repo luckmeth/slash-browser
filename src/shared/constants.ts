@@ -8,8 +8,18 @@ export const TITLE_BAR_HEIGHT = 40
 /** Navigation toolbar row, directly below the title bar. */
 export const TOOLBAR_HEIGHT = 44
 
+/**
+ * The workspace switcher row, at the very top.
+ *
+ * Horizontal rather than a rail down the left edge. A rail costs 56px of page
+ * width on every page for a control used a few times a day, and it is the one
+ * piece of chrome that cannot be dismissed. As a short row it costs height once
+ * and gives the page its full width back.
+ */
+export const WORKSPACE_BAR_HEIGHT = 36
+
 /** Total chrome above the page. */
-export const CHROME_HEIGHT = TITLE_BAR_HEIGHT + TOOLBAR_HEIGHT
+export const CHROME_HEIGHT = WORKSPACE_BAR_HEIGHT + TITLE_BAR_HEIGHT + TOOLBAR_HEIGHT
 
 /**
  * Space reserved at the right of the title bar for the native window controls.
@@ -30,22 +40,12 @@ export const PAGE_INSET = 10
 export const PAGE_RADIUS = 12
 
 /**
- * Width of the workspace switcher rail on the left edge.
- *
- * Shared because the renderer draws the rail and the main process must inset the
- * native page view by exactly the same amount — a mismatch would either clip the
- * page or leave a dead strip beside it.
- */
-export const WORKSPACE_RAIL_WIDTH = 56
-
-/**
  * Width of the vertical tab column, when the strip is on the left.
  *
  * Wide enough for a readable title, which is the entire reason to move the
  * strip: horizontal tabs become unreadable somewhere past fifteen, and a
  * vertical list simply keeps scrolling. Main insets the native page view by
- * this plus the workspace rail — a mismatch would clip the page or leave a dead
- * strip beside it.
+ * exactly this — a mismatch would clip the page or leave a dead strip beside it.
  */
 export const VERTICAL_TAB_STRIP_WIDTH = 208
 

@@ -21,9 +21,9 @@ import { Icon, type IconName } from '../../components/Icon'
  * product to smuggle in a default-on opt-in, so it deliberately has no power to.
  */
 
-type Step = 'welcome' | 'import' | 'search' | 'sleep' | 'default'
+type Step = 'welcome' | 'import' | 'search' | 'sleep' | 'downloads' | 'default'
 
-const ORDER: Step[] = ['welcome', 'import', 'search', 'sleep', 'default']
+const ORDER: Step[] = ['welcome', 'import', 'search', 'sleep', 'downloads', 'default']
 
 export function Onboarding(): React.JSX.Element {
   const [step, setStep] = useState<Step>('welcome')
@@ -64,6 +64,7 @@ export function Onboarding(): React.JSX.Element {
             }}
           />
         )}
+        {step === 'downloads' && <DownloadsStep />}
         {step === 'sleep' && <SleepStep />}
         {step === 'default' && <DefaultBrowserStep />}
 
@@ -109,10 +110,23 @@ function Welcome(): React.JSX.Element {
         A browser that organises tabs, sleeps the ones you are not using, and keeps what it learns
         about your browsing on this machine.
       </p>
-      {/* The claim this product actually rests on, said first. */}
+      {/*
+        The claim this product rests on, said first — and it had to be narrowed
+        when sponsored placements became always-on. It used to read "nothing
+        leaves this device unless you turn it on", which stopped being true the
+        moment the browser fetched an advert batch on launch without being
+        asked. Overstating this is worse than the revenue is worth: it is the
+        one sentence a reader would quote back if they caught it.
+      */}
       <p className="mt-4 rounded-xl border border-[var(--glass-edge)] bg-white/5 p-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
-        Nothing leaves this device unless you turn it on. Page indexing, semantic search and the AI
-        features all start switched off, and this walkthrough will not switch any of them on.
+        Your history, bookmarks and passwords stay on this machine. Page indexing, semantic search
+        and the AI features all start switched off, and this walkthrough will not switch any of
+        them on.
+      </p>
+      <p className="mt-2 rounded-xl border border-[var(--glass-edge)] bg-white/5 p-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
+        Slash is funded by sponsored placements, so it does fetch a batch of adverts periodically.
+        Nothing about you is part of that request — no history, no page address, no identifier — and
+        what goes back is a daily count of how often each advert was shown.
       </p>
     </div>
   )
@@ -362,5 +376,82 @@ function StepIcon({ name }: { name: IconName }): React.JSX.Element {
     <span className="flex size-10 items-center justify-center rounded-xl bg-[var(--glass-high)]">
       <Icon name={name} size={18} className="text-[var(--color-accent)]" />
     </span>
+  )
+}
+
+/**
+ * Offers the optional downloader, once, where it will actually be seen.
+ *
+ * Buried in Settings it is a feature nobody finds. Here it is a choice made
+ * knowingly at the point of install, which is also the honest place for it:
+ * this installs a separate program, and that should be a decision rather than
+ * something the browser did on its own.
+ */
+function DownloadsStep(): React.JSX.Element {
+  const [status, setStatus] = useState<{ installed: boolean; version: string | null } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  useEffect(() => {
+    void window.browser.invoke('external:status', undefined).then((result) => {
+      if (result.ok) setStatus({ installed: result.value.installed, version: result.value.version })
+    })
+  }, [])
+
+  const install = (): void => {
+    setBusy(true)
+    setNote('Fetching the current release…')
+    void window.browser.invoke('external:install', undefined).then((result) => {
+      setBusy(false)
+      if (result.ok) {
+        setNote(result.value.note)
+        void window.browser.invoke('settings:update', { useExternalDownloader: true })
+        setStatus({ installed: true, version: result.value.version })
+      } else {
+        // The failed branch is an `Err`, which carries no value — reading one
+        // off it was a typecheck error, and would have been an empty message.
+        setNote('yt-dlp could not be installed. You can try again in Settings.')
+      }
+    })
+  }
+
+  return (
+    <div>
+      <h2 className="text-lg font-semibold">Downloading videos</h2>
+      <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-muted)]">
+        Slash downloads video from most sites on its own, with a proper download manager — resumable,
+        multi-connection, and a picker for the quality.
+      </p>
+      <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-muted)]">
+        A few sites, YouTube among them, serve video in a form no browser can turn into a file by
+        itself. For those Slash can use <strong>yt-dlp</strong>, a well-known open-source tool. It is
+        optional, it is not part of Slash, and you can add or remove it later in Settings.
+      </p>
+
+      {status?.installed === true ? (
+        <p className="mt-4 text-sm text-[var(--color-accent)]">
+          yt-dlp {status.version ?? ''} is ready.
+        </p>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={install}
+          className="mt-4 cursor-pointer rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-black transition disabled:opacity-50"
+        >
+          {busy ? 'Installing…' : 'Install yt-dlp (about 18 MB)'}
+        </button>
+      )}
+
+      {note !== null && (
+        <p className="mt-3 text-xs text-[var(--color-text-muted)]" role="status">
+          {note}
+        </p>
+      )}
+      <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
+        Downloaded from the project's official releases and checked against its published checksum.
+        Skip this and everything else still works.
+      </p>
+    </div>
   )
 }

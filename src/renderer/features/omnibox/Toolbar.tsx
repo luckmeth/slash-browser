@@ -6,6 +6,7 @@ import {
 } from '@shared/types/omnibox'
 import { isInternalUrl, NEW_TAB_URL } from '@shared/types/tab'
 import { formatUrlForDisplay, isSecureUrl } from '@shared/url'
+import type { EngineDownload } from '@shared/types/downloadEngine'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { CleanButton } from '../cleanup/CleanButton'
@@ -19,12 +20,24 @@ export function Toolbar(): React.JSX.Element {
   const panel = useBrowserStore((s) => s.panel)
   const togglePanel = useBrowserStore((s) => s.togglePanel)
   const detectedMedia = useBrowserStore((s) => s.detectedMedia)
+  /**
+   * How many engine transfers are running, and how far along they are.
+   *
+   * The Downloads Center is a side panel, so until now a running download was
+   * invisible unless you went looking for it — which is backwards for the one
+   * thing this browser does that others do not. The button now carries it.
+   */
+  const [transfers, setTransfers] = useState<{ active: number; fraction: number }>({
+    active: 0,
+    fraction: 0
+  })
   const [assistantNote, setAssistantNote] = useState<string | null>(null)
   // The `?? []` MUST stay outside the selector. Zustand compares what a
   // selector returns with Object.is, so a selector that builds a fresh array
   // every call never compares equal — it re-renders, re-selects, and loops
   // forever. That is React error #185, and it hung the whole chrome renderer.
   const hiddenButtons = useBrowserStore((s) => s.settings?.hiddenToolbarButtons)
+  const autoHideChrome = useBrowserStore((s) => s.settings?.autoHideChrome ?? false)
   /** A deny-list, so a button added later shows up rather than being invisible. */
   const shown = (id: string): boolean => !(hiddenButtons ?? []).includes(id)
   const focusToken = useBrowserStore((s) => s.focusOmniboxToken)
@@ -42,6 +55,26 @@ export function Toolbar(): React.JSX.Element {
 
   // While the user is typing, `draft` owns the field. Clearing it on tab switch
   // or navigation is what stops a half-typed address leaking into another tab.
+  useEffect(() => {
+    const summarise = (items: EngineDownload[]): void => {
+      const live = items.filter(
+        (item) => item.state === 'downloading' || item.state === 'probing'
+      )
+      const total = live.reduce((sum, item) => sum + (item.totalBytes ?? 0), 0)
+      const done = live.reduce((sum, item) => sum + item.receivedBytes, 0)
+      // Only a fraction we can stand behind. A transfer whose length the server
+      // never reported has no percentage, and inventing one that creeps toward
+      // 90% and stops is worse than showing none — the same reasoning as the
+      // indeterminate page-load sweep.
+      setTransfers({ active: live.length, fraction: total > 0 ? done / total : 0 })
+    }
+
+    void window.browser.invoke('downloadEngine:list', undefined).then((result) => {
+      if (result.ok) summarise(result.value)
+    })
+    return window.browser.on('downloadEngine:changed', summarise)
+  }, [])
+
   useEffect(() => {
     setDraft(null)
     setSuggestions([])
@@ -166,7 +199,24 @@ export function Toolbar(): React.JSX.Element {
   const disabled = !tabId
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5">
+    // `relative` carries the loading beam's ::after. The class is present only
+    // while the active tab is loading and removed the moment it finishes, so
+    // this is never an animation running against an idle browser.
+    <div
+      className={`relative flex items-center gap-1 px-2 py-1.5${
+        activeTab?.isLoading === true ? ' slash-beam' : ''
+      }`}
+    >
+      {/*
+        Three columns, and the outer two are `flex-1 basis-0` so they are always
+        exactly the same width. That is what makes the address field land in the
+        centre of the *window* rather than the centre of whatever space happened
+        to be left over — with the navigation buttons on one side and ten
+        controls on the other, "centre the remaining space" put it visibly to
+        the left, which is the thing that looks wrong without being obviously
+        wrong.
+      */}
+      <div className="flex flex-1 basis-0 items-center gap-1">
       <NavButton
         icon="back"
         label="Back (Alt+Left)"
@@ -190,7 +240,21 @@ export function Toolbar(): React.JSX.Element {
         }}
       />
 
-      <div ref={fieldRef} className="relative mx-1 flex flex-1 items-center">
+      </div>
+
+      {/*
+        Centred and capped, rather than stretched from one edge to the other.
+        A 2,000px address field is not easier to read than a 700px one — the
+        text sits at the far left of an ocean of empty space, and the eye has to
+        travel the whole width to reach the controls on the right. Safari and
+        Chrome both cap it for the same reason.
+
+        `min-w-0` on the flex parent is load-bearing: without it the field
+        refuses to shrink below its content width on a narrow window and pushes
+        the toolbar buttons off the edge.
+      */}
+      <div className="flex w-[44rem] min-w-0 shrink justify-center px-1">
+        <div ref={fieldRef} className="relative flex w-full items-center">
         <span className="pointer-events-none absolute left-3 text-[var(--color-text-muted)]">
           {isNewTab ? (
             <Icon name="search" size={14} />
@@ -309,7 +373,9 @@ export function Toolbar(): React.JSX.Element {
           </button>
         </div>
       </div>
+      </div>
 
+      <div className="flex flex-1 basis-0 items-center justify-end gap-0.5">
       <SleepIndicator />
 
       <ShieldButton />
@@ -326,6 +392,21 @@ export function Toolbar(): React.JSX.Element {
           label="Open this page in your default browser"
           disabled={disabled || isNewTab}
           onClick={() => tabId && void window.browser.invoke('shell:openTabExternally', { tabId })}
+        />
+      )}
+
+      {shown('autohide') && (
+        <NavButton
+          icon="expand"
+          label={
+            autoHideChrome
+              ? 'Keep the toolbar on screen'
+              : 'Hide the toolbar until the pointer reaches the top'
+          }
+          active={autoHideChrome}
+          onClick={() =>
+            void window.browser.invoke('settings:update', { autoHideChrome: !autoHideChrome })
+          }
         />
       )}
 
@@ -381,12 +462,34 @@ export function Toolbar(): React.JSX.Element {
         </span>
       )}
       {shown('downloads') && (
-        <NavButton
-          icon="download"
-          label="Downloads (Ctrl+J)"
-          active={panel === 'downloads'}
-          onClick={() => togglePanel('downloads')}
-        />
+        <span className="relative flex items-center">
+          <NavButton
+            icon="download"
+            label={
+              transfers.active > 0
+                ? `Downloads — ${transfers.active} in progress (Ctrl+J)`
+                : 'Downloads (Ctrl+J)'
+            }
+            active={panel === 'downloads'}
+            onClick={() => togglePanel('downloads')}
+          />
+          {transfers.active > 0 && (
+            <>
+              {/* A bar under the icon rather than a spinner: it carries the
+                  proportion as well as the fact, and a spinner beside nine other
+                  icons is just motion. */}
+              <span className="pointer-events-none absolute inset-x-1 bottom-0.5 h-0.5 overflow-hidden rounded-full bg-white/15">
+                <span
+                  className="block h-full rounded-full bg-[var(--color-accent)] transition-[width]"
+                  style={{ width: `${Math.round(transfers.fraction * 100)}%` }}
+                />
+              </span>
+              <span className="sr-only" role="status" aria-live="polite">
+                {transfers.active} download{transfers.active === 1 ? '' : 's'} in progress
+              </span>
+            </>
+          )}
+        </span>
       )}
       {/* Only while this tab actually has something downloadable. A permanent
           button that is usually useless teaches people to ignore it, and this
@@ -425,6 +528,7 @@ export function Toolbar(): React.JSX.Element {
         label="Main menu"
         onClick={() => void window.browser.invoke('menu:showAppMenu', undefined)}
       />
+      </div>
     </div>
   )
 }

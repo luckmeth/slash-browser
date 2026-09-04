@@ -3,7 +3,7 @@ import {
   openTargetFromArgv,
   shouldOfferDefault,
   toFileUrl,
-  PROMPT_LIMITS,
+
   parseUserChoiceProgId,
   isSlashProgId,
   type PromptState
@@ -33,24 +33,58 @@ describe('shouldOfferDefault', () => {
     expect(shouldOfferDefault(state({ suppressed: true }), NOW)).toBe(false)
   })
 
-  it('asks a second time, a fortnight later', () => {
-    const asked = state({ asks: 1, lastAskedAt: NOW - PROMPT_LIMITS.minGapMs - 1 })
+  /*
+   * These three used to assert the opposite, and the change is deliberate.
+   *
+   * The old rule offered twice, a fortnight apart, then never again — sound
+   * reasoning for a prompt that nags. But Windows has not let an application
+   * make itself the default since Windows 8, so this card is the *only* route
+   * there is. Capping it meant somebody who dismissed it twice could never find
+   * it again and the browser silently stayed non-default for ever, which is the
+   * state the user was actually in when they reported it.
+   *
+   * So it now offers on every launch until Slash genuinely is the default. The
+   * two things that stop it are unchanged and are both definitive: it *is* the
+   * default, or the user pressed "Don't ask again".
+   */
+  it('keeps offering the next day, because nothing else can make it default', () => {
+    const asked = state({ asks: 1, lastAskedAt: NOW - 24 * 60 * 60 * 1000 })
     expect(shouldOfferDefault(asked, NOW)).toBe(true)
   })
 
-  it('does not ask again the next day', () => {
-    const asked = state({ asks: 1, lastAskedAt: NOW - 24 * 60 * 60 * 1000 })
-    expect(shouldOfferDefault(asked, NOW)).toBe(false)
+  it('keeps offering however many times it has been shown', () => {
+    const asked = state({ asks: 99, lastAskedAt: NOW - 1000 })
+    expect(shouldOfferDefault(asked, NOW)).toBe(true)
   })
 
-  it('stops for good after the second ask', () => {
-    // A third is nagging, and nagging never reads as confidence in the product.
-    const asked = state({ asks: PROMPT_LIMITS.maxAsks, lastAskedAt: NOW - 10 * PROMPT_LIMITS.minGapMs })
+  it('stops the moment Slash actually is the default', () => {
+    // The only outcome that should end this permanently, and it ends it without
+    // the user having to dismiss anything.
+    const asked = state({ isDefault: true, asks: 99, lastAskedAt: NOW - 1000 })
     expect(shouldOfferDefault(asked, NOW)).toBe(false)
   })
 })
 
 describe('openTargetFromArgv', () => {
+  it.each(['pdf', 'svg', 'webp', 'html', 'htm'])('opens a .%s Windows handed us', (ext) => {
+    // These must stay in step with `fileAssociations` in electron-builder.yml.
+    // Claiming a type in the installer and then ignoring the path opens Slash
+    // to a blank tab, which is worse than never claiming it — and it is what
+    // happened when PDFs were associated while this only accepted .html.
+    const opened = openTargetFromArgv(['C:/Slash/Slash.exe', `C:/docs/report.${ext}`])
+    expect(opened).toBe(`file:///C:/docs/report.${ext}`)
+  })
+
+  it('does not treat a drive letter as a URL scheme', () => {
+    expect(openTargetFromArgv(['C:/Slash/Slash.exe', 'C:/docs/a.pdf'])).toContain('file:///C:/')
+  })
+
+  it('ignores a file type Slash cannot render', () => {
+    // An association for something that would land on a download prompt is
+    // worse than no association at all.
+    expect(openTargetFromArgv(['C:/Slash/Slash.exe', 'C:/docs/archive.zip'])).toBeNull()
+  })
+
   it('opens a URL Windows handed us', () => {
     expect(openTargetFromArgv(['C:/Slash/Slash.exe', 'https://example.com/a?b=c'])).toBe(
       'https://example.com/a?b=c'

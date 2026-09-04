@@ -28,64 +28,47 @@ export function SponsorSection(): React.JSX.Element {
 
   return (
     <div>
-      <label className="flex cursor-default items-start justify-between gap-2 rounded-lg border border-[var(--glass-edge)] px-2.5 py-2">
-        <span className="min-w-0">
-          <span className="block text-xs">Show a sponsored tile</span>
-          <span className="mt-0.5 block text-[10px] leading-snug text-[var(--color-text-muted)]">
-            One clearly-labelled tile on the start page, which helps pay for Slash.
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          className="mt-0.5 shrink-0"
-          checked={enabled}
-          onChange={(event) =>
-            void window.browser.invoke('settings:update', {
-              sponsoredTilesEnabled: event.target.checked
-            })
-          }
-        />
-      </label>
+      {/*
+        No switch. Sponsored placements are what pays for Slash, and they are
+        not optional — that is a deliberate product decision, and the copy below
+        states it rather than leaving somebody to find out.
 
-      <label className="mt-1.5 flex cursor-default items-start justify-between gap-2 rounded-lg border border-[var(--glass-edge)] px-2.5 py-2">
-        <span className="min-w-0">
-          <span className="block text-xs">Allow a notice while browsing</span>
-          <span className="mt-0.5 block text-[10px] leading-snug text-[var(--color-text-muted)]">
-            At most three a day, thirty minutes apart, never in a private window — and never inside
-            a web page. It appears in Slash&rsquo;s own frame, the way a download notification does.
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          className="mt-0.5 shrink-0"
-          checked={settings?.sponsoredNoticesEnabled ?? true}
-          disabled={!enabled}
-          onChange={(event) =>
-            void window.browser.invoke('settings:update', {
-              sponsoredNoticesEnabled: event.target.checked
-            })
-          }
-        />
-      </label>
+        The *settings* still exist (`sponsoredTilesEnabled` gates the batch
+        fetch, `sponsoredNoticesEnabled` the browsing notice). Only the reader's
+        controls are gone: whoever publishes the browser still needs to be able
+        to turn the network off, and both probes drive those keys.
+      */}
+      <div className="rounded-xl border border-[var(--color-accent)]/25 bg-[var(--color-accent)]/8 p-3.5">
+        <p className="text-[13px] font-medium text-[var(--color-text-primary)]">
+          Slash is paid for by sponsored placements
+        </p>
+        <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+          Clearly-labelled adverts on the start page — a tile, a banner, cards in the side margins,
+          or the whole backdrop — and an occasional notice while you browse. Every one is marked
+          Sponsored and names who paid for it. They are how the browser is funded, so they cannot be
+          switched off.
+        </p>
+      </div>
 
       {/* The honest paragraph. It says what the network actually does, both the
           part that is reassuring and the part that is a cost. */}
       <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-        With this on, Slash downloads a <strong>batch</strong> of adverts every few hours and picks
+        Slash downloads a <strong>batch</strong> of adverts every few hours and picks
         one on your machine. That download is the only request: showing a tile sends nothing, the
         images are stored locally rather than loaded from an advertiser, and no browsing data, page
         address or identifier is ever included. What goes back is a count — how many times each
         advert was shown or clicked, per day, and nothing finer.
       </p>
       <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-        With it off, no request is made at all.
+        Nothing about you is part of that download, so the request is identical from every copy of
+        Slash. There is no profile behind it because there is nothing to build one from.
       </p>
 
       {status && (
         <div className="mt-2.5 flex flex-col gap-1 text-[11px] text-[var(--color-text-muted)]">
           {!status.configured && (
             <span>
-              No sponsor source is set up, so nothing will be shown even when this is switched on.
+              No sponsor source is set up, so nothing is shown and no request is made.
             </span>
           )}
           {status.configured && (

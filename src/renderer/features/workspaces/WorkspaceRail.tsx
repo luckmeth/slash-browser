@@ -1,14 +1,21 @@
 import { useState } from 'react'
-import { WORKSPACE_RAIL_WIDTH } from '@shared/constants'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { COLOR_CLASSES } from './workspaceColors'
 
 /**
- * The workspace switcher rail down the left edge.
+ * The workspace switcher, as a row across the top of the chrome.
  *
- * It lives inside the chrome document, which spans the whole window, and the
- * page view is inset to its right via `ViewLayoutManager.setSidebarWidth`.
+ * It used to be a rail down the left edge, and the change is not cosmetic: a
+ * rail costs 56px of **page width on every page**, permanently, for a control
+ * used a handful of times a day — and unlike a side panel it could not be
+ * dismissed. As a row it costs height once, and `setSidebarWidth` now insets the
+ * page by nothing at all unless the tab strip is vertical.
+ *
+ * The switching, drag-to-move and isolation-warning behaviour is unchanged.
+ * This is deliberately the same component rather than a second one: moving a tab
+ * between workspaces can sign you out of it, and that confirmation is not
+ * something to have two copies of.
  */
 export function WorkspaceRail(): React.JSX.Element {
   const workspaces = useBrowserStore((s) => s.workspaces)
@@ -19,9 +26,8 @@ export function WorkspaceRail(): React.JSX.Element {
 
   return (
     <nav
-      style={{ width: WORKSPACE_RAIL_WIDTH }}
       aria-label="Workspaces"
-      className="glass glass-divide-r flex shrink-0 flex-col items-center gap-1 py-2"
+      className="app-no-drag flex h-full items-center gap-1 px-2"
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeWorkspaceId
@@ -54,21 +60,28 @@ export function WorkspaceRail(): React.JSX.Element {
               if (tabId) void moveTab(tabId, workspace.id)
             }}
             className={[
-              'relative flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-lg transition',
-              isActive ? `${colors.tint} ring-2 ${colors.ring}` : 'hover:bg-white/5',
+              'relative flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-sm transition',
+              isActive ? `${colors.tint} ring-1 ${colors.ring}` : 'hover:bg-white/5',
               dragOverId === workspace.id ? 'ring-2 ring-[var(--color-accent)]' : ''
             ].join(' ')}
           >
-            <Icon name={workspace.icon} size={17} />
+            <Icon name={workspace.icon} size={15} />
+            {/*
+              The name, which the rail never had room for. A row does, and a
+              workspace switcher whose entries are unlabelled icons is one you
+              have to learn by position — the reason the rail needed a tooltip
+              to be usable at all.
+            */}
+            <span className="max-w-[10rem] truncate text-xs">{workspace.name}</span>
 
             {/* An isolated workspace is marked, because "my logins are separate
                 here" is the one property a user must be able to see at a glance. */}
             {workspace.isolated && (
               <span
-                className="absolute -right-0.5 -bottom-0.5 rounded-full bg-[var(--color-surface)] p-[1px] text-[var(--color-text-muted)]"
+                className="text-[var(--color-text-muted)]"
                 title="Isolated — separate cookies and storage"
               >
-                <Icon name="lock" size={9} />
+                <Icon name="lock" size={10} />
               </span>
             )}
 
@@ -84,21 +97,19 @@ export function WorkspaceRail(): React.JSX.Element {
         title="New workspace"
         aria-label="New workspace"
         onClick={() => setWorkspaceEditor('new')}
-        className="mt-1 flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-muted)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
+        className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[var(--color-text-muted)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
       >
-        <Icon name="plus" />
+        <Icon name="plus" size={14} />
       </button>
-
-      <div className="flex-1" />
 
       <button
         type="button"
         title="Manage workspaces"
         aria-label="Manage workspaces"
         onClick={() => setWorkspaceEditor(activeWorkspaceId)}
-        className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-[var(--color-text-muted)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
+        className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[var(--color-text-muted)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
       >
-        <Icon name="settings" size={15} />
+        <Icon name="settings" size={14} />
       </button>
     </nav>
   )

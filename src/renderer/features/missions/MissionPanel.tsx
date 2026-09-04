@@ -199,13 +199,31 @@ export function MissionPanel(): React.JSX.Element {
         </section>
       </div>
 
-      <div className="border-t border-[var(--color-border-subtle)] p-3">
+      <div className="space-y-1.5 border-t border-[var(--color-border-subtle)] p-3">
         <button
           type="button"
           onClick={() => call('mission:complete')}
           className="w-full cursor-default rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           Finish this mission
+        </button>
+        {/*
+          Finishing and discarding are different things and only one of them was
+          reachable — so abandoning a mission meant marking it complete, which
+          put it in the record as work that was done.
+        */}
+        <button
+          type="button"
+          onClick={() => {
+            void window.browser
+              .invoke('mission:discard', { id: mission.id })
+              .then((result) => {
+                if (result.ok) setStatus(result.value)
+              })
+          }}
+          className="w-full cursor-default rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-xs text-[var(--color-text-muted)] transition hover:border-[var(--color-bad)] hover:text-[var(--color-bad)]"
+        >
+          Discard it — keeps the pages, records no result
         </button>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { net } from 'electron'
-import { SponsorBatchSchema, type SponsorStatus, type SponsoredTile } from '@shared/types/sponsor'
+import { SponsorBatchSchema, type SponsorStatus, type SponsoredTile, PLACEMENTS } from '@shared/types/sponsor'
 import { acceptCreative, reportUrlFor, selectLive } from './sponsorRules'
 import type { Database } from '../db/Database'
 import type { SettingsStore } from '../settings/SettingsStore'
@@ -52,7 +52,15 @@ export class SponsorService {
 
   constructor(
     private readonly db: Database,
-    private readonly settings: SettingsStore
+    private readonly settings: SettingsStore,
+    /**
+     * Announces that the cached batch changed.
+     *
+     * Optional so every probe and test can build this without a window to
+     * broadcast to. Without it the start page never learns a batch arrived —
+     * see the note on the `sponsor:changed` contract.
+     */
+    private readonly onChanged: () => void = () => {}
   ) {}
 
   private get endpoint(): string {
@@ -85,6 +93,10 @@ export class SponsorService {
       background: this.active ? this.livePlacement(cached, 'background') : null,
       banner: this.active ? this.livePlacement(cached, 'banner') : null,
       notice: this.active ? this.livePlacement(cached, 'notice') : null,
+      // Two slots, filled in cache order. `livePlacement` answers with one, so
+      // the pair is taken directly — a rail campaign is bought as "a gutter",
+      // not as "the left gutter", and which side it lands on is not sold.
+      rails: this.active ? this.liveRails(cached) : [],
       cached: cached.length,
       pendingReports: this.pendingCount()
     }
@@ -121,6 +133,19 @@ export class SponsorService {
    * No rotation: every placement except the tile is sold with a small
    * concurrency cap, so the first one due is the whole of the decision.
    */
+  /** Up to two live rail creatives, in cache order. */
+  private liveRails(cached: SponsoredTile[]): SponsoredTile[] {
+    const now = Date.now()
+    return cached
+      .filter((tile) => tile.placement === 'rail')
+      .filter(
+        (tile) =>
+          (tile.startsAt === null || tile.startsAt <= now) &&
+          (tile.endsAt === null || tile.endsAt > now)
+      )
+      .slice(0, 2)
+  }
+
   private livePlacement(
     cached: SponsoredTile[],
     placement: SponsoredTile['placement']
@@ -292,6 +317,10 @@ export class SponsorService {
       })
       write()
       log.info(`cached ${accepted.length} sponsored tile(s)`)
+      // Tell the start page. It reads status once when it mounts, and it mounts
+      // at launch — long before any batch has been fetched — so without this
+      // the banner and the background stayed invisible until the next restart.
+      this.onChanged()
     } catch (error) {
       log.warn('could not refresh sponsored tiles', error)
     }
@@ -343,6 +372,7 @@ export class SponsorService {
     this.db.connection.prepare('DELETE FROM sponsored_tiles').run()
     this.db.connection.prepare('DELETE FROM sponsored_counts').run()
     this.lastFetch = 0
+    this.onChanged()
   }
 }
 
@@ -353,6 +383,18 @@ export class SponsorService {
  * this one must degrade to the smallest, least intrusive shape rather than
  * to whatever the enum happens to list first.
  */
+/**
+ * A stored placement, checked against the one list of them.
+ *
+ * This was the **third** copy of that list — after the two schemas — and it
+ * failed the same way they did: a value it had not been taught about silently
+ * became `'tile'`, so rail campaigns were written correctly, read back as
+ * tiles, and appeared in the wrong placement while their own slot stayed
+ * empty. Nothing threw and nothing logged. Driving it from `PLACEMENTS` means
+ * adding a placement is one edit, in one file.
+ */
 function asPlacement(value: string): SponsoredTile['placement'] {
-  return value === 'background' || value === 'banner' || value === 'notice' ? value : 'tile'
+  return (PLACEMENTS as readonly string[]).includes(value)
+    ? (value as SponsoredTile['placement'])
+    : 'tile'
 }

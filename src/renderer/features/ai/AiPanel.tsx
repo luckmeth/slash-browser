@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ActionPlan, AiStatus, EgressPreview } from '@shared/types/ai'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
+import { AiActivityLog } from './AiActivityLog'
 
 /**
  * The AI action surface.
@@ -22,6 +23,14 @@ export function AiPanel(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<{ messages: string[]; canUndo: boolean } | null>(null)
   const [keyDraft, setKeyDraft] = useState('')
+  /**
+   * Bumped whenever something is applied, cancelled or undone.
+   *
+   * The activity log is the record of exactly those events, so it has to reload
+   * when one happens — otherwise the user looks for what just happened and the
+   * list is one step behind.
+   */
+  const [activityKey, setActivityKey] = useState(0)
   const settings = useBrowserStore((s) => s.settings)
 
   const refreshStatus = (): void => {
@@ -242,6 +251,7 @@ export function AiPanel(): React.JSX.Element {
                     .invoke('ai:approve', { planId: plan.planId })
                     .then((result) => {
                       setPlan(null)
+                      setActivityKey((value) => value + 1)
                       if (result.ok) {
                         setReport({
                           messages: result.value.messages,
@@ -260,6 +270,7 @@ export function AiPanel(): React.JSX.Element {
               onClick={() => {
                 void window.browser.invoke('ai:cancel', { planId: plan.planId })
                 setPlan(null)
+                setActivityKey((value) => value + 1)
               }}
               className="cursor-default rounded-md border border-[var(--color-border-subtle)] px-3 py-1.5 text-sm transition hover:border-[var(--color-bad)]"
             >
@@ -283,7 +294,10 @@ export function AiPanel(): React.JSX.Element {
             <button
               type="button"
               onClick={() => {
-                void window.browser.invoke('ai:undo', undefined).then(() => setReport(null))
+                void window.browser.invoke('ai:undo', undefined).then(() => {
+                  setReport(null)
+                  setActivityKey((value) => value + 1)
+                })
               }}
               className="mt-2 flex cursor-default items-center gap-1.5 rounded-md border border-[var(--color-border-subtle)] px-2.5 py-1 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
             >
@@ -293,6 +307,8 @@ export function AiPanel(): React.JSX.Element {
           )}
         </div>
       )}
+
+      <AiActivityLog refreshKey={activityKey} />
 
       <p className="text-xs text-[var(--color-text-muted)]">
         This assistant can only group, move, close, bookmark and reorder tabs. It cannot send

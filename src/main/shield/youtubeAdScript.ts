@@ -26,7 +26,16 @@ export function buildYouTubeAdScript(): string {
     // but YouTube, it does nothing at all.
     if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
 
-    var FIELDS = ['adPlacements', 'playerAds', 'adSlots'];
+    // \`adBreakHeartbeatParams\` is the marker for **server-stitched** ads
+    // (SSAP): the break is not a separate request or a placement the page can
+    // be relieved of, it is spliced into the same stream as the video. Measured
+    // on a real watch page by SLASH_YT_ADS_PROBE, which found the other three
+    // fields correctly gone and this one present with ssap active — which is
+    // exactly what "the blocker stopped working" looked like from outside.
+    // Removing the heartbeat parameters is the only part of that mechanism the
+    // page hands us. It is not a guarantee: a stitched break that plays anyway
+    // cannot be filtered out of the video it is inside.
+    var FIELDS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
 
     // Only objects that are actually a player response. A blanket strip would
     // reach into unrelated data the page parses for its own reasons.
@@ -47,6 +56,13 @@ export function buildYouTubeAdScript(): string {
           // A frozen response is left as it is rather than throwing into the
           // page's own script and breaking playback entirely.
         }
+      }
+      // The server-stitched configuration hangs off playerConfig rather than
+      // sitting at the top level, so the loop above cannot reach it.
+      try {
+        if (value.playerConfig && value.playerConfig.ssap) delete value.playerConfig.ssap;
+      } catch (error) {
+        // As above: a failure here must not break playback.
       }
       return value;
     };
@@ -93,6 +109,51 @@ export function buildYouTubeAdScript(): string {
         return originalJson.apply(this, arguments).then(strip);
       };
     }
+    // 4. The slots that hold companion and feed adverts.
+    //
+    // These are not video breaks and no field removal reaches them: YouTube
+    // renders them as its own elements from a separate response, which is why
+    // a watch page with every ad field stripped still showed a full sponsored
+    // panel beside the player. This is **cosmetic filtering**, which
+    // \`FilterEngine\` deliberately does not do in general — a browser hiding
+    // elements site-wide on rules it did not write is a much larger promise.
+    // Here it is a fixed list of YouTube's own ad containers on YouTube only,
+    // and it hides them rather than removing them, so the page's own scripts
+    // still find every node they expect.
+    var css = [
+      '#player-ads',
+      'ytd-companion-slot-renderer',
+      'ytd-action-companion-ad-renderer',
+      'ytd-ad-slot-renderer',
+      'ytd-in-feed-ad-layout-renderer',
+      'ytd-banner-promo-renderer',
+      'ytd-statement-banner-renderer',
+      'ytd-primetime-promo-renderer',
+      '#masthead-ad',
+      '.ytp-ad-overlay-container',
+      'ytd-rich-item-renderer:has(ytd-ad-slot-renderer)',
+      'ytd-video-masthead-ad-v3-renderer'
+    ].join(',') + '{display:none !important}';
+
+    var addStyle = function () {
+      try {
+        if (document.getElementById('slash-yt-ads')) return;
+        var root = document.head || document.documentElement;
+        if (!root) return;
+        var style = document.createElement('style');
+        style.id = 'slash-yt-ads';
+        style.textContent = css;
+        root.appendChild(style);
+      } catch (error) {
+        // Cosmetic only - never worth breaking the page for.
+      }
+    };
+
+    // At document-start there may be no element to attach to yet, so try now
+    // and again once the document has a head.
+    addStyle();
+    document.addEventListener('readystatechange', addStyle);
+    document.addEventListener('DOMContentLoaded', addStyle);
   } catch (error) {
     // A failure here must leave YouTube working normally. Ads are the cost of
     // that, and a broken player is a far worse outcome.

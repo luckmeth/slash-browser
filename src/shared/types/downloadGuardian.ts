@@ -109,3 +109,21 @@ export const DOWNLOADABLE_MEDIA_EXTENSIONS = [
   'wav',
   'flac'
 ] as const
+
+/**
+ * The result of following a site's links and collecting what it publishes.
+ *
+ * Shares `DownloadCandidate` with the single-page scan on purpose: a file found
+ * three pages deep gets the same verdict, and "Download all" excludes a flagged
+ * one by the same rule. A grab is where nobody reads the list, so the checks
+ * have to be identical rather than merely similar.
+ */
+export const SiteGrabSchema = z.object({
+  candidates: z.array(DownloadCandidateSchema),
+  pagesVisited: z.number().int(),
+  /** Pages the site's own robots.txt asked crawlers not to fetch. */
+  skippedByRobots: z.number().int(),
+  /** What happened, including why an empty result is empty. */
+  note: z.string()
+})
+export type SiteGrab = z.infer<typeof SiteGrabSchema>

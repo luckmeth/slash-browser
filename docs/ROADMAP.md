@@ -36,6 +36,15 @@ Added most recently:
 - **Command palette** (Ctrl+K) and **shortcut sheet** (Ctrl+/, generated from the live menu).
 - **Per-site zoom · custom search engines by keyword · a custom engine as the *default* ·
   configurable toolbar · settings search.**
+- **Slash Coin** (2026-08-30) — pre-launch rewards. Opt-in, Google sign-in through the *system*
+  browser via loopback PKCE, balances held server-side in Supabase. The client reports intervals and
+  never a total; `record_coin_intervals` in Postgres is the fraud boundary and the overlap rule is a
+  GiST exclusion constraint rather than a code path. **Not yet reachable end to end**: Google is not
+  enabled on the Supabase project, which needs a Google Cloud OAuth client only the owner can
+  create. See `docs/SLASH-COIN.md`.
+- **Always-on sponsored placements** (2026-08-30) — the two reader-facing off-switches were removed;
+  the settings copy now states that adverts fund the browser and cannot be turned off. The operator
+  keys remain, because a publisher still needs a network off-switch.
 
 Also already present, contrary to older versions of this file: **empty states** in History,
 Bookmarks and Downloads, and a tab strip that **shrinks** tabs to fit (and, since the last QA pass,

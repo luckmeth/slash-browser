@@ -15,6 +15,8 @@
  * file.
  */
 
+import { mediaIdentity } from './mediaIdentity'
+
 export type SniffedKind =
   /** A complete file. Downloadable as-is. */
   | 'file'
@@ -22,6 +24,13 @@ export type SniffedKind =
   | 'stream'
   /** Encrypted. Recognised so it can be refused with a reason. */
   | 'protected'
+  /**
+   * The player's own transport framing, not a file.
+   *
+   * Recognised so the picker can say why there is nothing here, rather
+   * than offering a download that produces an unplayable file.
+   */
+  | 'transport'
 
 export interface SniffedMedia {
   readonly url: string
@@ -33,6 +42,19 @@ export interface SniffedMedia {
   /** Bytes, when the response said. */
   readonly size: number | null
   readonly contentType: string
+  /**
+   * The page that actually requested this, which is often **not** the tab's URL.
+   *
+   * Film sites put the player in a cross-origin iframe: the tab is on
+   * `123moviesfree.net` while the request comes from `if9.ppzj-youtube.cfd`.
+   * The CDN checks its referrer against the *player's* origin, so downloading
+   * with the top-level page as referrer is a different claim from the one the
+   * player made — and these hosts answer that with 403.
+   *
+   * Optional, and absent when the frame could not be identified — in which case
+   * the caller falls back to the tab's URL, which is what it always used.
+   */
+  readonly frameUrl?: string
 }
 
 const FILE_EXTENSIONS = ['.mp4', '.webm', '.m4v', '.mov', '.mkv', '.avi', '.flv', '.ogv']
@@ -59,6 +81,34 @@ const PROTECTION_HINTS = [
   'drmtoday'
 ]
 
+/**
+ * Hosts whose media addresses carry an expiry and stop working once it passes.
+ *
+ * Not a block list. An earlier version of this file *excluded* googlevideo
+ * entirely, on the theory that its addresses were locked to the player session
+ * — and that was wrong. Measured with `SLASH_MEDIA_ACCESS_PROBE` against a live
+ * watch page, a sniffed `videoplayback` URL answers **206** to the engine's own
+ * requests: bare, with the session, with the page context, and with both
+ * `Range: bytes=0-0` and a real range. It downloads.
+ *
+ * What it does not survive is time. These addresses carry `expire=`, and the
+ * 403s that prompted the mistaken theory were downloads queued against
+ * addresses captured before the user navigated on to other videos. So the host
+ * is recognised in order to explain *that* failure accurately, not to refuse
+ * the download.
+ */
+/**
+ * Content types that are a player's private framing rather than a media file.
+ *
+ * `vnd.yt-ump` is YouTube's; the others are the same idea elsewhere. Matched on
+ * the content type rather than the host, because the host serves both this and
+ * ordinary `video/mp4` depending on which delivery path the session got - and
+ * the two need opposite answers.
+ */
+const TRANSPORT_TYPES = ['vnd.yt-ump', 'ump', 'application/vnd.yt-sabr']
+
+const EXPIRING_MEDIA_HOSTS = ['googlevideo.com', '/videoplayback']
+
 const lower = (value: string): string => value.toLowerCase()
 
 /** The path part, without query or fragment — extensions hide behind both. */
@@ -81,7 +131,8 @@ const endsWithAny = (path: string, endings: readonly string[]): boolean =>
 export function classifyMedia(
   url: string,
   contentType: string,
-  size: number | null
+  size: number | null,
+  frameUrl = ''
 ): SniffedMedia | null {
   if (!/^https?:/i.test(url)) return null
 
@@ -90,7 +141,37 @@ export function classifyMedia(
   const haystack = lower(url)
 
   if (PROTECTION_HINTS.some((hint) => haystack.includes(hint))) {
-    return { url, kind: 'protected', media: null, label: 'Protected stream', size, contentType: type }
+    return {
+      url,
+      kind: 'protected',
+      media: null,
+      label: 'Protected stream',
+      size,
+      contentType: type,
+      frameUrl
+    }
+  }
+
+  // A player's own transport framing, recognised in order to be excluded and
+  // **explained** - the same reason DRM traffic and bare manifests are.
+  //
+  // Measured on a live watch page: YouTube serves media as
+  // `application/vnd.yt-ump` over XHR with no content length. That is not a
+  // video file. It is a stream of protobuf-framed chunks that only its own
+  // player can de-frame, so saving one produces a file nothing will play, and
+  // no amount of work on the *download* side changes that. Offering it would
+  // be the worst kind of failure: a button that completes and hands somebody
+  // something broken.
+  if (TRANSPORT_TYPES.some((hint) => type.includes(hint))) {
+    return {
+      url,
+      kind: 'transport',
+      media: null,
+      label: 'Player transport stream',
+      size,
+      contentType: type,
+      frameUrl
+    }
   }
 
   // Segments first: they are media by content type and must still be dropped.
@@ -103,7 +184,8 @@ export function classifyMedia(
       media: null,
       label: path.endsWith('.mpd') || type.includes('dash') ? 'DASH stream' : 'HLS stream',
       size,
-      contentType: type
+      contentType: type,
+      frameUrl
     }
   }
 
@@ -121,7 +203,8 @@ export function classifyMedia(
     media: isAudio ? 'audio' : 'video',
     label: isAudio ? 'Audio file' : 'Video file',
     size,
-    contentType: type
+    contentType: type,
+    frameUrl
   }
 }
 
@@ -134,13 +217,22 @@ export function classifyMedia(
  * small one is usually the advert that played before the feature.
  */
 export function rankCandidates(candidates: readonly SniffedMedia[]): SniffedMedia[] {
+  // Keyed by identity rather than by address. A player re-requests its manifest
+  // with a fresh token every few minutes, and keying by URL grew a second row
+  // for the same film under a different signature — then a third.
   const byUrl = new Map<string, SniffedMedia>()
   for (const candidate of candidates) {
-    const existing = byUrl.get(candidate.url)
+    const identity = mediaIdentity(candidate.url)
+    const existing = byUrl.get(identity)
     // Keep whichever knows its size — the same URL is often seen twice, once
-    // from a range request that reported nothing.
-    if (!existing || (existing.size === null && candidate.size !== null)) {
-      byUrl.set(candidate.url, candidate)
+    // from a range request that reported nothing. The **address** is always the
+    // newer one: the older token may already have expired.
+    if (!existing) {
+      byUrl.set(identity, candidate)
+    } else if (existing.size === null && candidate.size !== null) {
+      byUrl.set(identity, candidate)
+    } else {
+      byUrl.set(identity, { ...existing, url: candidate.url })
     }
   }
 
@@ -256,6 +348,14 @@ export function sniffNote(found: readonly SniffedMedia[]): string | null {
       'protections, so it cannot be downloaded here.'
     )
   }
+  if (found.some((item) => item.kind === 'transport')) {
+    return (
+      'This site is streaming in its own transport format rather than as video files — the player ' +
+      'asks the server for each piece as it plays and unwraps it in the page. There is no file ' +
+      'here for any browser to save, and one assembled from these pieces would not play. Nothing ' +
+      'is being withheld from Slash; on this connection the video does not exist as a file at all.'
+    )
+  }
   return null
 }
 
@@ -293,13 +393,19 @@ export class MediaLedger {
     const generation = this.generations.get(tabId) ?? 0
     const existing = this.entries.get(tabId) ?? []
 
+    const identity = mediaIdentity(item.url)
     const already = existing.find(
-      (entry) => entry.generation === generation && entry.item.url === item.url
+      (entry) => entry.generation === generation && mediaIdentity(entry.item.url) === identity
     )
     if (already) {
       // A range request reports no length; a later one may. Keep whichever
       // knows, but this is still not a change worth telling anybody about.
+      //
+      // The address is refreshed either way: the entry may have been recorded
+      // with a token that has since expired, and downloading from a stale one
+      // is a 403 on a row that looked fine.
       if (already.item.size === null && item.size !== null) already.item = item
+      else already.item = { ...already.item, url: item.url }
       return false
     }
 
@@ -329,4 +435,47 @@ export class MediaLedger {
     this.entries.delete(tabId)
     this.generations.delete(tabId)
   }
+}
+
+/**
+ * When a media address stops working, when it says so.
+ *
+ * Streaming CDNs sign a URL with a deadline — `expire=` on googlevideo, and the
+ * same idea under other names elsewhere. Once it passes, the server answers 403
+ * to everyone including the browser that was just playing it, and "Server
+ * returned 403" is a true but useless thing to tell somebody: it reads as a
+ * refusal aimed at them, when the address has simply gone stale.
+ *
+ * Pure, and returns null when there is nothing to read rather than guessing a
+ * lifetime. Seconds since the epoch, converted to milliseconds.
+ */
+export function mediaUrlExpiry(url: string): number | null {
+  let params: URLSearchParams
+  try {
+    params = new URL(url).searchParams
+  } catch {
+    return null
+  }
+  for (const key of ['expire', 'expires', 'e', 'valid_until']) {
+    const raw = params.get(key)
+    if (raw === null) continue
+    const seconds = Number(raw)
+    // Ten digits is a Unix timestamp in seconds; anything shorter is a
+    // duration or an id and means nothing as a deadline.
+    if (!Number.isFinite(seconds) || seconds < 1_000_000_000) continue
+    return seconds * 1000
+  }
+  return null
+}
+
+/** Whether this address is one that goes stale, and has. */
+export function mediaUrlHasExpired(url: string, now = Date.now()): boolean {
+  const expiry = mediaUrlExpiry(url)
+  return expiry !== null && expiry <= now
+}
+
+/** Whether the host is one whose addresses carry a deadline at all. */
+export function isExpiringMediaHost(url: string): boolean {
+  const haystack = url.toLowerCase()
+  return EXPIRING_MEDIA_HOSTS.some((hint) => haystack.includes(hint))
 }

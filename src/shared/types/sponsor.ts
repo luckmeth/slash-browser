@@ -8,6 +8,17 @@ import { z } from 'zod'
  * makes **no network request at all**, which is what keeps a sponsor from
  * learning when or how often it was seen.
  */
+/**
+ * Where a creative may go.
+ *
+ * Declared once and referenced by both the stored-tile schema and the batch
+ * schema. They used to carry their own copies of this list, and the moment a
+ * placement was added to one the other silently rejected **the entire batch** —
+ * not the single unknown creative, the whole fetch — so every campaign
+ * disappeared at once and the only evidence was one line in a log.
+ */
+export const PLACEMENTS = ['tile', 'banner', 'background', 'notice', 'rail'] as const
+
 export const SponsoredTileSchema = z.object({
   id: z.string(),
   /** Who paid. Shown to the user; not optional, because "Sponsored" alone hides who. */
@@ -26,6 +37,10 @@ export const SponsoredTileSchema = z.object({
    *    the start-page formats.
    *  - `banner` — a wide panel on the start page. Visible without owning it.
    *  - `tile` — the small labelled card.
+   *  - `rail` — a card in the empty gutter beside the start page's content
+   *    column. Two can run at once, left and right. Cheapest of the start-page
+   *    formats: it uses space that was otherwise blank, and it is the first
+   *    thing dropped on a narrow window.
    *  - `notice` — a dismissible strip in the browser's **own chrome** while
    *    somebody is browsing. Never inside a web page: injecting adverts into
    *    pages is the exact behaviour this browser blocks, and doing it ourselves
@@ -34,7 +49,7 @@ export const SponsoredTileSchema = z.object({
    * Defaults to `tile`, so a batch written before this existed keeps rendering
    * exactly as it did rather than becoming a takeover nobody sold.
    */
-  placement: z.enum(['tile', 'banner', 'background', 'notice']).default('tile'),
+  placement: z.enum(PLACEMENTS).default('tile'),
   /**
    * The campaign's window, in unix ms; null at either end means unbounded.
    *
@@ -69,6 +84,14 @@ export const SponsorStatusSchema = z.object({
   banner: SponsoredTileSchema.nullable(),
   /** The creative for a browsing notice, or null. Cadence decides *when*. */
   notice: SponsoredTileSchema.nullable(),
+  /**
+   * Up to two creatives for the gutters beside the start page, left then right.
+   *
+   * An array rather than two fields because the placement is sold as a pair of
+   * equivalent slots — which side a campaign lands on is not something anybody
+   * buys, and making it a field would imply it was.
+   */
+  rails: z.array(SponsoredTileSchema).max(2).default([]),
   /** How many creatives are cached, for the settings panel. */
   cached: z.number().int(),
   /** Counts waiting to be reported, so the user can see exactly what is pending. */
@@ -95,7 +118,7 @@ export const SponsorBatchSchema = z.object({
       /** data: URL only. An https: image would be a per-impression request. */
       image: z.string().max(2_000_000).default(''),
       clickUrl: z.string().url(),
-      placement: z.enum(['tile', 'banner', 'background', 'notice']).default('tile'),
+      placement: z.enum(PLACEMENTS).default('tile'),
       /** Unix ms. Omit both for a campaign with no schedule. */
       startsAt: z.number().nullable().default(null),
       endsAt: z.number().nullable().default(null)

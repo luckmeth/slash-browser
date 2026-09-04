@@ -5,6 +5,9 @@ import {
   rankCandidates,
   suggestedFilename,
   sniffNote,
+  mediaUrlExpiry,
+  mediaUrlHasExpired,
+  isExpiringMediaHost,
   toDownloadable,
   containerOf,
   MediaLedger,
@@ -374,5 +377,77 @@ describe('MediaLedger — the cost of a playing video', () => {
     ledger.record(1, item('https://x.com/a.mp4'))
     ledger.advance(1)
     expect(ledger.record(1, item('https://x.com/a.mp4'))).toBe(true)
+  })
+})
+
+describe('expiring media addresses', () => {
+  it('offers a googlevideo response — measurement says it downloads', () => {
+    // This asserted the opposite for one build. The theory was that these
+    // addresses were locked to the player's session; SLASH_MEDIA_ACCESS_PROBE
+    // against a live watch page says otherwise — bare=200, session=206,
+    // page=206, and 206 to both `Range: bytes=0-0` and a real range.
+    const found = classifyMedia(
+      'https://rr1---sn-nau-jhc6.googlevideo.com/videoplayback?itag=18&expire=4102444800',
+      'video/mp4',
+      12_345_678
+    )
+    expect(found?.kind).toBe('file')
+    expect(toDownloadable([found!])).toHaveLength(1)
+  })
+
+  it('reads the deadline the address carries', () => {
+    expect(mediaUrlExpiry('https://h/v?expire=1767225600')).toBe(1767225600000)
+    expect(mediaUrlExpiry('https://h/v?itag=18')).toBeNull()
+    expect(mediaUrlExpiry('not a url')).toBeNull()
+  })
+
+  it('ignores a short number that cannot be a timestamp', () => {
+    // `e=30` is a duration or an id, not a deadline. Guessing a lifetime from
+    // it would produce a confident, wrong explanation.
+    expect(mediaUrlExpiry('https://h/v?e=30')).toBeNull()
+  })
+
+  it('knows when one has gone stale', () => {
+    const past = 'https://h/videoplayback?expire=1000000000'
+    expect(mediaUrlHasExpired(past)).toBe(true)
+    expect(mediaUrlHasExpired('https://h/videoplayback?expire=4102444800')).toBe(false)
+  })
+
+  it('recognises the hosts whose addresses expire', () => {
+    expect(isExpiringMediaHost('https://rr1---x.googlevideo.com/videoplayback?a=1')).toBe(true)
+    expect(isExpiringMediaHost('https://cdn.example/film.mp4')).toBe(false)
+  })
+})
+
+describe('player transport framing', () => {
+  it('does not offer a UMP response as a download', () => {
+    // Measured on a live watch page: YouTube serves media as
+    // `application/vnd.yt-ump` over XHR with no content length. It is not a
+    // file — it is protobuf-framed chunks its own player unwraps — so saving
+    // one produces something nothing will play.
+    const found = classifyMedia(
+      'https://rr1---sn-nau-jhc6.googlevideo.com/videoplayback?expire=4102444800',
+      'application/vnd.yt-ump',
+      null
+    )
+    expect(found?.kind).toBe('transport')
+    expect(toDownloadable([found!])).toEqual([])
+  })
+
+  it('explains the transport case rather than saying nothing was found', () => {
+    const found = classifyMedia('https://x.googlevideo.com/videoplayback', 'application/vnd.yt-ump', null)!
+    expect(sniffNote([found])).toContain('does not exist as a file')
+  })
+
+  it('still offers the same host when it serves an ordinary file', () => {
+    // The host serves both paths depending on the session, which is why this
+    // matches on the content type and not the hostname.
+    const found = classifyMedia(
+      'https://rr1---x.googlevideo.com/videoplayback?itag=18&expire=4102444800',
+      'video/mp4',
+      9_000_000
+    )!
+    expect(found.kind).toBe('file')
+    expect(toDownloadable([found])).toHaveLength(1)
   })
 })

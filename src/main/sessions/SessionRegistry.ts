@@ -12,6 +12,15 @@ import type { SessionHardening } from './SessionHardening'
  */
 export class SessionRegistry {
   private readonly hardened = new Set<string>()
+  /**
+   * Which partition each session came from.
+   *
+   * Electron hands out `Session` objects and never says which partition string
+   * produced one, so a download that needs to be picked up after a restart has
+   * no way to ask for the same cookie jar again. This is the only place that
+   * mapping exists, because this is the only place partitions are created.
+   */
+  private readonly labels = new WeakMap<Session, string>()
 
   constructor(private readonly hardening: SessionHardening) {}
 
@@ -97,7 +106,34 @@ export class SessionRegistry {
     null
   private mediaSniffer: { install: (session: Session, label: string) => void } | null = null
 
+  /**
+   * The partition a session came from, for anything that must ask again later.
+   *
+   * Null for a session this registry did not create — there is no honest name
+   * to give it, and inventing one would send a download's cookies to the wrong
+   * jar.
+   */
+  partitionOf(target: Session): string | null {
+    return this.labels.get(target) ?? null
+  }
+
+  /**
+   * The session a partition name refers to, or null.
+   *
+   * `private` is refused on purpose. An in-memory partition is gone once its
+   * windows close, so a name pointing at one describes something that no longer
+   * exists — and resurrecting it for a download the user made privately is the
+   * opposite of what a private window promises.
+   */
+  fromPartition(label: string): Session | null {
+    if (label === 'private') return null
+    if (label === 'default') return this.getDefault()
+    if (!label.startsWith('persist:')) return null
+    return this.harden(session.fromPartition(label), label)
+  }
+
   private harden(target: Session, key: string): Session {
+    this.labels.set(target, key)
     if (!this.hardened.has(key)) {
       this.hardening.apply(target, key)
       this.blocker?.apply(target, key)

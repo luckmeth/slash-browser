@@ -46,10 +46,14 @@ export interface TakeoverRequest {
   /**
    * Whether the user asked to choose a folder for every download.
    *
-   * Left with Chromium when set, because its save dialog is the thing the
-   * setting promises and the engine has no equivalent. Accelerating a download
-   * at the cost of silently ignoring a preference is not a trade to make on
-   * somebody's behalf.
+   * **No longer a reason to refuse.** It used to be: Chromium's save dialog was
+   * the thing the setting promised and the engine had no equivalent, so turning
+   * the setting on silently disabled the accelerator for every download. The
+   * engine now asks first — see `AppContext`'s `accelerate` hook — so the
+   * preference and the acceleration are no longer a choice between two things.
+   *
+   * Kept in the request because a caller that has not been updated should still
+   * compile, and because it is worth recording in the verdict.
    */
   askWhereToSave: boolean
 }
@@ -60,9 +64,6 @@ export type TakeoverVerdict =
 
 export function shouldTakeOver(request: TakeoverRequest): TakeoverVerdict {
   if (!request.enabled) return { take: false, because: 'acceleration is switched off' }
-  if (request.askWhereToSave) {
-    return { take: false, because: 'the save dialog is on, and the engine has no equivalent' }
-  }
 
   if (!/^https?:\/\//i.test(request.url)) {
     // blob: and data: URLs exist only inside the page that made them, so there

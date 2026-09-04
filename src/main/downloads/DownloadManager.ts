@@ -1,5 +1,13 @@
 import { join } from 'node:path'
-import { app, dialog, shell, type BaseWindow, type Session, type DownloadItem as ElectronDownloadItem } from 'electron'
+import {
+  app,
+  dialog,
+  shell,
+  type BaseWindow,
+  type Session,
+  type WebContents as ElectronWebContents,
+  type DownloadItem as ElectronDownloadItem
+} from 'electron'
 import { isDangerousFilename, type DownloadItem, type DownloadState } from '@shared/types/browsing'
 import type { DownloadRepository } from '../db/repositories/DownloadRepository'
 import type { SettingsStore } from '../settings/SettingsStore'
@@ -27,7 +35,7 @@ export interface DownloadHooks {
    * decision to hand over is `shouldTakeOver`'s, and it is deliberately
    * conservative — see the note there about second requests.
    */
-  accelerate?: (url: string, filename: string) => void
+  accelerate?: (url: string, filename: string, initiator: ElectronWebContents | null) => void
 }
 
 export class DownloadManager {
@@ -81,7 +89,11 @@ export class DownloadManager {
         const filename = electronItem.getFilename()
         electronItem.cancel()
         log.info(`accelerating ${filename} (${electronItem.getTotalBytes()} bytes)`)
-        this.hooks.accelerate?.(url, filename)
+        // The page that started it, so the engine can send the referrer and
+        // cookies Chromium would have sent. Without them an accelerated
+        // download from a referrer-checking host fails where the plain one
+        // would have worked.
+        this.hooks.accelerate?.(url, filename, webContents ?? null)
         return
       }
       log.debug(`chromium keeps this download: ${verdict.because}`)
@@ -192,8 +204,30 @@ export class DownloadManager {
   async openFile(id: string): Promise<void> {
     const item = this.items.get(id)
     if (!item || item.state !== 'completed') return
+    await this.openPath(item.savePath, item.filename, item.url, item.isDangerous)
+  }
 
-    if (item.isDangerous && this.settings.getAll().warnOnExecutableDownload) {
+  /**
+   * Opens a finished download, whichever engine produced it.
+   *
+   * Keyed by **path rather than id**, because there are two id namespaces and
+   * this used to know only one. Chromium's downloads are `dl-<time>-<n>` in
+   * `this.items`; the accelerated engine's are `randomUUID()` in
+   * `DownloadQueue.records`. The Downloads Center lists the *engine's*, so
+   * `items.get(id)` never matched and both Open and Show in folder silently did
+   * nothing on every accelerated download — the ones most worth opening.
+   *
+   * The executable warning lives here so both routes get it. A file downloaded
+   * with eight connections is exactly as capable of running code as one
+   * downloaded with one.
+   */
+  async openPath(
+    savePath: string,
+    filename: string,
+    sourceUrl: string,
+    isDangerous = isDangerousFilename(filename)
+  ): Promise<void> {
+    if (isDangerous && this.settings.getAll().warnOnExecutableDownload) {
       const window = this.hooks.getWindow()
       const options = {
         type: 'warning' as const,
@@ -201,9 +235,9 @@ export class DownloadManager {
         defaultId: 1,
         cancelId: 1,
         title: 'Open downloaded file?',
-        message: `"${item.filename}" can run code on your computer.`,
+        message: `"${filename}" can run code on your computer.`,
         detail:
-          `It was downloaded from ${originOf(item.url)}.\n\n` +
+          `It was downloaded from ${originOf(sourceUrl)}.\n\n` +
           `Only open it if you trust that source. This warning is based on the file ` +
           `extension alone — it cannot tell whether this particular file is harmful.`,
         noLink: true
@@ -214,13 +248,18 @@ export class DownloadManager {
       if (response !== 0) return
     }
 
-    const error = await shell.openPath(item.savePath)
-    if (error) log.error(`could not open ${item.savePath}: ${error}`)
+    const error = await shell.openPath(savePath)
+    if (error) log.error(`could not open ${savePath}: ${error}`)
   }
 
   showInFolder(id: string): void {
     const item = this.items.get(id)
     if (item) shell.showItemInFolder(item.savePath)
+  }
+
+  /** Reveals any finished download, by path — see `openPath` for why. */
+  revealPath(savePath: string): void {
+    shell.showItemInFolder(savePath)
   }
 
   /** Removes from the list only. The file on disk is left alone. */

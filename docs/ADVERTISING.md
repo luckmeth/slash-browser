@@ -23,8 +23,9 @@ Three applications, one database:
 ### Multi-tenancy, stated precisely
 
 Every person running Slash gets **their own browser**: their own history, bookmarks, passwords,
-settings, workspaces, profiles. None of it is shared, none of it is uploaded, and the browser is
-fully usable with every network feature switched off.
+settings, workspaces, profiles. None of it is shared and none of it is uploaded. Every optional
+network feature — indexing, semantic search, AI, sync — is off until switched on. Sponsored
+placements are the exception: they are always on, because they are what funds the browser.
 
 The **only** thing common to all of them is the advert on the new-tab page. That is the whole of
 the shared surface, and it is the product being sold.
@@ -60,8 +61,11 @@ the shared surface, and it is the product being sold.
 ### For the person using the browser
 
 They open a tab. There is a background image, a headline, and the word **Sponsored** with the
-company's name. Clicking it opens the advertiser's site. That is all — and one switch in Settings
-turns it off entirely.
+company's name. Clicking it opens the advertiser's site. That is all.
+
+There is **no reader-facing off-switch** — sponsored placements pay for the browser, and Settings
+says so plainly rather than offering a control that only the least advert-tolerant readers would
+ever find. What the reader keeps is the guarantee that nothing about them is in the request.
 
 ---
 

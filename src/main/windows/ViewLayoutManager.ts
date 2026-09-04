@@ -26,6 +26,11 @@ export class ViewLayoutManager {
   private sidebarWidth = 0
   private rightPanelWidth = 0
 
+  /** What the page is currently inset from the top by. */
+  get chromeHeightPx(): number {
+    return this.chromeHeight
+  }
+
   setChromeHeight(px: number): void {
     this.chromeHeight = Math.max(0, Math.round(px))
   }

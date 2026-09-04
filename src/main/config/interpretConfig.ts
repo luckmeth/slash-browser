@@ -35,6 +35,43 @@ export function interpretConfig(settings: Record<string, unknown>): RemoteConfig
       // user of the browser, which is not a thing to send over plain http.
       url: /^https:\/\//i.test(url) ? url : ''
     },
-    flags
+    flags,
+    advertising: readAdvertising(settings)
+  }
+}
+
+/**
+ * The rate card the operator serves, falling back to the compiled defaults.
+ *
+ * Every field is checked rather than trusted: this is remote input rendered on
+ * a page that asks companies for money, so a malformed row must degrade to the
+ * built-in price rather than to an empty or nonsensical one.
+ */
+function readAdvertising(settings: Record<string, unknown>): RemoteConfig['advertising'] {
+  const fallback = DEFAULT_REMOTE_CONFIG.advertising
+  const raw = settings.advertising
+  if (!raw || typeof raw !== 'object') return fallback
+
+  const record = raw as Record<string, unknown>
+  const text = (value: unknown, limit: number): string =>
+    typeof value === 'string' ? value.slice(0, limit) : ''
+
+  const rows = Array.isArray(record.placements) ? record.placements : []
+  const placements = rows
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    .map((row) => ({
+      id: text(row.id, 40),
+      name: text(row.name, 60),
+      what: text(row.what, 200),
+      concurrency: text(row.concurrency, 80),
+      rate: text(row.rate, 60)
+    }))
+    // A row with no name or no price is not a placement anybody can buy.
+    .filter((row) => row.id !== '' && row.name !== '' && row.rate !== '')
+
+  return {
+    contactEmail: text(record.contactEmail, 120) || fallback.contactEmail,
+    reachNote: text(record.reachNote, 300),
+    placements: placements.length > 0 ? placements : fallback.placements
   }
 }

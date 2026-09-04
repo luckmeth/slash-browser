@@ -26,7 +26,11 @@ describe('shouldTakeOver', () => {
   it('leaves it alone when the user wants the save dialog', () => {
     // Accelerating at the cost of silently ignoring a preference is not a trade
     // to make on somebody's behalf.
-    expect(shouldTakeOver(request({ askWhereToSave: true })).take).toBe(false)
+    // Changed deliberately. This used to be `false`: the save dialog belonged to
+    // Chromium, so turning on "ask where to save" silently switched the whole
+    // accelerator off — a preference about *where* a file goes quietly deciding
+    // *how* it downloads. The engine now asks first, so both can be true at once.
+    expect(shouldTakeOver(request({ askWhereToSave: true })).take).toBe(true)
   })
 
   it('refuses a URL that cannot be requested again', () => {
@@ -60,7 +64,8 @@ describe('shouldTakeOver', () => {
     // indistinguishable from one that was never wired up.
     for (const over of [
       { enabled: false },
-      { askWhereToSave: true },
+      // `askWhereToSave` is deliberately no longer in this list — the engine
+      // asks where to save rather than handing the download back.
       { url: 'blob:x' },
       { totalBytes: 0 },
       { totalBytes: 1000 }

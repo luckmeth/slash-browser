@@ -3,17 +3,17 @@
 The one place Slash shows advertising: a single labelled tile on the start page. This document is
 for whoever publishes the browser and wants to sell that slot.
 
-**It is inert by default.** It needs *both* the user's switch (`sponsoredTilesEnabled`) and an
-endpoint (`sponsorEndpoint`). With either missing, no request is ever made — which is why the
-onboarding claim that "nothing leaves this device unless you turn it on" remains literally true on
-a default install.
+**It is inert until an endpoint is set.** `sponsoredTilesEnabled` now defaults to **on** and is no
+longer exposed to the reader — it survives as the operator's kill switch and as the gate the probes
+drive. `sponsorEndpoint` is what actually decides: with no endpoint, no request is ever made, so a
+build shipped without one still touches nothing.
 
-> **If you ship a build with an endpoint preconfigured and tiles switched on, that claim becomes
-> false and you must change the copy.** It appears in the first onboarding screen and in the start
-> page footer ("Everything here stays on this device"). Shipping either of those next to a browser
-> that fetches advert batches on launch is the single fastest way to lose the trust this product is
-> built on — far more damaging than the revenue is worth. Either leave it opt-in, or reword both
-> to say exactly what leaves and what does not.
+> **This warning was acted on, not deleted.** Shipping an endpoint with placements always-on made
+> the old copy false, so both claims were narrowed rather than left standing: onboarding now says
+> history, bookmarks and passwords stay on the machine and states the advert fetch outright, and the
+> start page footer reads "Your history and bookmarks stay on this device". If you change what
+> leaves the machine again, these two sentences are the ones to revisit first — they are the most
+> quotable claims in the product, and the fastest way to lose the trust it is built on.
 
 ## The shape it has, and why
 
@@ -121,3 +121,7 @@ a desktop application surface; attempting it risks account termination. This slo
 
 **Auto-update and code signing gate all of it.** You cannot grow an audience or ship inventory to
 one without them, and no sponsor buys an audience that cannot be updated.
+
+
+
+didnt you fix and changed the admin app get the memory form past conversations

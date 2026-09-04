@@ -17,14 +17,38 @@
  */
 export interface HandoffHint {
   readonly host: string
+  /**
+   * Only offer the hand-off on paths starting with this.
+   *
+   * Without it a hint covers a whole site, and a browser that offers to send
+   * you elsewhere on every page of a service you are already signed into is
+   * nagging rather than helping. Claude only needs this on its sign-in route.
+   */
+  readonly pathPrefix?: string
   readonly reason: string
 }
 
 const HINTS: readonly HandoffHint[] = [
+  // No blanket hint for `accounts.google.com`.
+  //
+  // It used to say Google refuses sign-in from Slash, and that was measured to
+  // be **false** for the ordinary OAuth redirect: Slash's user agent carries no
+  // `Electron` token, and `SLASH_GOOGLE_UA_PROBE` loads Google's real sign-in
+  // form here with `blocked: false`. The notice was not only wrong, it was
+  // harmful — it pushed people to finish a sign-in in a different browser than
+  // they started it in, which loses the flow state and strands them on the
+  // provider's fallback address.
+  //
+  // What genuinely does not work is **FedCM**, and that is a property of
+  // specific sites rather than of Google's domain, so it is listed per-site
+  // below.
   {
-    host: 'accounts.google.com',
+    host: 'claude.ai',
+    pathPrefix: '/login',
     reason:
-      'Google only allows sign-in from browsers it has approved, and Slash is not on that list. Signing in from your default browser works, and Slash keeps everything else.'
+      'Signing in with Google here uses FedCM, a browser feature Electron does not implement, so the ' +
+      'account chooser never appears. Signing in with your email works normally in Slash — or use ' +
+      'your default browser for this step.'
   },
   {
     host: 'accounts.youtube.com',
@@ -41,5 +65,18 @@ export function handoffHintFor(url: string): HandoffHint | null {
   } catch {
     return null
   }
-  return HINTS.find((hint) => host === hint.host || host.endsWith(`.${hint.host}`)) ?? null
+  let path: string
+  try {
+    path = new URL(url).pathname
+  } catch {
+    path = '/'
+  }
+
+  return (
+    HINTS.find((hint) => {
+      const hostMatches = host === hint.host || host.endsWith(`.${hint.host}`)
+      if (!hostMatches) return false
+      return hint.pathPrefix === undefined || path.startsWith(hint.pathPrefix)
+    }) ?? null
+  )
 }

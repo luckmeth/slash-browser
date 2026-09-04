@@ -173,6 +173,26 @@ export function PermissionsPanel(): React.JSX.Element {
             )}
           </ul>
         )}
+
+        {/*
+          The log is an audit trail of decisions the user made, so it is theirs
+          to clear — and there was no way to. Offered only when there is
+          something to clear, so the button never appears next to "nothing
+          recorded yet".
+        */}
+        {showLog && events.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              void window.browser.invoke('permissions:clearEvents', undefined).then(() => {
+                setEvents([])
+              })
+            }}
+            className="mt-2 cursor-default rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-text-muted)] transition hover:border-[var(--color-bad)] hover:text-[var(--color-bad)]"
+          >
+            Clear this log
+          </button>
+        )}
       </div>
     </div>
   )

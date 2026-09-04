@@ -114,8 +114,26 @@ export class MediaSniffer {
         const declared = Number(headerValue(headers, 'content-length'))
         const size = Number.isFinite(declared) && declared > 0 ? declared : null
 
-        const found = classifyMedia(details.url, headerValue(headers, 'content-type'), size)
-        if (!found) return
+        // The frame that actually made the request. On a film site the player
+        // is a cross-origin iframe, and its origin — not the tab's — is what
+        // the CDN checks its referrer against.
+        const frameUrl = details.frame?.url ?? details.referrer ?? ''
+        const found = classifyMedia(
+          details.url,
+          headerValue(headers, 'content-type'),
+          size,
+          frameUrl
+        )
+        if (!found) {
+          // Temporary diagnostic: why is nothing from YouTube ever offered?
+          if (process.env['SLASH_SNIFF_DEBUG'] && /googlevideo|videoplayback/i.test(details.url)) {
+            log.info(
+              `sniff-reject type=${details.resourceType} ct=${headerValue(headers, 'content-type')} ` +
+                `len=${size} url=${details.url.slice(0, 110)}`
+            )
+          }
+          return
+        }
 
         // Already seen this URL on this document — the common case while a video
         // plays, and not news.

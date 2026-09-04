@@ -24,8 +24,17 @@ const SESSION_END_KEEP = 5
  * in memory. A session that expired while the browser was closed will land on a
  * sign-in page, and no amount of snapshotting changes that.
  */
+/**
+ * How long after the tabs stop changing to write a snapshot.
+ *
+ * Short enough that a force-kill loses seconds rather than minutes, long enough
+ * that restoring a window of twenty tabs is one capture and not twenty.
+ */
+const CHANGE_SNAPSHOT_DELAY_MS = 4000
+
 export class SessionSnapshotManager {
   private timer: ReturnType<typeof setInterval> | null = null
+  private changeTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly repository: SnapshotRepository,
@@ -44,6 +53,35 @@ export class SessionSnapshotManager {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    if (this.changeTimer) clearTimeout(this.changeTimer)
+    this.changeTimer = null
+  }
+
+  /**
+   * The set of open tabs changed — a tab opened, closed, or finished loading.
+   *
+   * The five-minute timer alone was not enough, and the gap it left is the one
+   * that loses work. A `session-end` snapshot is only written on an orderly
+   * quit; a force-kill, a crash, or an application the user gave up on and
+   * ended from Task Manager writes nothing at all. Everything since the last
+   * automatic snapshot is then gone, and if the browser had been open for less
+   * than five minutes that is **every tab**.
+   *
+   * So changes are also recorded a few seconds after they settle. Debounced
+   * rather than immediate because opening a window of twenty tabs is twenty
+   * changes in a second, and each capture reads scroll position from every live
+   * renderer — doing that per tab would put a burst of IPC on the browsing path
+   * for no benefit. One capture once the dust has settled costs the same as the
+   * timer's, just far more often than every five minutes.
+   */
+  noteChange(): void {
+    if (this.changeTimer) clearTimeout(this.changeTimer)
+    this.changeTimer = setTimeout(() => {
+      this.changeTimer = null
+      void this.capture('automatic')
+    }, CHANGE_SNAPSHOT_DELAY_MS)
+    // Timers hold the process open at quit if they are still pending.
+    this.changeTimer.unref?.()
   }
 
   /**

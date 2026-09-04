@@ -40,12 +40,26 @@ export const AiProviderInfoSchema = z.object({
   /** Where to obtain a key, so the user is not left searching. */
   keyUrl: z.string().nullable(),
   /**
-   * Whether requests to this provider leave the machine.
+   * Whether this provider is *catalogued* as a local one.
    *
-   * The whole point of listing local models beside cloud ones is that the user
-   * can see which is which at the moment they choose.
+   * **Not a statement about where the request goes.** This is a property of the
+   * provider id; the endpoint beside it is free text the user can point
+   * anywhere. Use `destination` for anything the user will read as a promise —
+   * rendering this flag as "nothing is sent to a third party" is exactly the
+   * bug that made `loopback.ts` necessary.
    */
-  local: z.boolean()
+  local: z.boolean(),
+  /**
+   * Where requests to this provider actually go, checked rather than assumed.
+   *
+   * Derived from the stored endpoint by `loopbackVerdict`. The whole point of
+   * listing local models beside cloud ones is that the user can see which is
+   * which at the moment they choose — and that only works if the answer is
+   * about the address, not about the label.
+   */
+  destination: z.enum(['loopback', 'remote', 'unparseable']),
+  /** The host as it will be contacted, so the UI can name it. */
+  destinationHost: z.string()
 })
 export type AiProviderInfo = z.infer<typeof AiProviderInfoSchema>
 
@@ -66,7 +80,9 @@ export type AiHubStatus = z.infer<typeof AiHubStatusSchema>
 
 /** Catalogue defaults. Kept in shared so the UI can render before any IPC. */
 export const AI_PROVIDER_CATALOGUE: ReadonlyArray<
-  Omit<AiProviderInfo, 'connected' | 'model' | 'baseUrl'> & { defaultModel: string }
+  Omit<AiProviderInfo, 'connected' | 'model' | 'baseUrl' | 'destination' | 'destinationHost'> & {
+    defaultModel: string
+  }
 > = [
   {
     id: 'anthropic',

@@ -237,6 +237,119 @@ if (!app.requestSingleInstanceLock()) {
       )
     }
 
+    if (process.env['SLASH_YT_FORMAT_PROBE']) {
+      void import('./dev/youtubeFormatProbe').then(({ runYouTubeFormatProbe }) =>
+        runYouTubeFormatProbe(window, {
+          sniffed: () => {
+            const contents = window.tabs.activeTab?.contents ?? null
+            return contents
+              ? context.mediaSniffer
+                  .forTab(contents)
+                  .map((item) => ({ url: item.url, kind: item.kind, label: item.label }))
+              : []
+          }
+        })
+      )
+    }
+
+    if (process.env['SLASH_AUTOHIDE_PROBE']) {
+      void import('./dev/autoHideProbe').then(({ runAutoHideProbe }) => runAutoHideProbe(window))
+    }
+
+    if (process.env['SLASH_QUALITY_PROBE']) {
+      void import('./dev/qualityProbe').then(({ runQualityProbe }) =>
+        runQualityProbe(window, {
+          qualities: (w) => context.playerQualitiesFor(w),
+          request: (w, level) => context.requestPlayerQuality(w, level),
+          options: (w) => context.mediaOptionsFor(w)
+        })
+      )
+    }
+
+    const adShowcase = process.env['SLASH_AD_SHOWCASE']
+    if (adShowcase) {
+      void import('./dev/spikeCapture').then(({ runAdShowcase }) =>
+        runAdShowcase(window, adShowcase, {
+          setEndpoint: (url) =>
+            context.settings.update({ sponsorEndpoint: url, sponsoredTilesEnabled: true }),
+          disable: () =>
+            context.settings.update({ sponsorEndpoint: '', sponsoredTilesEnabled: false }),
+          refresh: () => context.sponsor.refresh(),
+          status: () => context.sponsor.status(),
+          impression: (id) => context.sponsor.recordImpression(id),
+          click: (id) => context.sponsor.recordClick(id),
+          clear: () => context.sponsor.clear()
+        })
+      )
+    }
+
+    if (process.env['SLASH_AUTH_PROBE']) {
+      void import('./dev/authProbe').then(({ runAuthProbe }) => runAuthProbe(window))
+    }
+
+    if (process.env['SLASH_MOTION_PROBE']) {
+      void import('./dev/motionProbe').then(({ runMotionProbe }) => runMotionProbe(window))
+    }
+
+    if (process.env['SLASH_PDF_PROBE']) {
+      void import('./dev/pdfProbe').then(({ runPdfProbe }) => runPdfProbe(window))
+    }
+
+    if (process.env['SLASH_TOGGLES_PROBE']) {
+      void import('./dev/togglesProbe').then(({ runTogglesProbe }) =>
+        runTogglesProbe(window, {
+          settings: () => context.settings.getAll() as unknown as Record<string, unknown>
+        })
+      )
+    }
+
+    if (process.env['SLASH_SESSION_PROBE']) {
+      void import('./dev/sessionProbe').then(({ runSessionProbe }) =>
+        runSessionProbe(window, {
+          restorable: () => {
+            const found = context.snapshots.latestRestorable()
+            return found ? { tabs: found.tabs, kind: found.kind, createdAt: found.createdAt } : null
+          }
+        })
+      )
+    }
+
+    if (process.env['SLASH_INSTALL_PROBE']) {
+      void import('./dev/installProbe').then(({ runInstallProbe }) => runInstallProbe())
+    }
+
+    if (process.env['SLASH_EXTERNAL_PROBE']) {
+      void import('./dev/externalProbe').then(({ runExternalProbe }) => runExternalProbe())
+    }
+
+    if (process.env['SLASH_IDM_PROBE']) {
+      void import('./dev/idmProbe').then(({ runIdmProbe }) => runIdmProbe())
+    }
+
+    if (process.env['SLASH_SEGMENT_PROBE']) {
+      void import('./dev/segmentProbe').then(({ runSegmentProbe }) => runSegmentProbe())
+    }
+
+    if (process.env['SLASH_RESUME_PROBE']) {
+      void import('./dev/resumeProbe').then(({ runResumeProbe }) => runResumeProbe())
+    }
+
+    if (process.env['SLASH_MEDIA_ACCESS_PROBE']) {
+      const decisions: { url: string; blocked: boolean }[] = []
+      context.blocker.onDecision = (url, blocked) => decisions.push({ url, blocked })
+      void import('./dev/mediaAccessProbe').then(({ runMediaAccessProbe }) =>
+        runMediaAccessProbe(window, {
+          shieldDecisions: () => decisions,
+          shieldSeen: () => context.blocker.diagnostics.seen,
+          sniffed: (contents) =>
+            context.mediaSniffer
+              .forTab(contents)
+              .map((item) => ({ url: item.url, kind: item.kind, label: item.label })),
+          contextFor: (contents) => context.mediaContextFor(contents)
+        })
+      )
+    }
+
     if (process.env['SLASH_STREAM_PROBE']) {
       void import('./dev/spikeCapture').then(({ runStreamCapture }) =>
         runStreamCapture(window, {
@@ -246,6 +359,22 @@ if (!app.requestSingleInstanceLock()) {
           list: () => context.downloadEngine.list(),
           canJoin: () => context.downloadEngine.canJoin()
         })
+      )
+    }
+
+    if (process.env['SLASH_SIGNIN_PROBE']) {
+      void import('./dev/rewardsSignInProbe').then(({ runRewardsSignInProbe }) =>
+        runRewardsSignInProbe(context)
+      )
+    }
+
+    if (process.env['SLASH_GOOGLE_UA_PROBE']) {
+      void import('./dev/googleUaProbe').then(({ runGoogleUaProbe }) => runGoogleUaProbe(window))
+    }
+
+    if (process.env['SLASH_YT_ADS_PROBE']) {
+      void import('./dev/youtubeAdProbe').then(({ runYouTubeAdProbe }) =>
+        runYouTubeAdProbe(window, context)
       )
     }
 
@@ -848,6 +977,27 @@ if (!app.requestSingleInstanceLock()) {
     if (perfPath) {
       void import('./dev/spikeCapture').then(({ runPerformanceCapture }) =>
         runPerformanceCapture(window, perfPath)
+      )
+    }
+
+    const advertiseShot = process.env['SLASH_ADVERTISE_SHOT']
+    if (advertiseShot) {
+      void import('./dev/spikeCapture').then(({ runAdvertiseShot }) =>
+        runAdvertiseShot(window, advertiseShot)
+      )
+    }
+
+    const rewardsShot = process.env['SLASH_REWARDS_SHOT']
+    if (rewardsShot) {
+      void import('./dev/spikeCapture').then(({ runRewardsShot }) =>
+        runRewardsShot(window, rewardsShot)
+      )
+    }
+
+    const settingsShot = process.env['SLASH_SETTINGS_SHOT']
+    if (settingsShot) {
+      void import('./dev/spikeCapture').then(({ runSettingsShot }) =>
+        runSettingsShot(window, settingsShot)
       )
     }
 

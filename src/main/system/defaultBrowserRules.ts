@@ -50,9 +50,17 @@ export interface PromptState {
  */
 export function shouldOfferDefault(state: PromptState, now: number): boolean {
   if (state.isDefault) return false
+  // "Don't ask again" is still honoured — it is an explicit instruction, and
+  // ignoring it would make the button a lie.
   if (state.suppressed) return false
-  if (state.asks >= PROMPT_LIMITS.maxAsks) return false
-  if (state.lastAskedAt > 0 && now - state.lastAskedAt < PROMPT_LIMITS.minGapMs) return false
+  // The ask count and the fortnight gap are deliberately **not** consulted any
+  // more. Windows will not let an application make itself the default, so this
+  // card is the only route there is; capping it at two attempts a fortnight
+  // meant somebody who dismissed it twice could never find it again, and the
+  // browser then silently stayed non-default for ever. It now offers on every
+  // launch until Slash genuinely is the default — at which point the first line
+  // of this function stops it permanently.
+  void now
   return true
 }
 
@@ -69,6 +77,15 @@ export function shouldOfferDefault(state: PromptState, now: number): boolean {
  * development, or something a caller should not be able to talk us into
  * opening.
  */
+/**
+ * File types Slash is registered to open, and can actually render.
+ *
+ * Chromium displays all of these natively, which is the bar for claiming one:
+ * an association for a type that would land on a download prompt is worse than
+ * no association.
+ */
+const OPENABLE_FILE = /\.(x?html?|pdf|svg|webp)$/i
+
 export function openTargetFromArgv(argv: readonly string[]): string | null {
   // Skip argv[0]: it is the executable, and in development it is followed by
   // the project directory, which is a real path and must not be opened.
@@ -79,10 +96,18 @@ export function openTargetFromArgv(argv: readonly string[]): string | null {
     if (/^https?:\/\//i.test(arg)) return arg
     if (/^file:\/\//i.test(arg)) return arg
 
-    // A local page, from the .htm/.html association. The scheme test demands
-    // two or more characters before the colon on purpose: `C:\pages\a.html` is
-    // a path, and a one-character "scheme" on Windows is always a drive letter.
-    if (/\.x?html?$/i.test(arg) && !/^[a-z][a-z0-9+.-]+:/i.test(arg)) {
+    // A local file, from one of the installer's associations. The scheme test
+    // demands two or more characters before the colon on purpose:
+    // `C:\pages\a.html` is a path, and a one-character "scheme" on Windows is
+    // always a drive letter.
+    //
+    // This list must stay in step with `fileAssociations` in
+    // electron-builder.yml. Registering a type the installer claims and then
+    // ignoring the path Windows hands over opens Slash to a blank tab, which is
+    // a worse outcome than never having claimed it — and it is exactly what
+    // happened when PDFs were associated while this test still read `.html`
+    // only.
+    if (OPENABLE_FILE.test(arg) && !/^[a-z][a-z0-9+.-]+:/i.test(arg)) {
       return toFileUrl(arg)
     }
   }

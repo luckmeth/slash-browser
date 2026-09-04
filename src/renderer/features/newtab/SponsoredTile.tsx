@@ -28,9 +28,14 @@ export function SponsoredTile(): React.JSX.Element | null {
   const counted = useRef<string | null>(null)
 
   useEffect(() => {
-    void window.browser.invoke('sponsor:status', undefined).then((result) => {
-      if (result.ok) setStatus(result.value)
-    })
+    const read = (): void => {
+      void window.browser.invoke('sponsor:status', undefined).then((result) => {
+        if (result.ok) setStatus(result.value)
+      })
+    }
+    read()
+    // Same reason as the page around it: mounted long before any batch exists.
+    return window.browser.on('sponsor:changed', read)
   }, [])
 
   const tile = status?.tile ?? null

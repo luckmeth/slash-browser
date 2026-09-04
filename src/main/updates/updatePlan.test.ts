@@ -121,3 +121,35 @@ describe('planInstall', () => {
     if (verdict.ok) expect(verdict.plan.size).toBe(0)
   })
 })
+
+describe('the shape a GitHub-hosted feed must have', () => {
+  // The release workflow uploads a `latest.json` beside the installer, so that
+  // a feed can be served from GitHub with no database and no secret anywhere.
+  // This pins the contract that file has to meet: change either side and this
+  // fails rather than the updater silently finding nothing.
+  const latestJson = {
+    version: '0.2.0',
+    releaseUrl: 'https://github.com/luckmeth/slash-browser/releases/tag/v0.2.0',
+    notes: 'What changed.',
+    fileUrl:
+      'https://github.com/luckmeth/slash-browser/releases/download/v0.2.0/Slash-0.2.0-x64.exe',
+    sha512: HEX,
+    size: 178192486
+  }
+
+  it('plans an install straight from it', () => {
+    const feed = 'https://github.com/luckmeth/slash-browser/releases/latest/download/latest.json'
+    const verdict = planInstall(latestJson, feed)
+    expect(verdict.ok).toBe(true)
+    if (verdict.ok) {
+      expect(verdict.plan.fileName).toBe('Slash-0.2.0-x64.exe')
+      expect(verdict.plan.size).toBe(178192486)
+    }
+  })
+
+  it('is accepted from the Supabase feed too, since the asset is on GitHub', () => {
+    // The two hosting choices are independent: the feed says where the file is,
+    // and a GitHub release asset is allowed from either.
+    expect(planInstall(latestJson, FEED).ok).toBe(true)
+  })
+})

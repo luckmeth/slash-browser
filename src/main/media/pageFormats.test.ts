@@ -207,7 +207,11 @@ describe('analyseFormats and formatsNote', () => {
     // "This page lists no media" and "every address here is signed" are
     // different facts, and the second one sends nobody off to file a bug.
     const note = formatsNote(analyseFormats({ formats: [{ signatureCipher: 's=a' }] }))
-    expect(note).toContain('signed addresses')
+    // The meaning, not the plural. This used to pin the exact string
+    // "signed addresses", which forced the copy to say "1 formats" — the
+    // grammatical bug that shipped and read as broken software.
+    expect(note).toMatch(/signed address(es)?/)
+    expect(note).toContain('nothing on this page')
   })
 
   it('says nothing when a complete file is on offer', () => {
@@ -217,6 +221,50 @@ describe('analyseFormats and formatsNote', () => {
   it('warns when every option is one half of a pair', () => {
     const note = formatsNote(analyseFormats({ adaptiveFormats: [videoOnly(), audioOnly()] }))
     expect(note).toContain('does not combine them')
+  })
+
+  it('still counts the signed formats when something else is offerable', () => {
+    // The case that made this look broken: YouTube lists one progressive 360p
+    // and every higher resolution behind a signed address. Showing the 360p row
+    // and saying nothing reads as "360p is all this video has".
+    const note = formatsNote(
+      analyseFormats({
+        formats: [progressive()],
+        adaptiveFormats: [{ signatureCipher: 's=a', mimeType: 'video/mp4', qualityLabel: '1080p' }]
+      })
+    )
+    expect(note).toContain('1 other format')
+    // The meaning, not the plural. This used to pin the exact string
+    // "signed addresses", which forced the copy to say "1 formats" — the
+    // grammatical bug that shipped and read as broken software.
+    // This page *does* have something offerable, so the note explains what is
+    // missing without claiming there is nothing here.
+    expect(note).toMatch(/signed address(es)?/)
+    expect(note).not.toContain('nothing on this page')
+  })
+
+  it('separates formats with no address from formats with a signed one', () => {
+    // Measured on a real watch page: thirty formats, every one carrying neither
+    // `url` nor `signatureCipher`. Counting those as zero of everything made
+    // the picker say the page had no video on it.
+    const analysis = analyseFormats({
+      adaptiveFormats: [
+        { mimeType: 'video/mp4; codecs="avc1"', qualityLabel: '1080p' },
+        { mimeType: 'audio/mp4; codecs="mp4a.40.2"' },
+        { signatureCipher: 's=a', mimeType: 'video/mp4' }
+      ]
+    })
+    expect(analysis.choices).toEqual([])
+    expect(analysis.signed).toBe(1)
+    expect(analysis.serverDriven).toBe(2)
+  })
+
+  it('says the address does not exist rather than that nothing was found', () => {
+    const note = formatsNote(
+      analyseFormats({ adaptiveFormats: [{ mimeType: 'video/mp4', qualityLabel: '1080p' }] })
+    )
+    expect(note).toContain('no address at all')
+    expect(note).toContain('does not exist until the player asks')
   })
 
   it('has nothing to explain about a page with no media at all', () => {
