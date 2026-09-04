@@ -78,7 +78,21 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
-    context.start()
+    // A throw in here used to mean **no window at all**: the browser stayed
+    // running with nothing on screen, the taskbar shortcut appeared dead
+    // because the single-instance lock handed it to that process, and no IPC
+    // handler was ever registered. That happened for real, from one call
+    // placed above `db.open()`.
+    //
+    // A browser that starts with a broken subsystem is worth far more than one
+    // that does not start, so the failure is logged and the window is opened
+    // anyway. Whatever is broken then fails visibly, in a browser the user can
+    // actually see and report from.
+    try {
+      context.start()
+    } catch (error) {
+      log.error('start() failed; opening a window anyway', error)
+    }
     buildApplicationMenu(context)
 
     // Right-clicking the taskbar icon. Every mainstream browser offers these

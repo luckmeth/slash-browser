@@ -636,16 +636,25 @@ export class AppContext {
   }
 
   start(): void {
-    // After `app.whenReady()`, which is the whole point: `safeStorage` is not
-    // usable before it, so reading this in a constructor signed the user out
-    // of Slash Coin on every launch. The activity tracker reads `signedIn` on
-    // each tick, so earning resumes from here without further wiring.
-    this.rewards.restoreSession()
-    this.broadcastRewards()
-
     if (this.started) return
     this.db.open()
     this.settings.load()
+
+    // **After `db.open()`, and that ordering is the whole of it.** Placing
+    // these two lines at the top of this method shipped a browser that did not
+    // open: `broadcastRewards` reads `pendingCount`, which queries
+    // `coin_intervals`, and a query before `open()` throws -- so `start()`
+    // aborted, no window was ever created, no IPC handler was registered, and
+    // the session was never restored. One misplaced call, and the symptom was
+    // a shortcut that did nothing and a set of tabs that looked lost.
+    //
+    // Restoring here rather than in RewardsService's constructor is still
+    // right: that constructor runs before `app.whenReady()`, and `safeStorage`
+    // cannot decrypt until after it. The activity tracker reads `signedIn` on
+    // each tick, so earning resumes from here with no further wiring.
+
+    this.rewards.restoreSession()
+    this.broadcastRewards()
 
     // After settings load: it reads them to decide whether to register at all.
     this.mediaKeys.start()
