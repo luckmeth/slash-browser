@@ -25,7 +25,7 @@ const startBody = (): string => {
   expect(begin).toBeGreaterThan(-1)
   // To the next method at the same indentation, which is enough to bound it.
   const after = text.slice(begin + 20)
-  const end = after.search(/\n  [a-zA-Z]+\(.*\): [a-zA-Z]/)
+  const end = after.search(/\n {2}[a-zA-Z]+\(.*\): [a-zA-Z]/)
   return end === -1 ? after : after.slice(0, end)
 }
 
