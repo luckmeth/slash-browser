@@ -87,10 +87,20 @@ jobs:
             echo "::error::Repository variable RELEASES_REPO is not set (expected owner/repo of the public releases repository). See docs/RELEASING.md."
             exit 1
           fi
+          # A *blank* secret and a missing one are the same empty string here, and
+          # they need opposite fixes: one is "create the token", the other is
+          # "you created it but the value did not arrive". `gh secret set` reads
+          # stdin, so an empty paste stores an empty secret and `gh secret list`
+          # then shows it as present — which sends anybody debugging this
+          # looking for a permissions fault that does not exist.
+          #
+          # The length is safe to print: it is a number, not the token, and
+          # Actions masks the value itself in logs regardless.
           if [ -z "$RELEASES_TOKEN" ]; then
-            echo "::error::Secret RELEASES_TOKEN is not set. It needs contents:write on $RELEASES_REPO and nothing else. See docs/RELEASING.md."
+            echo "::error::Secret RELEASES_TOKEN is empty. If 'gh secret list' shows it, the stored value is blank rather than the secret being absent - 'gh secret set' reads stdin and an empty paste stores an empty secret. Re-set it with an explicit value: gh secret set RELEASES_TOKEN --repo <this repo> --body \"<token>\". See docs/RELEASING.md."
             exit 1
           fi
+          echo "RELEASES_TOKEN length: ${#RELEASES_TOKEN}"
           echo "publishing to $RELEASES_REPO"
 
       - name: Typecheck
