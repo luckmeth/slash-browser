@@ -164,6 +164,17 @@ export const OverlayStateSchema = z.object({
      */
     'media-offer',
     /**
+     * "There is an update. Install it, or not, but answer."
+     *
+     * Modal and full-window, which almost nothing else here is allowed to be.
+     * The justification is that a chip already existed and was ignorable
+     * enough that a browser advertising an update it could not actually fetch
+     * went unnoticed. Shown at most **once per launch** — see `launchPrompt.ts`
+     * for why not once per check — and never before the first check has come
+     * back, so it cannot delay startup.
+     */
+    'update-required',
+    /**
      * A transient message: what happened, when the answer is "nothing".
      *
      * In the overlay because it has to be readable over a web page, and sized to

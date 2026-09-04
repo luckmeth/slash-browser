@@ -102,6 +102,7 @@ import { BrowserWindowController } from './windows/BrowserWindowController'
 import type { MediaOffer } from './windows/BrowserWindowController'
 import { CrashReporting } from './diagnostics/CrashReporting'
 import { UpdateService } from './updates/UpdateService'
+import { shouldPromptForUpdate } from './updates/launchPrompt'
 import { PageWatchService } from './snapshots/PageWatchService'
 import { MissionService } from './missions/MissionService'
 import { createLogger } from './logger'
@@ -298,6 +299,14 @@ export class AppContext {
   readonly injector: ScriptletInjector
   /** The script switches as they were, so a change can be noticed. */
   private lastScriptSwitches = ''
+  /**
+   * Whether this launch has already asked about an update.
+   *
+   * Deliberately in memory and never persisted: "cancel" means until the
+   * browser is next opened, which is what makes the prompt unmissable without
+   * making it a thing that follows you around.
+   */
+  private updatePrompted = false
   /** Hides the empty slots that blocked ads leave behind. */
   readonly cosmetics: CosmeticFilter
   private readonly gestures = new GestureTracker()
@@ -376,9 +385,18 @@ export class AppContext {
     this.crashes = new CrashReporting(this.db)
     this.updates = new UpdateService(
       () => this.settings.getAll().updateFeedUrl,
-      (status) => this.broadcastAll('updates:changed', status)
+      (status) => {
+        this.broadcastAll('updates:changed', status)
+        // The chip still appears; this is the half that cannot be scrolled
+        // past. Guarded so a six-hourly re-check never reopens it -- see
+        // launchPrompt.ts, where the whole decision lives and is tested.
+        if (shouldPromptForUpdate({ state: status.state, promptedThisLaunch: this.updatePrompted })) {
+          this.updatePrompted = true
+          this.focusedWindow()?.showUpdateRequired()
+        }
+      }
     )
-    // Nothing is contacted while no feed address is set, which is the default.
+    // A feed address is set by default, so this does check on launch.
     this.updates.startAutoCheck(
       () => this.settings.getAll().updateAutoCheck,
       () => this.settings.getAll().updateAutoDownload

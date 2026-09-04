@@ -574,6 +574,23 @@ export class BrowserWindowController {
   }
 
   /**
+   * Puts an available update in front of the user.
+   *
+   * Modal and focused, unlike onboarding: this one is a question with two
+   * answers and the buttons are the only way out, so the keyboard should reach
+   * them. Full bounds because it is deliberately not dismissable by clicking
+   * past it -- an overlay swallows clicks inside its own rect, and here that
+   * property is the feature rather than a cost to work around.
+   */
+  showUpdateRequired(): void {
+    const state = this.overlay.show('update-required', this.fullBounds(), {
+      modal: true,
+      takeFocus: true
+    })
+    this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
    * Opens tab search over the page.
    *
    * Modal and focused: it is a picker the user just asked for, and it has a text
