@@ -129,16 +129,16 @@ describe('the shape a GitHub-hosted feed must have', () => {
   // fails rather than the updater silently finding nothing.
   const latestJson = {
     version: '0.2.0',
-    releaseUrl: 'https://github.com/luckmeth/slash-browser/releases/tag/v0.2.0',
+    releaseUrl: 'https://github.com/luckmeth/slash-releases/releases/tag/v0.2.0',
     notes: 'What changed.',
     fileUrl:
-      'https://github.com/luckmeth/slash-browser/releases/download/v0.2.0/Slash-0.2.0-x64.exe',
+      'https://github.com/luckmeth/slash-releases/releases/download/v0.2.0/Slash-0.2.0-x64.exe',
     sha512: HEX,
     size: 178192486
   }
 
   it('plans an install straight from it', () => {
-    const feed = 'https://github.com/luckmeth/slash-browser/releases/latest/download/latest.json'
+    const feed = 'https://github.com/luckmeth/slash-releases/releases/latest/download/latest.json'
     const verdict = planInstall(latestJson, feed)
     expect(verdict.ok).toBe(true)
     if (verdict.ok) {

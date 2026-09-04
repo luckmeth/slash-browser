@@ -1,27 +1,28 @@
 import { z } from 'zod'
-import { REWARDS_URL_DEFAULT } from './rewards'
 
 /**
  * Where a stock build looks for a newer version.
  *
- * The `releases` table itself, read through PostgREST. That is deliberate and
- * it is what finally made updating work: the feed used to be an endpoint in
- * the advertiser web app, which has to be deployed somewhere for a browser to
- * reach it, and is not. Every copy of Slash therefore had nothing to check and
- * the updater never ran once for a real user.
+ * A `latest.json` asset on the **public releases repository**. GitHub resolves
+ * `releases/latest/download/<asset>` to the newest release, so publishing is
+ * the whole of publishing: tag, and every browser finds it on its next check.
+ * No database, no deployment, and no secret anywhere in the path a user takes.
  *
- * Published releases carry a public read policy, so this needs no session and
- * no per-installation key -- which matters, because a key per installation is
- * an identifier, and an update check must not become a way of counting people.
- * The answer is identical for every caller.
+ * The repository holding the code is private; this one holds nothing but
+ * installers and their checksums, which have to be public for an updater to
+ * reach them at all. A private release asset is not downloadable without
+ * credentials, and this browser carries none — it would fail silently on every
+ * machine, which is the worst way for an update system to be broken.
  *
- * Still overridable, and still clearable: emptying `updateFeedUrl` in settings
- * means Slash contacts nothing about updates at all.
+ * The request carries no identifier and no key, and the answer is identical
+ * for every caller, so a check cannot be used to count installations.
+ * Emptying `updateFeedUrl` in Settings stops it entirely.
+ *
+ * The shape of that file is pinned by `updatePlan.test.ts` against the
+ * workflow that writes it, so the two cannot drift apart quietly.
  */
 export const UPDATE_FEED_DEFAULT =
-  `${REWARDS_URL_DEFAULT}/rest/v1/releases` +
-  '?select=version,release_url,notes,file_url,sha512,size_bytes' +
-  '&channel=eq.stable&published=eq.true&order=published_at.desc&limit=1'
+  'https://github.com/luckmeth/slash-releases/releases/latest/download/latest.json'
 
 /**
  * Update checking.

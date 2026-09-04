@@ -1,11 +1,24 @@
 name: Release
 
-# Tagging a version builds the Windows installer, publishes it as a release
-# asset, and writes the metadata the in-app updater reads.
+# Tagging a version builds the Windows installer and publishes it — with the
+# checksum the updater verifies against — to the **public releases
+# repository**, which is a different repository from this one.
 #
-# The updater will only fetch an installer from Slash's own Supabase host or
-# from a GitHub release asset, so the asset must stay on the release. Moving it
-# to a CDN or a redirector breaks updating by design.
+# That split is deliberate: this repository is private, and a private release
+# asset is not downloadable without credentials. The browser carries none, so
+# publishing installers here would fail silently on every machine. The releases
+# repository holds nothing but installers and their checksums, which have to be
+# public for an updater to reach them at all.
+#
+# Publishing across repositories needs a token of its own: `GITHUB_TOKEN` is
+# scoped to the repository the workflow runs in. `RELEASES_TOKEN` should be a
+# fine-grained personal access token with **contents: write on the releases
+# repository and nothing else** — it can publish releases there and cannot read
+# a line of this repository.
+#
+# The updater fetches an installer only from Slash's own Supabase host or from
+# a GitHub release asset, so the asset must stay on the release. Moving it to a
+# CDN or a redirector breaks updating by design.
 on:
   push:
     tags: ['v*.*.*']
@@ -16,8 +29,10 @@ on:
         type: boolean
         default: true
 
+# Nothing is written to *this* repository: the release goes to the releases
+# repository using RELEASES_TOKEN, so the job's own token needs only to read.
 permissions:
-  contents: write
+  contents: read
 
 # One release at a time. Two tags racing would fight over the same version.
 concurrency:
@@ -57,6 +72,26 @@ jobs:
             echo "::error::Tag v$TAG does not match package.json version $PKG. Bump the version, commit, then re-tag."
             exit 1
           fi
+
+      # Before anything expensive. A missing variable or secret is a
+      # misconfiguration that should cost thirty seconds, not the ten minutes it
+      # takes to package, and it is set up once.
+      - name: Check the release destination is configured
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$RELEASES_REPO" ]; then
+            echo "::error::Repository variable RELEASES_REPO is not set (expected owner/repo of the public releases repository). See docs/RELEASING.md."
+            exit 1
+          fi
+          if [ -z "$RELEASES_TOKEN" ]; then
+            echo "::error::Secret RELEASES_TOKEN is not set. It needs contents:write on $RELEASES_REPO and nothing else. See docs/RELEASING.md."
+            exit 1
+          fi
+          echo "publishing to $RELEASES_REPO"
 
       - name: Typecheck
         run: npm run typecheck
@@ -111,9 +146,8 @@ jobs:
       # either side and that test fails rather than the updater quietly finding
       # nothing.
       #
-      # Only usable while the repository is public — a private repository's
-      # release assets are not publicly downloadable, and the updater has no
-      # credentials. See docs/RELEASING.md.
+      # Addressed at the **releases** repository, not this one, because that is
+      # where the asset will live and where a browser will fetch it from.
       - name: Write latest.json
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -121,8 +155,9 @@ jobs:
           VERSION: ${{ steps.measure.outputs.version }}
           SHA: ${{ steps.measure.outputs.sha512 }}
           SIZE: ${{ steps.measure.outputs.size }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
         run: |
-          BASE="https://github.com/${GITHUB_REPOSITORY}/releases"
+          BASE="https://github.com/${RELEASES_REPO}/releases"
           node -e "
             const fs = require('fs')
             fs.writeFileSync('release/latest.json', JSON.stringify({
@@ -140,7 +175,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Not `github.token`: that is scoped to this repository and cannot
+          # publish to the releases one.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
           VERSION: ${{ steps.measure.outputs.version }}
           SHA: ${{ steps.measure.outputs.sha512 }}
           SIZE: ${{ steps.measure.outputs.size }}
@@ -162,11 +200,17 @@ jobs:
             echo '```'
           } > "$NOTES"
 
+          # `--repo` publishes into the releases repository. The tag does not
+          # exist there, so GitHub creates it against that repository's default
+          # branch — which is why it needs at least one commit (a README).
           gh release create "$GITHUB_REF_NAME" \
             "release/Slash-${VERSION}-x64.exe" \
             "release/latest.json" \
+            --repo "$RELEASES_REPO" \
             --title "Slash $VERSION" \
             --notes-file "$NOTES"
+
+          echo "published https://github.com/${RELEASES_REPO}/releases/tag/${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
 
       # A manual run builds and checks without publishing, so the pipeline can
       # be exercised without cutting a release.
