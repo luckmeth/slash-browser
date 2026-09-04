@@ -149,7 +149,12 @@ export class RewardsService {
      */
     private readonly onSignedIn: () => void = () => {}
   ) {
-    this.restore()
+    // Deliberately does **not** restore here. `AppContext` is constructed
+    // before `app.whenReady()`, and `safeStorage` is not usable that early --
+    // so a restore in this constructor silently failed on every launch while
+    // the sign-in that wrote the file (which happens after ready) succeeded.
+    // The symptom was a browser that asked you to sign in to Slash Coin every
+    // single time it opened. Restored from `AppContext.start()` instead.
   }
 
   // --- configuration --------------------------------------------------------
@@ -238,8 +243,25 @@ export class RewardsService {
     return join(app.getPath('userData'), 'rewards.session')
   }
 
-  private restore(): void {
-    if (!safeStorage.isEncryptionAvailable()) return
+  /**
+   * Reads the stored session back, once the app is ready.
+   *
+   * Called from `AppContext.start()` rather than this class's constructor,
+   * because that constructor runs before `app.whenReady()` and `safeStorage`
+   * is not available until then -- it returned false, this bailed, and the
+   * account was "signed out" on every launch despite a perfectly good session
+   * file sitting on disk.
+   *
+   * Guarded so it cannot overwrite a session that is already live, and it logs
+   * why it gave up: the previous version failed silently in three different
+   * ways, which is why the cause took a user report to find.
+   */
+  restoreSession(): void {
+    if (this.session) return
+    if (!safeStorage.isEncryptionAvailable()) {
+      log.warn('no secure store, so a saved Slash Coin session cannot be read')
+      return
+    }
     try {
       const raw = readFileSync(this.sessionPath)
       const decoded = JSON.parse(safeStorage.decryptString(raw)) as {
@@ -256,9 +278,16 @@ export class RewardsService {
         expiresAt: 0,
         email: typeof decoded.email === 'string' ? decoded.email : ''
       }
-    } catch {
-      // No session, or one written by a different OS account. Either way the
-      // user simply is not signed in.
+      log.info('restored the Slash Coin session')
+    } catch (error) {
+      // No session file is the ordinary case on a first run and says nothing.
+      // Anything else is worth a line: a file written by a different OS
+      // account cannot be decrypted here, and that is indistinguishable from
+      // "not signed in" without one.
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT') {
+        log.warn(`could not read the stored Slash Coin session: ${String(error)}`)
+      }
     }
   }
 

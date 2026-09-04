@@ -636,6 +636,13 @@ export class AppContext {
   }
 
   start(): void {
+    // After `app.whenReady()`, which is the whole point: `safeStorage` is not
+    // usable before it, so reading this in a constructor signed the user out
+    // of Slash Coin on every launch. The activity tracker reads `signedIn` on
+    // each tick, so earning resumes from here without further wiring.
+    this.rewards.restoreSession()
+    this.broadcastRewards()
+
     if (this.started) return
     this.db.open()
     this.settings.load()
