@@ -61,15 +61,21 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
 /**
  * Checks a release feed for a newer version.
  *
- * **Deliberately does not download or install.** `electron-updater` is installed
- * and its config is in place, but auto-installing is withheld until the build is
- * code-signed: without a signature there is no way to verify an update package
- * came from us, and an unsigned auto-installer is a remote code path onto the
- * user's machine. Telling the user a version exists carries none of that risk.
+ * **Deliberately never installs silently.** It checks, and it downloads and
+ * verifies against the checksum the feed publishes -- but the last step always
+ * asks. `electron-updater` is installed and its config is in place, and
+ * auto-installing stays withheld until the build is code-signed: without a
+ * signature there is nothing proving an update package came from us, and an
+ * unsigned auto-installer is a remote code path onto the user's machine.
+ * Handing somebody a verified installer to run carries none of that risk.
  *
- * The feed URL comes from settings and is empty by default, so a fresh install
- * contacts nothing. That is also why this reports `no-channel` rather than
- * failing: there is no feed to be wrong about yet.
+ * The feed URL comes from settings and **defaults to Slash's own release
+ * feed**, so a fresh install does check on launch. That was a deliberate
+ * change: a browser that never learns about a Chromium security fix is a worse
+ * outcome than one outbound request carrying no identifier, no cookie and no
+ * per-installation key. Emptying `updateFeedUrl` stops it dead, and this then
+ * reports `no-channel` rather than failing, because there is no feed to be
+ * wrong about.
  */
 export class UpdateService {
   private status: UpdateStatus
@@ -104,10 +110,11 @@ export class UpdateService {
   /**
    * Checks on launch and every few hours.
    *
-   * Does nothing at all while no feed is configured, which is the default --
-   * the address is the switch that decides whether this browser talks to a
-   * server about updates, and this only decides how often once one exists. The
-   * first check is delayed so it never competes with the first paint.
+   * Does nothing at all while no feed is configured -- the address is the
+   * switch that decides whether this browser talks to a server about updates,
+   * and this only decides how often once one exists. A feed **is** configured
+   * by default, so this does run on a fresh install. The first check is
+   * delayed so it never competes with the first paint.
    */
   startAutoCheck(enabled: () => boolean, autoDownload: () => boolean): void {
     const run = (): void => {

@@ -537,10 +537,11 @@ export const SettingsSchema = z.object({
   /**
    * Check the feed on launch and every few hours.
    *
-   * On by default, and still contacts nothing while `updateFeedUrl` is empty --
-   * which it is on a fresh install. The pair is deliberate: the switch that
-   * decides *whether* to talk to a server is the address, and this one only
-   * decides how often once that address exists.
+   * On by default, and still contacts nothing while `updateFeedUrl` is empty.
+   * It is **not** empty on a fresh install -- it carries Slash's own feed -- so
+   * a default install does check on launch and every few hours. The pair is
+   * deliberate: the switch that decides *whether* to talk to a server is the
+   * address, and this one only decides how often once that address exists.
    */
   updateAutoCheck: z.boolean().default(true),
   /**
