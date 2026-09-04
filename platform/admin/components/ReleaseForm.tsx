@@ -34,27 +34,33 @@ export function ReleaseForm(): React.JSX.Element {
         <label htmlFor="fileUrl">Installer address (optional)</label>
         <input id="fileUrl" name="fileUrl" placeholder="https://…/Slash-Setup-0.2.0.exe" />
         <p className="note">
-          With this and a checksum, browsers fetch the installer themselves and verify it before
-          running it. Without them they only learn that a version exists and send people to the
-          release page. It must be <code>https</code>, and on the same host as this feed or a GitHub
-          release asset — the browser refuses to fetch an executable from anywhere else.
+          Give this and browsers fetch the installer themselves, check it against a checksum, and
+          offer to install it. Leave it empty and they only learn a version exists and point people
+          at the release page. It must be <code>https</code>, and on Slash&rsquo;s own Supabase host
+          or a GitHub release asset — the browser refuses to fetch an executable from anywhere else.
         </p>
-      </div>
-      <div>
-        <label htmlFor="sha512">SHA-512 of that file (optional)</label>
-        <input id="sha512" name="sha512" placeholder="hex or base64" spellCheck={false} />
         <p className="note">
-          <code>certutil -hashfile &quot;Slash Setup 0.2.0.exe&quot; SHA512</code> on Windows, or{' '}
-          <code>shasum -a 512</code> elsewhere. A download that does not match is deleted by the
-          browser and nothing is installed. This is integrity, not a signature: anybody who can edit
-          this row can change the file and this value together.
+          <strong>Publishing will download it once</strong> to measure the checksum, so expect this
+          to take a minute on a large installer.
         </p>
       </div>
-      <div>
-        <label htmlFor="sizeBytes">Size in bytes (optional)</label>
-        <input id="sizeBytes" name="sizeBytes" type="number" min="0" placeholder="188000000" />
-        <p className="note">Checked after the download, and used to show a progress bar.</p>
-      </div>
+      <details className="advanced">
+        <summary>Checksum — computed for you unless you paste one</summary>
+        <div style={{ padding: '14px 18px' }}>
+          <label htmlFor="sha512">SHA-512</label>
+          <input id="sha512" name="sha512" placeholder="left empty: measured from the file" spellCheck={false} />
+          <p className="note">
+            Publishing fetches the installer and hashes it, so this is normally left empty —
+            transcribing 128 characters is the one mistake that makes every update fail
+            verification, and the failure looks like a broken updater rather than a typo. Paste one
+            only to pin a value you have already verified elsewhere.
+          </p>
+          <label htmlFor="sizeBytes" style={{ marginTop: 12 }}>
+            Size in bytes
+          </label>
+          <input id="sizeBytes" name="sizeBytes" type="number" min="0" placeholder="measured too" />
+        </div>
+      </details>
       <div>
         <label htmlFor="notes">Notes</label>
         <textarea id="notes" name="notes" placeholder="Shown in the browser beside the update." />
@@ -62,7 +68,7 @@ export function ReleaseForm(): React.JSX.Element {
       {state && 'error' in state && <p className="error">{state.error}</p>}
       {state && 'ok' in state && <p className="note" style={{ color: 'var(--good)' }}>{state.ok}</p>}
       <button type="submit" disabled={busy}>
-        {busy ? 'Publishing…' : 'Publish'}
+        {busy ? 'Publishing — fetching and hashing the installer…' : 'Publish'}
       </button>
     </form>
   )

@@ -726,6 +726,57 @@ export class RewardsService {
     }
   }
 
+  /**
+   * Asks to be paid.
+   *
+   * The coins leave the balance inside the same statement that records the
+   * claim -- a balance that still shows coins already claimed is a balance
+   * somebody claims twice -- and come back in full if an operator refuses.
+   * Everything that decides anything is in `request_payout`: the minimum, the
+   * one-open-request rule, the completed profile, the wallet. This carries the
+   * ask and reports the answer.
+   */
+  async requestPayout(coins: number): Promise<{ ok: boolean; problem: string }> {
+    if (!this.signedIn) return { ok: false, problem: 'Sign in first.' }
+    try {
+      await this.rpc('request_payout', { coins })
+      await this.refreshState()
+      this.onChanged()
+      return { ok: true, problem: '' }
+    } catch (error) {
+      return { ok: false, problem: readableRpc(String(error)) }
+    }
+  }
+
+  /** A fresh challenge to sign in a wallet. */
+  async walletChallenge(): Promise<{ ok: boolean; problem: string; challenge: string }> {
+    if (!this.signedIn) return { ok: false, problem: 'Sign in first.', challenge: '' }
+    try {
+      const raw = (await this.rpc('issue_wallet_challenge', {})) as { challenge?: string }
+      return { ok: true, problem: '', challenge: String(raw.challenge ?? '') }
+    } catch (error) {
+      return { ok: false, problem: readableRpc(String(error)), challenge: '' }
+    }
+  }
+
+  /**
+   * Stores the signature. It is **not** verified here.
+   *
+   * A browser that marked its own wallet verified would be proving nothing at
+   * all. Slash Operations recovers the signing address server-side and
+   * compares it, and only then is a wallet verified.
+   */
+  async submitWalletSignature(signature: string): Promise<{ ok: boolean; problem: string }> {
+    if (!this.signedIn) return { ok: false, problem: 'Sign in first.' }
+    try {
+      await this.rpc('submit_wallet_signature', { signature })
+      this.onChanged()
+      return { ok: true, problem: '' }
+    } catch (error) {
+      return { ok: false, problem: readableRpc(String(error)) }
+    }
+  }
+
   /** Pulls the balance, the day's total and the campaign settings. */
   async refreshState(): Promise<void> {
     if (!this.enabled) return
@@ -895,3 +946,19 @@ const PAGE = (title: string, body: string): string =>
   `<body style="font:15px system-ui;background:#0d1017;color:#e6e9ef;display:grid;place-items:center;height:100vh;margin:0">` +
   `<div style="text-align:center"><h1 style="font-size:19px;font-weight:600">${title}</h1>` +
   `<p style="color:#9aa3b2">${body}</p></div>`
+
+/**
+ * A Postgres exception as a sentence somebody can act on.
+ *
+ * These functions raise with the message already written for a person -- "the
+ * smallest payout is 1000 coins" -- so the work here is getting it out of the
+ * wrapper rather than rewriting it.
+ */
+function readableRpc(error: string): string {
+  const match = /"message":"([^"]+)"/.exec(error) ?? /message: ([^,}]+)/.exec(error)
+  if (match?.[1]) return match[1].replace(/\\n/g, ' ').trim()
+  if (error.includes('404')) {
+    return 'This deployment is missing the payout functions. Apply supabase/migrations/20260904_updates_and_payouts.sql.'
+  }
+  return 'The rewards service refused that.'
+}

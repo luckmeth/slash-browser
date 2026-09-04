@@ -22,6 +22,7 @@ const PAGES: ReadonlyArray<{ href: string; label: string }> = [
   { href: '/pricing', label: 'Pricing' },
   { href: '/coin', label: 'Slash Coin' },
   { href: '/collectors', label: 'Collectors' },
+  { href: '/payouts', label: 'Payouts' },
   { href: '/browser', label: 'Browser' },
   { href: '/releases', label: 'Releases' },
   { href: '/emails', label: 'Email log' },

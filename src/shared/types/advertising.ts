@@ -98,7 +98,19 @@ export const CampaignSummarySchema = z.object({
   totalHours: z.number(),
   startsAt: z.string(),
   endsAt: z.string(),
-  reviewNote: z.string().default('')
+  reviewNote: z.string().default(''),
+  /**
+   * What was delivered, summed from the daily counts.
+   *
+   * Indicative and late by design: browsers report in batches every few hours
+   * and only when they are reopened, so a campaign that started an hour ago
+   * shows nothing and that is correct rather than broken. The screen says so
+   * rather than letting somebody conclude their advert is not running.
+   */
+  impressions: z.number().default(0),
+  clicks: z.number().default(0),
+  /** Whether the advertiser may still take it back: before review or payment. */
+  cancellable: z.boolean().default(false)
 })
 export type CampaignSummary = z.infer<typeof CampaignSummarySchema>
 

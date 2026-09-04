@@ -8,6 +8,7 @@ import {
 } from '@shared/types/advertising'
 import { Icon } from '../../components/Icon'
 import { CreativePicker } from './CreativePicker'
+import { LegalLinks } from '../legal/LegalLinks'
 
 /**
  * Booking an advert without leaving the browser.
@@ -89,7 +90,8 @@ export function CampaignComposer(): React.JSX.Element {
           onSubmitted={load}
         />
       )}
-      {state.campaigns.length > 0 && <CampaignList state={state} />}
+      {state.campaigns.length > 0 && <CampaignList state={state} onChanged={load} />}
+      <LegalLinks context="advertising" />
     </div>
   )
 }
@@ -421,7 +423,16 @@ function BookingCard({
   )
 }
 
-function CampaignList({ state }: { state: AdvertiserState }): React.JSX.Element {
+function CampaignList({
+  state,
+  onChanged
+}: {
+  state: AdvertiserState
+  onChanged: () => void
+}): React.JSX.Element {
+  const [cancelling, setCancelling] = useState('')
+  const [asking, setAsking] = useState('')
+
   return (
     <section className="glass-raised rounded-2xl border border-[var(--glass-edge)] p-5">
       <h2 className="text-[14px] font-semibold">Your campaigns</h2>
@@ -429,37 +440,102 @@ function CampaignList({ state }: { state: AdvertiserState }): React.JSX.Element 
         {state.campaigns.map((campaign) => (
           <div
             key={campaign.id}
-            className="flex items-center gap-3 rounded-xl border border-[var(--glass-edge)] px-4 py-3"
+            className="rounded-xl border border-[var(--glass-edge)] px-4 py-3"
           >
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px]">{campaign.title}</p>
-              <p className="text-[11.5px] text-[var(--color-text-muted)]">
-                {new Date(campaign.startsAt).toLocaleDateString()} —{' '}
-                {new Date(campaign.endsAt).toLocaleDateString()} · ${campaign.totalCost.toFixed(2)}
-              </p>
-              {campaign.reviewNote !== '' && (
-                <p className="mt-1 text-[11.5px] text-[var(--color-warn)]">{campaign.reviewNote}</p>
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px]">{campaign.title}</p>
+                <p className="text-[11.5px] text-[var(--color-text-muted)]">
+                  {new Date(campaign.startsAt).toLocaleDateString()} —{' '}
+                  {new Date(campaign.endsAt).toLocaleDateString()} · ${campaign.totalCost.toFixed(2)}
+                </p>
+                {campaign.reviewNote !== '' && (
+                  <p className="mt-1 text-[11.5px] text-[var(--color-warn)]">{campaign.reviewNote}</p>
+                )}
+              </div>
+              <span className="shrink-0 rounded-full bg-white/8 px-2.5 py-1 text-[11px] text-[var(--color-text-muted)]">
+                {campaign.status.replace(/_/g, ' ')}
+              </span>
+
+              {/* Paying means Stripe, and Stripe means the web. */}
+              {campaign.status === 'approved_unpaid' || campaign.status === 'pending_payment' ? (
+                <button
+                  type="button"
+                  disabled={state.portalUrl === ''}
+                  onClick={() =>
+                    void window.browser.invoke('tabs:create', {
+                      url: `${state.portalUrl.replace(/\/+$/, '')}/dashboard`,
+                      background: false
+                    })
+                  }
+                  className="shrink-0 cursor-default rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[11.5px] font-semibold text-black disabled:opacity-40"
+                >
+                  Pay
+                </button>
+              ) : null}
+
+              {campaign.cancellable && (
+                <button
+                  type="button"
+                  disabled={cancelling === campaign.id}
+                  onClick={() => setAsking(asking === campaign.id ? '' : campaign.id)}
+                  className="shrink-0 cursor-default rounded-lg border border-[var(--glass-edge)] px-3 py-1.5 text-[11.5px] text-[var(--color-text-muted)] transition hover:border-[var(--color-bad)] hover:text-[var(--color-bad)]"
+                >
+                  {cancelling === campaign.id ? 'Withdrawing…' : 'Withdraw'}
+                </button>
               )}
             </div>
-            <span className="shrink-0 rounded-full bg-white/8 px-2.5 py-1 text-[11px] text-[var(--color-text-muted)]">
-              {campaign.status.replace(/_/g, ' ')}
-            </span>
-            {/* Paying means Stripe, and Stripe means the web. */}
-            {campaign.status === 'approved_unpaid' || campaign.status === 'pending_payment' ? (
-              <button
-                type="button"
-                disabled={state.portalUrl === ''}
-                onClick={() =>
-                  void window.browser.invoke('tabs:create', {
-                    url: `${state.portalUrl.replace(/\/+$/, '')}/dashboard`,
-                    background: false
-                  })
-                }
-                className="shrink-0 cursor-default rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[11.5px] font-semibold text-black disabled:opacity-40"
-              >
-                Pay
-              </button>
-            ) : null}
+
+            {/* What it actually delivered. Only once it can have delivered
+                something — a run that has not started showing "0 impressions"
+                reads as a fault rather than as a fact. */}
+            {(campaign.status === 'active' || campaign.status === 'completed') && (
+              <p className="mt-2 text-[11.5px] text-[var(--color-text-muted)]">
+                <span className="text-[var(--color-text-primary)] tabular-nums">
+                  {campaign.impressions.toLocaleString()}
+                </span>{' '}
+                shown ·{' '}
+                <span className="text-[var(--color-text-primary)] tabular-nums">
+                  {campaign.clicks.toLocaleString()}
+                </span>{' '}
+                clicked — counted per day, reported by browsers in batches, so the last few hours
+                are always missing.
+              </p>
+            )}
+
+            {asking === campaign.id && (
+              <div className="mt-2 rounded-lg border border-[var(--color-bad)]/30 bg-[var(--color-bad)]/8 p-3">
+                <p className="text-[11.5px] text-[var(--color-text-muted)]">
+                  Withdrawing removes it entirely. Nothing has been charged, and it can be submitted
+                  again from scratch.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCancelling(campaign.id)
+                      setAsking('')
+                      void window.browser
+                        .invoke('advertiser:cancelCampaign', { id: campaign.id })
+                        .then(() => {
+                          setCancelling('')
+                          onChanged()
+                        })
+                    }}
+                    className="cursor-default rounded-lg bg-[var(--color-bad)]/20 px-3 py-1.5 text-[11.5px] text-[var(--color-bad)]"
+                  >
+                    Yes, withdraw it
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAsking('')}
+                    className="cursor-default rounded-lg border border-[var(--glass-edge)] px-3 py-1.5 text-[11.5px] text-[var(--color-text-muted)]"
+                  >
+                    Keep it
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

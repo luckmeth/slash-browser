@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { UPDATE_FEED_DEFAULT } from './updates'
 
 /**
  * Application settings. This schema is also the persistence format and the
@@ -522,13 +523,17 @@ export const SettingsSchema = z.object({
 
   // --- updates ---------------------------------------------------------------
   /**
-   * Release feed to check for newer versions. Empty by default.
+   * Release feed to check for newer versions.
    *
-   * Empty means Slash contacts nothing at all — there is no default endpoint,
-   * because a browser that phones a server on first launch to ask about updates
-   * has made an outbound request the user never agreed to.
+   * Defaults to Slash's own, because a browser that never learns about a
+   * security fix is a worse outcome than an update check — Chromium ships
+   * fixes roughly monthly and this is how they arrive. The request carries no
+   * identifier, no cookie and no per-installation key, and the answer is the
+   * same for everybody, so it cannot be used to count installations.
+   *
+   * Emptying this stops it dead: no address, no check, nothing contacted.
    */
-  updateFeedUrl: z.string().default(''),
+  updateFeedUrl: z.string().default(UPDATE_FEED_DEFAULT),
   /**
    * Check the feed on launch and every few hours.
    *
@@ -541,11 +546,12 @@ export const SettingsSchema = z.object({
   /**
    * Fetch the package as soon as a newer version is found.
    *
-   * Off by default. Downloading a hundred megabytes without being asked is a
-   * decision about somebody's connection, and installing is always a separate
-   * click regardless of this.
+   * On, so that saying yes to an update is one click rather than a wait. The
+   * cost is real -- it is a large download on somebody's connection -- so it
+   * is a switch, and turning it off leaves the check working and the download
+   * manual. **Installing always asks**, whatever this is set to.
    */
-  updateAutoDownload: z.boolean().default(false),
+  updateAutoDownload: z.boolean().default(true),
 
   // --- cleanup mode ----------------------------------------------------------
   /** Which Cleanup Mode the Clean This Page button uses. */

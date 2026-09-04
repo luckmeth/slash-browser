@@ -1254,11 +1254,37 @@ export const invokeContracts = {
   'advertiser:state': { request: z.void(), response: AdvertiserStateSchema },
   'advertiser:saveCompany': { request: CompanyInputSchema, response: AdvertiserResultSchema },
   'advertiser:submitCampaign': { request: CampaignInputSchema, response: AdvertiserResultSchema },
+  /** Withdraws a campaign that is still waiting for review or payment. */
+  'advertiser:cancelCampaign': {
+    request: z.object({ id: z.string() }),
+    response: AdvertiserResultSchema
+  },
 
   'rewards:profile': { request: z.void(), response: CoinProfileSchema.nullable() },
   'rewards:saveProfile': {
     request: CoinProfileInputSchema,
     response: CoinProfileResultSchema
+  },
+
+  /**
+   * Asking to be paid, and proving the wallet.
+   *
+   * Every rule lives in the database functions these call: the minimum, the
+   * one-request-at-a-time rule, and the deduction that stops a balance being
+   * claimed twice. The signature is stored, never verified here -- a client
+   * that verified its own wallet would be proving nothing.
+   */
+  'rewards:requestPayout': {
+    request: z.object({ coins: z.number().positive() }),
+    response: z.object({ ok: z.boolean(), problem: z.string() })
+  },
+  'rewards:walletChallenge': {
+    request: z.void(),
+    response: z.object({ ok: z.boolean(), problem: z.string(), challenge: z.string() })
+  },
+  'rewards:submitWalletSignature': {
+    request: z.object({ signature: z.string().max(400) }),
+    response: z.object({ ok: z.boolean(), problem: z.string() })
   },
   /**
    * Downloads and installs the available update, then relaunches.

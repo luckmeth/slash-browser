@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { countryOptions } from '@shared/countries'
+import { PRIVACY_URL } from '@shared/types/tab'
 import { checkProfile, WALLET_NETWORKS, WALLET_NETWORK_LABELS } from '@shared/profileRules'
 import type { CoinProfile, CoinProfileInput } from '@shared/types/rewards'
 import { Icon } from '../../components/Icon'
+import { PayoutCard } from './PayoutCard'
 
 /**
  * The details a collector gives once, after signing in.
@@ -28,11 +30,16 @@ import { Icon } from '../../components/Icon'
  */
 export function ProfileCard({
   email,
-  locked = false
+  locked = false,
+  balance,
+  coinToUsd
 }: {
   email: string
   /** Earning is waiting on this form. It cannot be folded away while so. */
   locked?: boolean
+  /** For the payout card underneath: what there is to cash in, and at what. */
+  balance: number
+  coinToUsd: number | null
 }): React.JSX.Element {
   const [profile, setProfile] = useState<CoinProfile | null>(null)
   const [form, setForm] = useState<CoinProfileInput | null>(null)
@@ -42,6 +49,14 @@ export function ProfileCard({
   const [serverProblems, setServerProblems] = useState<Record<string, string>>({})
 
   const countries = useMemo(() => countryOptions(), [])
+
+  const reload = (): void => {
+    void window.browser.invoke('rewards:profile', undefined).then((result) => {
+      if (!result.ok || result.value === null) return
+      setProfile(result.value)
+      setForm(toInput(result.value))
+    })
+  }
 
   useEffect(() => {
     void window.browser.invoke('rewards:profile', undefined).then((result) => {
@@ -96,7 +111,8 @@ export function ProfileCard({
   }
 
   return (
-    <section className="slash-reveal glass-raised mt-3 overflow-hidden rounded-2xl border border-[var(--glass-edge)]">
+    <>
+      <section className="slash-reveal glass-raised mt-3 overflow-hidden rounded-2xl border border-[var(--glass-edge)]">
       <button
         type="button"
         // While earning is waiting on it, this is the one thing on the page
@@ -132,10 +148,23 @@ export function ProfileCard({
 
       {showing && (
         <div className="border-t border-[var(--glass-edge)] px-5 py-5">
-          <p className="mb-4 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+          <p className="mb-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
             Stored against your Slash Coin account and readable by nobody else. It is here so a
             payout has somewhere to go and a name to go under — none of it is needed to browse, and
             none of it is collected from your machine.
+          </p>
+          <p className="mb-4 text-[11.5px] text-[var(--color-text-muted)]">
+            What is done with it is set out in{' '}
+            <button
+              type="button"
+              onClick={() =>
+                void window.browser.invoke('tabs:create', { url: PRIVACY_URL, background: false })
+              }
+              className="cursor-default text-[var(--color-accent)] underline underline-offset-2"
+            >
+              Privacy
+            </button>
+            .
           </p>
 
           <Row label="Email">
@@ -271,7 +300,19 @@ export function ProfileCard({
           </div>
         </div>
       )}
-    </section>
+      </section>
+
+      {/* Only once there is somewhere to pay and something to pay: an empty
+          payout box above an empty balance is furniture. */}
+      {profile.complete && (
+        <PayoutCard
+          profile={profile}
+          balance={balance}
+          coinToUsd={coinToUsd}
+          onChanged={reload}
+        />
+      )}
+    </>
   )
 }
 

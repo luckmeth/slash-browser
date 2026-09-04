@@ -5,6 +5,7 @@ import { Icon } from '../../components/Icon'
 import { useReveal } from '../../hooks/useReveal'
 import { ProfileCard } from '../rewards/ProfileCard'
 import { hoursPerCoin } from './coinRates'
+import { LegalLinks } from '../legal/LegalLinks'
 
 /**
  * Slash Coin, for somebody who has never heard of it.
@@ -282,7 +283,12 @@ export function RewardsPage(): React.JSX.Element {
         )}
 
         {/* Their details, for a payout that has somewhere to go ---------- */}
-        {enabled && signedIn && <ProfileCard email={status?.email ?? ''} locked={locked} />}
+        {enabled && signedIn && <ProfileCard
+            email={status?.email ?? ''}
+            locked={locked}
+            balance={status?.balance ?? 0}
+            coinToUsd={status?.coinToUsd ?? null}
+          />}
 
         {/* Rates -------------------------------------------------------- */}
         {enabled && (
@@ -688,6 +694,7 @@ export function RewardsPage(): React.JSX.Element {
         <p className="slash-reveal mt-6 rounded-xl border border-[var(--glass-edge)] bg-white/[0.03] p-4 text-center text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
           {COIN_DISCLAIMER}
         </p>
+            <LegalLinks context="coin" />
       </div>
     </div>
   )

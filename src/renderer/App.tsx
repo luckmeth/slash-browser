@@ -1,12 +1,36 @@
 import { useEffect, useState } from 'react'
-import { SETTINGS_URL, NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
+import {
+  SETTINGS_URL,
+  NEW_TAB_URL,
+  ADVERTISE_URL,
+  REWARDS_URL,
+  TERMS_URL,
+  PRIVACY_URL,
+  isInternalUrl
+} from '@shared/types/tab'
 import {
   CHROME_HEIGHT,
   TITLE_BAR_HEIGHT,
   TOOLBAR_HEIGHT,
   VERTICAL_TAB_STRIP_WIDTH,
-  WINDOW_CONTROLS_WIDTH
+  WINDOW_CONTROLS_WIDTH,
+  WORKSPACE_BAR_HEIGHT
 } from '@shared/constants'
+
+/**
+ * Chrome left on screen when it is hidden, so the pointer has somewhere to
+ * arrive. See the note on `chromeShown`.
+ */
+/**
+ * Whether the launch sequence has already played in this process.
+ *
+ * Module-level rather than state: React can remount `App` — a hot reload in
+ * development, a future error boundary — and replaying the boot animation on a
+ * browser somebody is already using would read as a crash and recovery.
+ */
+let bootPlayed = false
+
+const AUTO_HIDE_PEEK = 6
 import { FindBar, FIND_BAR_HEIGHT } from './features/find/FindBar'
 import { HandoffNotice, HANDOFF_NOTICE_HEIGHT } from './features/handoff/HandoffNotice'
 import { PopupBlockedNotice, POPUP_NOTICE_HEIGHT } from './features/shield/PopupBlockedNotice'
@@ -21,11 +45,17 @@ import { ErrorPage } from './features/errors/ErrorPage'
 import { SettingsPanel } from './features/panels/SettingsPanel'
 import { SplitDivider } from './features/split/SplitDivider'
 import { SidePanel } from './features/panels/SidePanel'
+import { AdvertisePage } from './features/newtab/AdvertisePage'
+import { RewardsPage } from './features/newtab/RewardsPage'
+import { CoinChip } from './features/rewards/CoinChip'
+import { BrandMark } from './components/BrandMark'
 import { WorkspaceRail } from './features/workspaces/WorkspaceRail'
 import { useWorkspaceTheme } from './features/workspaces/useWorkspaceTheme'
 import { useAppearance } from './features/settings/useAppearance'
 import { PrivateNotice, PRIVATE_NOTICE_HEIGHT } from './features/private/PrivateNotice'
 import { Icon } from './components/Icon'
+import { UpdateChip } from './features/updates/UpdateChip'
+import { LegalPage } from './features/legal/LegalPage'
 
 /**
  * Browser chrome.
@@ -46,6 +76,8 @@ export function App(): React.JSX.Element {
   const requestOmniboxFocus = useBrowserStore((s) => s.requestOmniboxFocus)
   const refreshHistory = useBrowserStore((s) => s.refreshHistory)
   const openFind = useBrowserStore((s) => s.openFind)
+  const settings = useBrowserStore((s) => s.settings)
+  const focusOmniboxToken = useBrowserStore((s) => s.focusOmniboxToken)
   const findOpen = useBrowserStore((s) => s.findOpen)
   const handoffDismissedHost = useBrowserStore((s) => s.handoffDismissedHost)
   const workspaces = useBrowserStore((s) => s.workspaces)
@@ -111,23 +143,86 @@ export function App(): React.JSX.Element {
     setBlockedNav(null)
   }, [activeTab?.url])
 
+  /**
+   * Auto-hide: whether the chrome is currently showing.
+   *
+   * A sliver of chrome always remains — `AUTO_HIDE_PEEK` — and that sliver is
+   * the entire mechanism. The page is a **native view composited above the
+   * chrome document**, so once it covers the top of the window the chrome can
+   * no longer see the pointer at all; there is no mouse event to listen for.
+   * Leaving a few pixels of real chrome gives the pointer something to arrive
+   * at, and is the only approach here that does not need main to poll the
+   * cursor.
+   *
+   * That sliver must **not** be a drag region. `-webkit-app-region: drag` is
+   * handled above the DOM — Chromium routes the pointer to the window move
+   * handler and dispatches no mouse event at all — so the first version of
+   * this, which reused the `app-drag` class from the row below, hid the chrome
+   * and then had no way on earth to bring it back. Every other row here is a
+   * drag region, which is exactly why the mistake looked right.
+   */
+  // Skipped entirely when the system asks for less motion, and skipped on every
+  // remount after the first.
+  const [booting, setBooting] = useState(() => {
+    if (bootPlayed) return false
+    if (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true) return false
+    bootPlayed = true
+    return true
+  })
+
+  useEffect(() => {
+    if (!booting) return
+    // Matches the CSS: the mark fades in, draws, holds, then clears at 1390ms.
+    const timer = setTimeout(() => setBooting(false), 1450)
+    return () => clearTimeout(timer)
+  }, [booting])
+
+  const autoHide = settings?.autoHideChrome ?? false
+  const [chromeShown, setChromeShown] = useState(false)
+  const chromeHidden = autoHide && !chromeShown
+
+  // Any reason to focus the address bar is a reason to bring the bars back —
+  // otherwise Ctrl+L would put the caret in something that is not on screen.
+  useEffect(() => {
+    if (focusOmniboxToken > 0) setChromeShown(true)
+  }, [focusOmniboxToken])
+
+  // Turning the setting off must not leave the chrome hidden.
+  useEffect(() => {
+    if (!autoHide) setChromeShown(false)
+  }, [autoHide])
+
+  // Main watches for the pointer coming back, because the renderer cannot: the
+  // top edge of the window is the OS resize border, so a hover strip there is
+  // never delivered to any web content however it is styled. See
+  // `BrowserWindowController.setChromeAutoHidden`.
+  useEffect(() => {
+    void window.browser.invoke('layout:setChromeHidden', { active: autoHide, hidden: chromeHidden })
+  }, [autoHide, chromeHidden])
+
   useEffect(() => {
     void window.browser.invoke('layout:setChromeHeight', {
       height:
-        CHROME_HEIGHT +
+        (chromeHidden ? AUTO_HIDE_PEEK : CHROME_HEIGHT) +
         (findOpen ? FIND_BAR_HEIGHT : 0) +
         (handoffShowing ? HANDOFF_NOTICE_HEIGHT : 0) +
         (blockedPopup ? POPUP_NOTICE_HEIGHT : 0) +
         (blockedNav ? NAV_NOTICE_HEIGHT : 0) +
         (isPrivate ? PRIVATE_NOTICE_HEIGHT : 0)
     })
-  }, [findOpen, handoffShowing, blockedPopup, blockedNav, isPrivate])
+  }, [findOpen, handoffShowing, blockedPopup, blockedNav, isPrivate, chromeHidden])
 
   // Menu accelerators arrive here because a native view — usually the page —
   // holds keyboard focus, so the chrome document never sees the keystroke.
   useEffect(() => {
     return window.browser.on('ui:command', ({ command }) => {
       switch (command) {
+        case 'reveal-chrome':
+          setChromeShown(true)
+          break
+        case 'hide-chrome':
+          setChromeShown(false)
+          break
         case 'focus-omnibox':
           requestOmniboxFocus()
           break
@@ -192,6 +287,10 @@ export function App(): React.JSX.Element {
 
   const showNewTab = activeTab?.url === NEW_TAB_URL
   const showSettings = activeTab?.url === SETTINGS_URL
+  const showAdvertise = activeTab?.url === ADVERTISE_URL
+  const showRewards = activeTab?.url === REWARDS_URL
+  const showTerms = activeTab?.url === TERMS_URL
+  const showPrivacy = activeTab?.url === PRIVACY_URL
   // Main insets the native page view to match; the two read the same constant.
   const verticalTabs = appearance?.tabStripPosition === 'left'
   const crashed = activeTab?.status === 'crashed'
@@ -205,27 +304,135 @@ export function App(): React.JSX.Element {
   return (
     // No opaque background: the window's acrylic is the backdrop, and each row
     // below adds its own translucent layer over it.
-    <div className="flex h-full flex-col">
+    <div
+      className="flex h-full flex-col"
+      onMouseLeave={() => {
+        // Deliberately empty of auto-hide logic. Hiding used to happen here, on
+        // the DOM `mouseleave`, which fires the instant the pointer crosses into
+        // the page — so the bars vanished while the pointer was still on its way
+        // to a tab, and the whole feature felt twitchy and unreliable.
+        //
+        // Main drives both directions now, from the real cursor position, with
+        // a wide gap between the reveal and hide thresholds. See
+        // `BrowserWindowController.setChromeAutoHidden`.
+      }}
+    >
+
       {/*
-        Row 1 is the title bar. The window has no OS title bar, so this strip
-        carries the drag region and reserves space on the right for the native
-        minimise/maximise/close buttons Windows draws over it.
+        The launch sequence. Sits over the chrome rather than replacing it, so
+        the browser behind is already live and interactive the moment it clears
+        — this is a reveal, not a loading screen.
+      */}
+      {booting && (
+        <div
+          className="slash-boot pointer-events-none fixed inset-0 z-50 grid place-items-center"
+          aria-hidden="true"
+        >
+          <BrandMark
+            size={132}
+            draw
+            className="text-[var(--color-accent)] drop-shadow-[0_0_28px_var(--color-accent)]"
+          />
+        </div>
+      )}
+      {/*
+        A few pixels of chrome that never leave.
+
+        Not the hit target - it cannot be one. The top edge of the window is the
+        OS resize border, so nothing there reaches web content and `mouseenter`
+        on this strip can never fire from a real mouse. Main watches the system
+        cursor instead. This survives because the page view is inset by exactly
+        this much, and a page starting flush against the window edge under a
+        hidden toolbar looks like a rendering fault.
+      */}
+      {autoHide && (
+        <div style={{ height: AUTO_HIDE_PEEK }} className="shrink-0" aria-hidden="true" />
+      )}
+      <div
+        className={[
+          // 260ms, matching the page view's own tween in
+          // `setChromeHeight` — the two have to arrive together or the bars
+          // fade in over a page that already moved.
+          'flex min-h-0 flex-col overflow-hidden',
+          'transition-[max-height,opacity,transform] duration-[260ms] ease-[cubic-bezier(0.22,1,0.36,1)]',
+          chromeHidden
+            ? 'pointer-events-none max-h-0 -translate-y-2 opacity-0'
+            : 'max-h-[240px] translate-y-0 opacity-100'
+        ].join(' ')}
+      >
+      {/*
+        Row 1: the workspace switcher, and the window's drag region.
+
+        This is also the title bar — the window has no OS one — so it reserves
+        space on the right for the native minimise/maximise/close buttons
+        Windows draws over it, and everything here must be `app-no-drag` or it
+        cannot be clicked.
       */}
       <div
-        className="app-drag glass flex shrink-0 items-stretch"
-        style={{ height: TITLE_BAR_HEIGHT, paddingRight: WINDOW_CONTROLS_WIDTH }}
+        className={`app-drag glass flex shrink-0 items-stretch${booting ? ' slash-row-1' : ''}`}
+        style={{ height: WORKSPACE_BAR_HEIGHT, paddingRight: WINDOW_CONTROLS_WIDTH }}
       >
-        {/* With the strip on the left this row keeps only the drag region and
-            the window controls — it cannot be removed, or there is nowhere left
-            to grab the window. */}
+        <WorkspaceRail />
+        {/* Right of the workspaces, left of the window controls the row already
+            reserves space for. `ml-auto` inside the chip pushes it there. */}
+        <UpdateChip />
+        <CoinChip />
+      </div>
+
+      {/*
+        Row 2: the tabs, centred across the whole window.
+
+        Genuinely centred, because this row no longer has to reserve space for
+        the window controls — those sit in the row above. Centring in a row that
+        reserved 138px on one side would have put the tabs visibly off-centre.
+      */}
+      <div
+        className={`app-drag glass flex shrink-0 items-stretch${booting ? ' slash-row-2' : ''}`}
+        style={{ height: TITLE_BAR_HEIGHT }}
+      >
         {!verticalTabs && <TabStrip />}
       </div>
 
-      {/* Row 2: workspace rail on the left, toolbar and content to its right —
-          matching the native page view's inset (WORKSPACE_RAIL_WIDTH, plus the
-          tab column when the strip is vertical). */}
+      {/*
+        Row 3 is the toolbar. It spans the whole window, and the address field
+        inside it is centred and capped in width rather than stretched edge to
+        edge — a 2,000px-wide text field is harder to read, not easier.
+
+        The rule the chrome follows: full width means global — the tab strip and
+        the omnibox belong to the browser, not to the page — while anything
+        inset to the right of the rail is about the page you are looking at.
+        That is why the find bar and the blocked-popup notices below stay in the
+        content column: they describe this page, and lining them up with it says
+        so without a word of explanation.
+
+        This costs the page view nothing. `ViewLayoutManager` insets it by
+        `chromeHeight` from the top and `sidebarWidth` from the left, and both
+        are unchanged — the toolbar simply occupies the strip it was already
+        occupying, over the rail's column as well as its own.
+      */}
+      <div
+        className="glass glass-divide-b relative shrink-0"
+        style={{ height: TOOLBAR_HEIGHT }}
+      >
+        <Toolbar />
+        {/*
+          Loading indicator. Chromium reports no load percentage, so an
+          indeterminate sweep is the honest form — a fake percentage that
+          creeps to 90% and waits is worse than none.
+        */}
+        {activeTab?.isLoading && (
+          <div className="absolute inset-x-0 -bottom-px h-0.5 overflow-hidden">
+            <div className="h-full w-1/3 animate-[loading_1.1s_ease-in-out_infinite] bg-[var(--color-accent)]" />
+          </div>
+        )}
+      </div>
+
+      </div>
+
+      {/* Row 4: the page. Nothing insets it from the left any more unless the
+          tab strip is vertical — the workspace rail that used to cost 56px of
+          every page is now the row at the top. */}
       <div className="flex min-h-0 flex-1">
-        <WorkspaceRail />
 
         {verticalTabs && (
           <div
@@ -237,22 +444,6 @@ export function App(): React.JSX.Element {
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div
-            className="glass glass-divide-b relative shrink-0"
-            style={{ height: TOOLBAR_HEIGHT }}
-          >
-            <Toolbar />
-            {/*
-              Loading indicator. Chromium reports no load percentage, so an
-              indeterminate sweep is the honest form — a fake percentage that
-              creeps to 90% and waits is worse than none.
-            */}
-            {activeTab?.isLoading && (
-              <div className="absolute inset-x-0 -bottom-px h-0.5 overflow-hidden">
-                <div className="h-full w-1/3 animate-[loading_1.1s_ease-in-out_infinite] bg-[var(--color-accent)]" />
-              </div>
-            )}
-          </div>
           {isPrivate && <PrivateNotice />}
           <FindBar />
           <HandoffNotice />
@@ -275,6 +466,14 @@ export function App(): React.JSX.Element {
                 <div className="glass-page h-full overflow-y-auto">
                   <SettingsPanel />
                 </div>
+              ) : showAdvertise ? (
+                <AdvertisePage />
+              ) : showRewards ? (
+                <RewardsPage />
+              ) : showTerms ? (
+                <LegalPage which="terms" />
+              ) : showPrivacy ? (
+                <LegalPage which="privacy" />
               ) : null}
             </main>
             <SidePanel />

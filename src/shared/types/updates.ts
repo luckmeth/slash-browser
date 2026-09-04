@@ -1,4 +1,27 @@
 import { z } from 'zod'
+import { REWARDS_URL_DEFAULT } from './rewards'
+
+/**
+ * Where a stock build looks for a newer version.
+ *
+ * The `releases` table itself, read through PostgREST. That is deliberate and
+ * it is what finally made updating work: the feed used to be an endpoint in
+ * the advertiser web app, which has to be deployed somewhere for a browser to
+ * reach it, and is not. Every copy of Slash therefore had nothing to check and
+ * the updater never ran once for a real user.
+ *
+ * Published releases carry a public read policy, so this needs no session and
+ * no per-installation key -- which matters, because a key per installation is
+ * an identifier, and an update check must not become a way of counting people.
+ * The answer is identical for every caller.
+ *
+ * Still overridable, and still clearable: emptying `updateFeedUrl` in settings
+ * means Slash contacts nothing about updates at all.
+ */
+export const UPDATE_FEED_DEFAULT =
+  `${REWARDS_URL_DEFAULT}/rest/v1/releases` +
+  '?select=version,release_url,notes,file_url,sha512,size_bytes' +
+  '&channel=eq.stable&published=eq.true&order=published_at.desc&limit=1'
 
 /**
  * Update checking.

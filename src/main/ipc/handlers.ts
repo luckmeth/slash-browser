@@ -1374,8 +1374,18 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('advertiser:submitCampaign', async (request) =>
     ok(await ctx.advertiser.submitCampaign(request))
   )
+  ipc.handle('advertiser:cancelCampaign', async (request) =>
+    ok(await ctx.advertiser.cancelCampaign(request.id))
+  )
   ipc.handle('rewards:profile', async () => ok(await ctx.rewards.profile()))
   ipc.handle('rewards:saveProfile', async (request) => ok(await ctx.rewards.saveProfile(request)))
+  ipc.handle('rewards:requestPayout', async (request) =>
+    ok(await ctx.rewards.requestPayout(request.coins))
+  )
+  ipc.handle('rewards:walletChallenge', async () => ok(await ctx.rewards.walletChallenge()))
+  ipc.handle('rewards:submitWalletSignature', async (request) =>
+    ok(await ctx.rewards.submitWalletSignature(request.signature))
+  )
   ipc.handle('rewards:refresh', async () => {
     await ctx.rewards.report(true)
     await ctx.rewards.refreshState()

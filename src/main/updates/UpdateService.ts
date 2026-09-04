@@ -8,6 +8,17 @@ import { z } from 'zod'
 import type { UpdateStatus } from '@shared/types/updates'
 import { createLogger } from '../logger'
 import { planInstall, type InstallPlan } from './updatePlan'
+import { REWARDS_ANON_KEY_DEFAULT } from '@shared/types/rewards'
+
+/** Whether an address is this project's own REST API, which needs a key. */
+function isSupabaseRest(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.endsWith('.supabase.co') && parsed.pathname.startsWith('/rest/v1/')
+  } catch {
+    return false
+  }
+}
 
 const log = createLogger('updates')
 
@@ -431,6 +442,15 @@ export class UpdateService {
    */
   private async fetchFeed(url: string): Promise<unknown> {
     const request = net.request({ url, method: 'GET' })
+
+    // The default feed is the `releases` table read through PostgREST, which
+    // requires the project key on every request even for a public row. It is
+    // the same key every copy of Slash already ships and it identifies the
+    // project, not the installation.
+    if (isSupabaseRest(url)) {
+      request.setHeader('apikey', REWARDS_ANON_KEY_DEFAULT)
+      request.setHeader('authorization', `Bearer ${REWARDS_ANON_KEY_DEFAULT}`)
+    }
     const timer = setTimeout(() => request.abort(), CHECK_TIMEOUT_MS)
 
     try {
@@ -465,6 +485,33 @@ export class UpdateService {
  */
 export function parseFeed(text: string): unknown {
   const trimmed = text.trim()
+
+  /*
+   * A PostgREST array: the feed is a table, so the answer is a list of rows in
+   * the column names the table uses. Mapped here rather than in the schema so
+   * that a hand-written JSON feed and a database-backed one both arrive at the
+   * same shape, and neither has to know about the other.
+   */
+  if (trimmed.startsWith('[')) {
+    try {
+      const rows = JSON.parse(trimmed) as Record<string, unknown>[]
+      const row = rows[0]
+      if (!row) return {}
+      return {
+        version: row.version,
+        releaseUrl: row.release_url ?? row.releaseUrl ?? undefined,
+        notes: row.notes ?? '',
+        // Empty strings are how the table says "no package"; the plan wants
+        // them absent, since an empty address is a malformed one.
+        fileUrl: row.file_url === '' ? undefined : (row.file_url ?? row.fileUrl),
+        sha512: row.sha512 === '' ? undefined : row.sha512,
+        size: Number(row.size_bytes ?? row.size ?? 0) || undefined
+      }
+    } catch {
+      return {}
+    }
+  }
+
   if (trimmed.startsWith('{')) {
     try {
       return JSON.parse(trimmed)

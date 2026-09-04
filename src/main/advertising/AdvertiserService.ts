@@ -161,27 +161,69 @@ export class AdvertiserService {
 
   private async campaigns(): Promise<AdvertiserState['campaigns']> {
     try {
+      // The delivery counts come back nested rather than as a second request:
+      // one round trip, and the numbers cannot belong to a different campaign
+      // than the row they are printed under.
       const response = await this.rest(
-        'campaigns?select=id,title,status,placement_tier,total_cost,total_hours,starts_at,ends_at,review_note&order=created_at.desc&limit=50'
+        'campaigns?select=id,title,status,placement_tier,total_cost,total_hours,starts_at,ends_at,review_note,delivery_counts(impressions,clicks)&order=created_at.desc&limit=50'
       )
       if (!response.ok) return []
       const rows = (await response.json()) as Record<string, unknown>[]
-      return rows.map((row) =>
-        CampaignSummarySchema.parse({
+
+      return rows.map((row) => {
+        const counts = Array.isArray(row.delivery_counts)
+          ? (row.delivery_counts as { impressions?: number; clicks?: number }[])
+          : []
+        const status = String(row.status ?? '')
+
+        return CampaignSummarySchema.parse({
           id: String(row.id ?? ''),
           title: String(row.title ?? ''),
-          status: String(row.status ?? ''),
+          status,
           placementTier: String(row.placement_tier ?? ''),
           totalCost: Number(row.total_cost ?? 0),
           totalHours: Number(row.total_hours ?? 0),
           startsAt: String(row.starts_at ?? ''),
           endsAt: String(row.ends_at ?? ''),
-          reviewNote: String(row.review_note ?? '')
+          reviewNote: String(row.review_note ?? ''),
+          impressions: counts.reduce((sum, day) => sum + Number(day.impressions ?? 0), 0),
+          clicks: counts.reduce((sum, day) => sum + Number(day.clicks ?? 0), 0),
+          // The same two statuses the delete policy allows. Stated here so the
+          // button appears exactly when the database would accept it, rather
+          // than being offered and then refused.
+          cancellable: status === 'pending_review' || status === 'pending_payment'
         })
-      )
+      })
     } catch (error) {
       log.warn(`could not read campaigns: ${String(error)}`)
       return []
+    }
+  }
+
+  /**
+   * Takes a campaign back before anybody has acted on it.
+   *
+   * A delete rather than a status change, because that is what the policy
+   * allows: `campaigns_delete_before_review` permits it while the row is
+   * waiting for review or for payment, and nothing after that. A campaign that
+   * has been approved or has run is history, and history is not deleted from
+   * the advertiser side.
+   */
+  async cancelCampaign(id: string): Promise<AdvertiserResult> {
+    if (!this.rewards.signedIn) return { ok: false, problem: 'Sign in first.', campaignId: '' }
+
+    try {
+      const response = await this.rest(`campaigns?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      })
+      if (!response.ok) {
+        const detail = await response.text()
+        log.warn(`campaign cancel failed: ${response.status} ${detail}`)
+        return { ok: false, problem: readablePostgrest(detail, response.status), campaignId: '' }
+      }
+      return { ok: true, problem: '', campaignId: id }
+    } catch (error) {
+      return { ok: false, problem: String(error), campaignId: '' }
     }
   }
 

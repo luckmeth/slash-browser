@@ -271,8 +271,12 @@ export const INVOKE_CHANNELS = [
   'advertiser:state',
   'advertiser:saveCompany',
   'advertiser:submitCampaign',
+  'advertiser:cancelCampaign',
   'rewards:profile',
   'rewards:saveProfile',
+  'rewards:requestPayout',
+  'rewards:walletChallenge',
+  'rewards:submitWalletSignature',
   'updates:install',
   'updates:download',
 

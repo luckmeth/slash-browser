@@ -2,3 +2,4 @@
 export * from './pricing'
 export * from './batch'
 export * from './coin'
+export * from './walletProof'

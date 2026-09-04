@@ -154,6 +154,17 @@ export const CoinProfileInputSchema = z.object({
 
 export type CoinProfileInput = z.infer<typeof CoinProfileInputSchema>
 
+export const PayoutSchema = z.object({
+  id: z.string(),
+  coins: z.number(),
+  status: z.string(),
+  amountUsd: z.number().nullable().default(null),
+  requestedAt: z.number().default(0),
+  reference: z.string().default(''),
+  note: z.string().default('')
+})
+export type Payout = z.infer<typeof PayoutSchema>
+
 export const CoinProfileSchema = CoinProfileInputSchema.extend({
   /** From the signed-in Google account, and not editable here. */
   email: z.string().default(''),
@@ -162,7 +173,18 @@ export const CoinProfileSchema = CoinProfileInputSchema.extend({
   /** Epoch ms of the last save; 0 when they have never saved one. */
   updatedAt: z.number().default(0),
   /** They have saved their details at least once. */
-  complete: z.boolean().default(false)
+  complete: z.boolean().default(false),
+  /**
+   * The text to sign in a wallet to prove it is theirs, when one is issued.
+   *
+   * Readable on purpose. Somebody is about to be asked to sign it, and a
+   * string of hex that says nothing is exactly how people are phished — it
+   * names what it is for, whose account, and when it was made.
+   */
+  walletChallenge: z.string().default(''),
+  walletSigned: z.boolean().default(false),
+  /** Their most recent payout request, if they have made one. */
+  payout: PayoutSchema.nullable().default(null)
 })
 
 export type CoinProfile = z.infer<typeof CoinProfileSchema>

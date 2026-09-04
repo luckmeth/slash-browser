@@ -135,6 +135,39 @@ export const NEW_TAB_URL = 'slash://newtab'
 export const SETTINGS_URL = 'slash://settings'
 
 /**
+ * What advertising on Slash costs and how to buy it.
+ *
+ * An internal page rather than a link to a marketing site, because a company
+ * that has just noticed the card on the start page should be able to read the
+ * rates without leaving the browser or handing over an email address first.
+ * The request itself goes to the operator's portal at the end.
+ */
+export const ADVERTISE_URL = 'slash://advertise'
+
+/**
+ * Slash Coin: the balance, what is accruing, and the countdown.
+ *
+ * A page rather than a panel because it is read occasionally and at length -
+ * the same reasoning as Settings - and because it carries wording about what
+ * these points are and are not, which needs room to be read rather than a
+ * tooltip.
+ */
+export const REWARDS_URL = 'slash://rewards'
+
+/**
+ * The terms, and what is done with personal information.
+ *
+ * Internal pages rather than links to a website, for two reasons. They are
+ * read at the moment somebody is deciding whether to hand over a date of birth
+ * and a wallet address, and a link that opens a marketing site is a link most
+ * people do not follow. And they must be readable by somebody who is offline
+ * or who has not signed in to anything -- terms nobody can reach are terms
+ * nobody agreed to.
+ */
+export const TERMS_URL = 'slash://terms'
+export const PRIVACY_URL = 'slash://privacy'
+
+/**
  * Both schemes are recognised: the browser was renamed, and restore points and
  * history written before that still hold `adaptive://` URLs. Dropping the old
  * prefix would make those tabs look like real web pages and try to navigate to
@@ -154,6 +187,10 @@ export function isInternalUrl(url: string): boolean {
  */
 export function internalPageTitle(url: string): string | null {
   if (url === SETTINGS_URL) return 'Settings'
+  if (url === ADVERTISE_URL) return 'Advertise on Slash'
+  if (url === REWARDS_URL) return 'Slash Coin'
+  if (url === TERMS_URL) return 'Terms'
+  if (url === PRIVACY_URL) return 'Privacy'
   if (url === NEW_TAB_URL) return 'New tab'
   return isInternalUrl(url) ? 'Slash' : null
 }
