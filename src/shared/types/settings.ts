@@ -535,6 +535,17 @@ export const SettingsSchema = z.object({
    */
   updateFeedUrl: z.string().default(UPDATE_FEED_DEFAULT),
   /**
+   * Whether this profile has been offered the release feed already.
+   *
+   * Bookkeeping, not a preference, and deliberately not in the settings UI.
+   * Profiles written before the feed had a default hold `updateFeedUrl: ""` on
+   * disk, and a schema default cannot reach a key that is present -- so those
+   * installs would never check for an update again. This marks the one-time
+   * adoption in `adoptDefaultFeed`, so that filling the field in happens once
+   * and a field cleared afterwards stays cleared.
+   */
+  updateFeedAdopted: z.boolean().default(false),
+  /**
    * Check the feed on launch and every few hours.
    *
    * On by default, and still contacts nothing while `updateFeedUrl` is empty.

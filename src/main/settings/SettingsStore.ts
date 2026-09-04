@@ -1,6 +1,7 @@
 import { SettingsSchema, DEFAULT_SETTINGS, type Settings } from '@shared/types/settings'
 import type { Database } from '../db/Database'
 import { createLogger } from '../logger'
+import { adoptDefaultFeed } from './adoptFeed'
 
 const log = createLogger('settings')
 
@@ -35,7 +36,15 @@ export class SettingsStore {
     try {
       const parsed = SettingsSchema.safeParse(JSON.parse(row.data))
       if (parsed.success) {
-        this.cache = parsed.data
+        // A profile older than the release feed carries an empty one, and a
+        // schema default cannot reach a key that is already present. Runs once
+        // per profile; see adoptFeed.ts for why clearing it later sticks.
+        const adopted = adoptDefaultFeed(parsed.data)
+        this.cache = adopted.settings
+        if (adopted.changed) {
+          this.persist()
+          log.info(`adopted the release feed: ${this.cache.updateFeedUrl || '(left empty)'}`)
+        }
       } else {
         // Keep whichever keys are still valid by re-parsing the partial overlay
         // onto defaults, so one bad key does not discard every other preference.
