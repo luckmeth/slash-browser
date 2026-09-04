@@ -7,6 +7,7 @@ import { isSignedBuild } from './buildSignature'
 import { z } from 'zod'
 import type { UpdateStatus } from '@shared/types/updates'
 import { createLogger } from '../logger'
+import { installGate } from './installGate'
 import { planInstall, type InstallPlan } from './updatePlan'
 import { REWARDS_ANON_KEY_DEFAULT } from '@shared/types/rewards'
 
@@ -366,9 +367,12 @@ export class UpdateService {
    * Settings stops being disabled.
    */
   async downloadAndInstall(): Promise<{ ok: boolean; detail: string }> {
-    if (this.status.state !== 'update-available') {
-      return { ok: false, detail: 'There is no update to install.' }
-    }
+    // Not `state !== 'update-available'`, which refused `ready` -- the state
+    // that means the package is downloaded and its checksum matches. With
+    // auto-download on, that is the state every user is in by the time they
+    // click, so installing was refused on the normal path. See installGate.ts.
+    const gate = installGate(this.status.state)
+    if (!gate.ok) return { ok: false, detail: gate.detail }
     if (!(await isSignedBuild())) {
       // The unsigned path: fetch the package the feed named, prove it matches
       // the checksum the feed published, and hand the installer to the user.

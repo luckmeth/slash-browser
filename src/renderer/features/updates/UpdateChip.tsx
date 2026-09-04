@@ -28,6 +28,8 @@ import { Icon } from '../../components/Icon'
 export function UpdateChip(): React.JSX.Element | null {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  /** What main said when it refused, so a dead click is never silent. */
+  const [failed, setFailed] = useState<string | null>(null)
 
   useEffect(() => {
     void window.browser.invoke('updates:status', undefined).then((result) => {
@@ -47,7 +49,9 @@ export function UpdateChip(): React.JSX.Element | null {
   const ready = status.state === 'ready'
   const downloading = status.state === 'downloading'
 
-  const label = ready
+  const label = failed
+    ? 'Update failed'
+    : ready
     ? 'Restart to update'
     : downloading
       ? `Updating ${Math.round(status.progress * 100)}%`
@@ -56,8 +60,20 @@ export function UpdateChip(): React.JSX.Element | null {
   const act = (): void => {
     if (downloading || busy) return
     setBusy(true)
+    setFailed(null)
     const channel = ready || status.canInstall ? 'updates:install' : 'updates:download'
-    void window.browser.invoke(channel, undefined).finally(() => setBusy(false))
+    // The result used to be discarded by a bare `.finally`, so a refusal from
+    // main was invisible: the button did nothing, said nothing, and left the
+    // chip reading "Restart to update" for ever. Whatever comes back, it is
+    // shown -- a click that cannot work must at least say why.
+    void window.browser
+      .invoke(channel, undefined)
+      .then((result) => {
+        if (result.ok && !result.value.ok) setFailed(result.value.detail)
+        else if (!result.ok) setFailed('The update could not be started.')
+      })
+      .catch(() => setFailed('The update could not be started.'))
+      .finally(() => setBusy(false))
   }
 
   return (
@@ -65,7 +81,7 @@ export function UpdateChip(): React.JSX.Element | null {
       type="button"
       onClick={act}
       disabled={downloading}
-      title={status.detail}
+      title={failed ?? status.detail}
       aria-label={label}
       className={`app-no-drag flex shrink-0 cursor-default items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] font-medium transition ${
         ready
