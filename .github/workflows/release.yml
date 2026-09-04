@@ -1,0 +1,223 @@
+name: Release
+
+# Tagging a version builds the Windows installer and publishes it — with the
+# checksum the updater verifies against — to the **public releases
+# repository**, which is a different repository from this one.
+#
+# That split is deliberate: this repository is private, and a private release
+# asset is not downloadable without credentials. The browser carries none, so
+# publishing installers here would fail silently on every machine. The releases
+# repository holds nothing but installers and their checksums, which have to be
+# public for an updater to reach them at all.
+#
+# Publishing across repositories needs a token of its own: `GITHUB_TOKEN` is
+# scoped to the repository the workflow runs in. `RELEASES_TOKEN` should be a
+# fine-grained personal access token with **contents: write on the releases
+# repository and nothing else** — it can publish releases there and cannot read
+# a line of this repository.
+#
+# The updater fetches an installer only from Slash's own Supabase host or from
+# a GitHub release asset, so the asset must stay on the release. Moving it to a
+# CDN or a redirector breaks updating by design.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and check, but publish nothing'
+        type: boolean
+        default: true
+
+# Nothing is written to *this* repository: the release goes to the releases
+# repository using RELEASES_TOKEN, so the job's own token needs only to read.
+permissions:
+  contents: read
+
+# One release at a time. Two tags racing would fight over the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Windows because the target is Windows: electron-builder produces the NSIS
+    # installer on the platform it targets.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Root only. `platform/` is a separate workspace holding the Next.js
+      # applications and has nothing to do with the browser build.
+      - name: Install
+        run: npm ci
+
+      # A tag that disagrees with package.json produces an installer named for
+      # one version and a feed entry naming another, and the update silently
+      # never triggers. Caught here rather than discovered by users.
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match package.json version $PKG. Bump the version, commit, then re-tag."
+            exit 1
+          fi
+
+      # Before anything expensive. A missing variable or secret is a
+      # misconfiguration that should cost thirty seconds, not the ten minutes it
+      # takes to package, and it is set up once.
+      - name: Check the release destination is configured
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$RELEASES_REPO" ]; then
+            echo "::error::Repository variable RELEASES_REPO is not set (expected owner/repo of the public releases repository). See docs/RELEASING.md."
+            exit 1
+          fi
+          if [ -z "$RELEASES_TOKEN" ]; then
+            echo "::error::Secret RELEASES_TOKEN is not set. It needs contents:write on $RELEASES_REPO and nothing else. See docs/RELEASING.md."
+            exit 1
+          fi
+          echo "publishing to $RELEASES_REPO"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # Required before packaging. `resources/ffmpeg/` is ~84 MB, gitignored,
+      # and fetched with a checksum by this script; without it the installer
+      # ships without ffmpeg and media features fail at runtime rather than at
+      # build time.
+      - name: Fetch ffmpeg
+        run: npm run fetch:ffmpeg
+
+      - name: Package
+        run: npm run package
+
+      # The checksum the updater verifies the download against, and the size it
+      # shows a progress bar from. Computed here so nobody transcribes 128
+      # characters by hand — that mistake makes every update fail verification
+      # and looks like a broken updater rather than a typo.
+      - name: Measure the installer
+        id: measure
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          FILE="release/Slash-${VERSION}-x64.exe"
+          test -f "$FILE" || { echo "::error::$FILE was not produced"; exit 1; }
+
+          SHA="$(node -e "const c=require('crypto'),f=require('fs');const h=c.createHash('sha512');h.update(f.readFileSync('$FILE'));console.log(h.digest('hex'))")"
+          SIZE="$(node -e "console.log(require('fs').statSync('$FILE').size)")"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "file=$FILE"       >> "$GITHUB_OUTPUT"
+          echo "sha512=$SHA"      >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE"       >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Slash $VERSION"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Size | $(( SIZE / 1048576 )) MB |"
+            echo "| SHA-512 | \`$SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The feed a browser can read straight from GitHub, with no database and
+      # no secret anywhere. Its shape is pinned by `updatePlan.test.ts`: change
+      # either side and that test fails rather than the updater quietly finding
+      # nothing.
+      #
+      # Addressed at the **releases** repository, not this one, because that is
+      # where the asset will live and where a browser will fetch it from.
+      - name: Write latest.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          VERSION: ${{ steps.measure.outputs.version }}
+          SHA: ${{ steps.measure.outputs.sha512 }}
+          SIZE: ${{ steps.measure.outputs.size }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+        run: |
+          BASE="https://github.com/${RELEASES_REPO}/releases"
+          node -e "
+            const fs = require('fs')
+            fs.writeFileSync('release/latest.json', JSON.stringify({
+              version:    process.env.VERSION,
+              releaseUrl: '${BASE}/tag/${GITHUB_REF_NAME}',
+              notes:      'Slash ' + process.env.VERSION,
+              fileUrl:    '${BASE}/download/${GITHUB_REF_NAME}/Slash-' + process.env.VERSION + '-x64.exe',
+              sha512:     process.env.SHA,
+              size:       Number(process.env.SIZE)
+            }, null, 2))
+          "
+          cat release/latest.json
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          # Not `github.token`: that is scoped to this repository and cannot
+          # publish to the releases one.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          VERSION: ${{ steps.measure.outputs.version }}
+          SHA: ${{ steps.measure.outputs.sha512 }}
+          SIZE: ${{ steps.measure.outputs.size }}
+        run: |
+          NOTES="$(mktemp)"
+          {
+            echo "## Slash $VERSION"
+            echo ""
+            echo "Windows installer, $(( SIZE / 1048576 )) MB."
+            echo ""
+            echo "This build is **not code-signed**, so Windows will warn about an unknown"
+            echo "publisher the first time you run it. Slash verifies its own updates against"
+            echo "the checksum below before running anything; that proves the file is the one"
+            echo "published here, not who published it."
+            echo ""
+            echo '```'
+            echo "SHA-512  $SHA"
+            echo "Size     $SIZE bytes"
+            echo '```'
+          } > "$NOTES"
+
+          # `--repo` publishes into the releases repository. The tag does not
+          # exist there, so GitHub creates it against that repository's default
+          # branch — which is why it needs at least one commit (a README).
+          gh release create "$GITHUB_REF_NAME" \
+            "release/Slash-${VERSION}-x64.exe" \
+            "release/latest.json" \
+            --repo "$RELEASES_REPO" \
+            --title "Slash $VERSION" \
+            --notes-file "$NOTES"
+
+          echo "published https://github.com/${RELEASES_REPO}/releases/tag/${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
+
+      # A manual run builds and checks without publishing, so the pipeline can
+      # be exercised without cutting a release.
+      - name: Upload the installer as a build artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: slash-installer
+          path: release/Slash-*-x64.exe
+          retention-days: 7

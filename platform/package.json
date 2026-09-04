@@ -1,0 +1,26 @@
+{
+  "name": "slash-ad-platform",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "advertiser",
+    "admin",
+    "admin-desktop"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p shared/tsconfig.json"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0"
+  }
+}

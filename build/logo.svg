@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    The application icon: the Slash mark on its own field.
+
+    Rasterised into build/icon.png and build/icon.ico by `npm run logo`. This is
+    the source of truth for the icon; src/renderer/components/BrandMark.tsx is
+    the same glyph drawn bare so it can take the colour of whatever it sits in.
+    CHANGING ONE MEANS CHANGING THE OTHER, or the taskbar icon stops matching
+    the mark inside the window.
+
+    The field is here rather than left transparent because an app icon is seen
+    against a taskbar, a desktop and whatever wallpaper somebody has, and a
+    white glyph alone disappears on half of those.
+  -->
+  <defs>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2a2a2d" />
+      <stop offset="55%" stop-color="#151517" />
+      <stop offset="100%" stop-color="#0d0d0f" />
+    </linearGradient>
+
+    <!--
+      The gap is a cut through the glyph, not a line drawn over it. Wider than
+      the slash that sits inside it, so a hairline of the dark field survives on
+      each side — that keyline is what stops the S and the slash reading as one
+      blob once the icon is scaled to 16px.
+    -->
+    <mask id="cut">
+      <rect width="1024" height="1024" fill="white" />
+      <line x1="296" y1="880" x2="728" y2="144" stroke="black" stroke-width="156" />
+    </mask>
+  </defs>
+
+  <!-- Windows rounds and masks icons itself in several places, so the corner
+       radius is gentle: a tighter one gets clipped into a visible flat. -->
+  <rect width="1024" height="1024" rx="230" fill="url(#field)" />
+
+  <g mask="url(#cut)">
+    <path
+      d="M 696 312 A 185.6 185.6 0 1 0 440 563.2"
+      fill="none"
+      stroke="#ffffff"
+      stroke-width="116"
+      stroke-linecap="butt"
+    />
+    <path
+      d="M 328 712 A 185.6 185.6 0 1 0 584 460.8"
+      fill="none"
+      stroke="#ffffff"
+      stroke-width="116"
+      stroke-linecap="butt"
+    />
+  </g>
+
+  <line x1="328" y1="888" x2="696" y2="136" stroke="#ffffff" stroke-width="92" stroke-linecap="butt" />
+</svg>

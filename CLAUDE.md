@@ -1,0 +1,370 @@
+# Adaptive Browser
+
+A Chromium/Electron desktop browser. The differentiator is not rendering — that is Chromium's job —
+but everything around the page: workspace organisation, adaptive tab resource management, granular
+permission control, local-first browsing memory, session time travel, and an optional AI action layer
+that always previews before it acts.
+
+Full development plan: `docs/PLAN.md`.
+**What is left to build, in priority order: `docs/ROADMAP.md`** — read this before starting new
+feature work. It records what is missing, what each item costs, and the constraints that rule some
+approaches out (notably: Electron cannot install Chrome Web Store extensions, and auto-update needs
+a signing certificate the project does not have).
+
+## Core product principles
+
+These are not aspirations; they constrain the code.
+
+1. **Fast by default.** No feature may add latency to the browsing path.
+2. **Privacy by default.** Nothing leaves the machine unless the user turned it on.
+3. **Local-first.** SQLite in `userData` is the source of truth.
+4. **AI is optional.** The browser must be fully usable with AI disabled — and it must be disabled
+   until the user configures a provider. No nagging, no degraded experience.
+5. **AI never acts without approval.** `UNDERSTAND → PLAN → PREVIEW → APPROVE → EXECUTE → REPORT`.
+6. **Advanced power must not complicate the default UI.** Dashboards are routes the user opens, never
+   permanent chrome.
+7. **Explain permissions and security decisions in plain language.**
+8. **Never claim capability the architecture does not have.** See "Honest constraints" below. If
+   Electron cannot do something, the UI says so rather than implying otherwise.
+9. **Modular systems behind clean interfaces.**
+10. **Stability before experiments.**
+
+## Honest constraints (do not paper over these)
+
+| Vision | Reality | What we do instead |
+|---|---|---|
+| Freeze/hibernate a tab | Electron has no freeze API | FROZEN = detach view + throttle + mute. HIBERNATED = destroy the `WebContentsView`, persist `{url,title,favicon,scrollY,navigationHistory}`, rebuild on activate |
+| Per-tab CPU/RAM | `app.getAppMetrics()` is per-**process**; site isolation shares renderers | Map via `getOSProcessId()`; when a PID serves >1 tab, divide and label the row "shared process (estimate)" |
+| Resource savings | Only measurable for hibernation | Record RSS before destroying the view → **measured**. Freeze savings are tagged **estimate** |
+| Autoplay as a permission | Not in `setPermissionRequestHandler` | `autoplayPolicy` webPreference + per-tab mute; UI states a reload is required to change it |
+| Permission revocation | Chromium caches some grants renderer-side | Revoke updates our store *and* offers "Revoke & reload tab" |
+| Restore my session | Cookies persist; SPA in-memory state does not | Restore URL/title/order/pinned/scroll + full back-forward history via `navigationHistory.restore()`. UI says: pages, not logged-in state |
+| React UI over page content | `WebContentsView` is a native view — CSS `z-index` cannot cover it | Transparent overlay `WebContentsView` stacked above page views, hosting `overlay.html` |
+| Block YouTube's video ads by filtering requests | Ad segments stream from the same `googlevideo.com/videoplayback` URL as the video, and the ad breaks arrive as a *field in the watch page's HTML*, not as a request | One script in YouTube's own JavaScript context deletes `adPlacements`/`playerAds`/`adSlots`. Gated on hostname, scoped to three fields, switchable off via `blockYouTubeVideoAds`. It does not touch creator-read sponsor segments, which are part of the video itself |
+| Run our scripts in the page whenever we like | Only **one** debugger client may attach to a `WebContents`, so a second feature attaching its own would silently never run — and DevTools is a client too | `ScriptletInjector` is the single attach point; scripts register with it and each re-checks its own hostname and setting at runtime. **DevTools always wins**: opening it detaches us, closing it reattaches. Two scripts live there — the YouTube ad-break strip and the `window.open` defuser. `CleanupService.executeJavaScript` is also main-world, so this is a capability to keep narrow rather than a line nobody has crossed |
+| Block a popup by refusing it | `setWindowOpenHandler` denying makes `window.open()` return `null` — and Slash denies for *allowed* popups too, since it opens the tab itself and denies so Chromium does not open a second window. Sites doing `var w = window.open(u); w.blur()` then throw, killing the click that asked | `popupDefuserScript` decides nothing: the real `window.open` still runs, so the verdict, gesture accounting and held-popup notice are unchanged. Only the return value changes — `null` becomes a harmless stand-in, so the page's code continues and the popup still never opens |
+| Match ads by hostname alone | 152 hand-kept domains cannot express request types, first-party exceptions, or the tens of thousands of rules real lists carry | `@ghostery/adblocker` (pure TypeScript — node-gyp cannot build under a path with spaces) runs *alongside* `FilterEngine`, which keeps the malicious list, per-site exemptions and the host+path rules that reach first-party endpoints. Lists are bundled data with attribution; uBlock's scriptlets are **not** bundled, being executable GPLv3 |
+| Compile filter lists at startup | Parsing 4.3 MB takes ~770 ms, and principle 1 is that no feature may add latency to the browsing path | Compiled in a utility process (second rollup entry, same as the embedding worker) and cached to `userData`. Main only deserialises: 24–30 ms, and later launches skip the compile entirely. A stale or missing cache degrades to the domain lists rather than blocking startup |
+| Show the user which AI providers stay on their machine | `AI_PROVIDER_CATALOGUE` marks the OpenAI-compatible provider `local: true` — but that is a label on a *provider id*, and the endpoint beside it is a free-text field `ProviderRegistry` stores unvalidated. A "local" provider pointed at `https://my-gpu-box.example.net/v1` still rendered **"Runs on this machine — nothing is sent to a third party"** | `loopbackVerdict(baseUrl)` decides, not the label: `localhost`, `::1` and the whole `127.0.0.0/8` block are loopback; `localhost.evil.example` and a LAN address are not; anything unparseable is refused rather than guessed. Both surfaces that made the claim (`AiHubPanel`, `ComparePanel`) render the **verified** verdict and **name the host** — "sent to api.anthropic.com" beats "leaves your machine". The honest limit, stated in the code: a hosts-file remap of `localhost` defeats a literal check, and resolving the name would put DNS on a pure path |
+| Autofill a saved password | Filling means the value must reach the page, and both obvious routes are bad: `executeJavaScript` puts it in script source in the page's own world, and sending it to the content preload hands it to a process running untrusted web content | The preload reports only that a password field **exists** and keeps its own element references; main asks it to *focus* one (no secret in the command) and then calls `webContents.insertText`, so the value travels Chromium's own input pipeline. Never script source, never an IPC payload, never inside a renderer we control. `SavedLogin` has no password field, so no handler can leak one |
+| Capture a password when you sign in | That means reading the value out of a password field, which is exactly what `preload/content.ts` is written never to do | Sign-ins are added by hand in Settings and typed back for you. The cost is stated in the UI rather than discovered. A preload that reads sign-in fields on every site is a much larger change to what this browser is, and is not made quietly for convenience |
+| Four-pane split view | Each pane is a live renderer, and Chromium composites every attached view | Capped at **two**. Two is the one deliberate exception to "only the active tab's view is attached", justified because both panes are genuinely visible; four is a different performance conversation, not a bigger number. The drag handle may live in the chrome document *only* because it sits in the gutter, where no page view composites above it |
+| Tab groups that behave like small workspaces | A workspace owns a session partition; a group is a label over tabs that already exist | Deleting a group never deletes tabs, and moving a tab between groups never reloads it. "Ungroup (keeps tabs open)" and "Close N tabs" are separate channels with separate names, because they are one careless click apart and only one is recoverable. Collapsing is **not** sleeping — the tabs keep their views, so the chip shows a count rather than letting a run silently vanish |
+| Semantic search out of the box | Running a language model needs weights from somewhere | MiniLM **ships with the app** (`resources/models/`, ~23 MB) rather than being fetched on first enable. Downloading it would have turned a local search feature into an outbound request to a third party. Still opt-in, and keyword search never depends on it |
+| Two profiles open side by side | The single-instance lock is application-wide, and `app.setPath('userData')` is only honoured before anything has opened a file — by the time a user clicks "switch", the database, every session partition and every cache are already open | **One profile at a time.** Switching relaunches with `--profile=<id>`, which Chrome does too. The default profile keeps the original directory untouched so no existing install moves; others are **siblings**, never children, or the default's "delete all data" would take them with it |
+| Media keys that only reach Slash | `globalShortcut` is exactly that — global. Electron does not route hardware media keys to the focused page, and Chromium's own handling sits above the layer Electron exposes | Registered on focus, released on blur, so pausing Spotify does not pause a minimised browser tab. `mediaKeysAlwaysOn` opts into the rude version for people who use Slash as their music player, and the settings copy says what it takes |
+| Translate a page without sending it anywhere | A translation model worth using is gigabytes; the browser ships a ~23 MB embedding model and bundling a translator would quadruple the installer for a feature most people never open | Translation goes through the **already-configured AI provider** and is gated on `aiMayReadPageContent` — the same switch as every other route page text takes to a provider, not a second one to find. It translates the *article* (Readability blocks, shown in the reader), never the live page, because rewriting text in place would mean scripting every site in its own world |
+| Autofill a saved payment card | Storing one means holding a primary account number: a regulated category of data with obligations this project cannot meet, and nothing the browser can do protects it better than a dedicated password manager already does | Addresses are stored and filled; **cards are not**, and the settings screen says so rather than half-doing it. Address filling reuses the password path exactly — the preload reports which *kinds* of field exist and never a value, main focuses one and calls `insertText` |
+| Sync that a server operator could read | Nothing, technically — which is the problem. A sync that uploads readable bookmarks turns "local-first, nothing leaves the machine" into a slogan | End-to-end encrypted: scrypt from a passphrase that **never leaves the machine**, AES-256-GCM per item, and no derived key stored. The server holds ciphertext and a timestamp. The cost is stated before the switch is thrown — forget the passphrase and the data is unrecoverable, because nobody holds a spare. History is deliberately not synced |
+| An accessible combobox: omnibox + its suggestion popup | The suggestions render in the **overlay**, a separate `WebContentsView` with its own document. `aria-controls` and `aria-activedescendant` are id references, and an id cannot be resolved across documents — so the relationship was declared and silently resolved to nothing | `aria-autocomplete="list"` plus a `role="status"` live region **in the chrome document**, announcing how many suggestions there are. The overlay list keeps `role="listbox"`/`option` for its own document. The relationship is not faked with attributes that cannot work |
+| "Find any page by meaning" | Only the first ~8,000 characters of a page are embedded (10 passages), and MiniLM reads 256 word-pieces at a time | The cap is stated in the UI. A long page is matched on its opening, not its entirety |
+| Sign in with a Claude Pro/Max subscription and use it from the browser | There is no public OAuth that grants a third-party app someone's subscription. The API is billed separately; the only other route is lifting a session cookie out of a browser profile | The assistant is **the real website in a pane** — split view, pointed at claude.ai. The user signs in as they always do, so the subscription works, there is no key to enter, and Slash reads nothing. Sending page content to a provider stays a separate feature behind `aiMayReadPageContent` |
+| Set Slash as the default browser from inside Slash | Windows has not permitted it since Windows 8: the association is a `UserChoice` key signed against the user and the ProgId, and anything written from code is reverted with no error | The installer registers Slash under `StartMenuInternet`/`RegisteredApplications` so it *appears* in Default apps; the app opens that screen and says the final click is the user's. No `system:makeDefault` channel exists, because the name would be a lie. Slash also had to learn to open URLs from its own argv — that is the entire mechanism by which a default browser receives a click |
+| Find YouTube's video by watching the network | Its media arrives as byte ranges of `videoplayback`, increasingly inside YouTube's own transport format — a response observer sees fragments, never a file. The chip correctly had nothing to offer, so it never appeared on the one site people judge this feature on | The page lists every format in `ytInitialPlayerResponse` before playback starts. `PageMediaExtractor` **reads** it: hostname-gated, only on the user's click, changing nothing. Formats whose address must be built by running the site's signature code are skipped *and counted*, so the picker says that rather than "nothing found" |
+| Right-click always works | A page can cancel the `contextmenu` event, and Chromium then never asks the browser for a menu. There is nothing for `installPageContextMenu` to show, and Chrome behaves identically — which is why this is a complaint about every browser | `contextMenuScript` registers a capture-phase listener at document start that calls `stopImmediatePropagation`, so the site's handler never runs and never gets to cancel. Inline `oncontextmenu` properties are cleared separately, since propagation does not reach those. Verified by `SLASH_CONTEXTMENU_PROBE` against both forms. Behind `restoreContextMenu` because a site with a genuinely useful menu loses it |
+| Drag a link or selection onto the omnibox | The omnibox lives in the chrome view and the page in a separate `WebContentsView`. A drag is a native session belonging to one surface; it does not cross between two of them in the same window | Not implemented, and not faked. The context menu's **Search for "…"** and **Copy link address** reach the same outcomes in one action, and paste-and-go works in the omnibox |
+| A floating "download this video" panel, like IDM | Anything drawn over a page has to be a native view: the page is a `WebContentsView` composited above the chrome document, so a React chip renders *behind* the video it points at — visible on the new tab page, invisible on YouTube | The chip is an overlay surface (`media-offer`) sized to a corner, non-modal so the player stays clickable. **Passive**: it never takes the overlay from a surface the user opened, and returns when that closes |
+| Download any video the browser plays, like a download manager | Every serious video site streams through Media Source Extensions: the `<video>` element's `src` is a `blob:` URL meaningless outside that page, the real media arrives as thousands of encrypted or segmented responses, and DRM-protected streams cannot be assembled at all | `MediaSniffer` watches `onResponseStarted` (the free event — `onBeforeRequest` belongs to `ContentBlocker`, and Electron allows one listener each) and offers **complete files only**. Manifests and encrypted streams are recognised in order to be *excluded and explained*, never decrypted. A toolbar button appears only when there is genuinely something to download |
+| Fetch a media URL the way any HTTP client would | Every engine request was anonymous: default session, no cookies, no `Referer`, no `Origin`, Electron's user agent. Ordinary files did not care; media hosts refuse it — hotlink protection on the missing referrer, `googlevideo` on the client identity | The download **is the page's own request**: the tab's session with `useSessionCookies`, its user agent, and the page as referrer. Nothing is forged — the tab genuinely is the referrer |
+| Send the headers a browser sends | `Sec-Fetch-Dest`/`Mode`/`Site` are **forbidden header names**. A `net.request` carrying one is rejected with `ERR_INVALID_ARGUMENT` before it leaves the machine, so adding them broke every download that had an origin to report | They are not sent. Measured by `SLASH_MEDIA_ACCESS_PROBE`, not reasoned about, and pinned by a test that asserts no `Sec-` header exists |
+| Send the page's URL as `Referer` | Chromium's network service verifies the referrer against `strict-origin-when-cross-origin` and **cancels** the request when it does not match — `ERR_BLOCKED_BY_CLIENT`, indistinguishable from an ad blocker. Same host, three referrers: none → 200, `https://site/` → 200, `https://site/movies/the-full-path` → cancelled | `refererFor` applies the same policy a browser does: full URL same-origin, origin alone cross-origin, nothing on an https→http downgrade |
+| `redirect: 'manual'` means "hand me the 3xx" | It means the redirect is **cancelled** unless `followRedirect()` is called synchronously in the `redirect` event. Both downloaders handled 3xx in the *response*, which never arrives — so every redirecting fetch failed with "Redirect was cancelled". Ordinary files rarely redirect; streaming CDNs redirect **every segment** (1266 of them on one measured film), so this one bug failed every stream download on every such site | `sendMediaRequest` is the single place that follows a hop, and it still records each one — the chain is what Redirect X-Ray and the Guardian exist to surface |
+| Tell a playlist from a file by its address | `isStreamUrl` wants a `.m3u8` path, and real CDNs serve HLS from `…/hls/1080/<id>/<id>/<n>/<hash>` with no extension. The playlist went down the file path and "downloaded" successfully as a few kilobytes of text | The **sniffer already knew** — it classified the response by `Content-Type`. `enqueue({ isStream: true })` carries that fact instead of re-deriving it wrongly. The URL test remains as the fallback for callers who have nothing better |
+| Offer "the" HLS stream | A master playlist *is* a list of qualities, and `planStream` silently took the highest bitrate. The choice existed in the playlist all along and was being made on the user's behalf without asking | The master is read when the picker opens and expanded into one row per quality, cached 60s so the double-lookup on download does not re-fetch. A media playlist with one rendition stays one row, and says so |
+| Reveal an auto-hidden toolbar with a hover strip at the top of the window | The window is `titleBarStyle: 'hidden'`, which keeps the **native** frame, so the outermost pixels of every edge are the OS resize border — `SM_CYSIZEFRAME + SM_CXPADDEDBORDER`, about eight. A pointer there belongs to the window manager: Chromium is never asked, no view receives anything, and `mouseenter` on a strip thinner than that cannot fire however it is styled. The chrome hid and had no way back | Main watches `screen.getCursorScreenPoint()`, which reads the OS cursor directly and is not hit-tested, and sends `ui:command: 'reveal-chrome'`. A poll, which principle 1 would normally refuse, kept honest by being narrow: only while auto-hide has actually collapsed the chrome, stopped the instant it is back, and stopped while the window is unfocused. The few pixels of chrome that remain are there so the page does not sit flush against the window edge — decoration, not the mechanism |
+| Download every quality YouTube offers | Measured twice on a real watch page: **30 formats, 0 carrying a URL, 0 signed, 30 with no address at all.** The player negotiates each piece with the server as it plays, so there is no address on the page for anything to fetch — not for us, not for any reader. The sniffer saw 0 items too, because the media arrives as byte ranges in YouTube's own transport format rather than as files | The picker says so, naming the count. Where a progressive format still exists it is offered, which is why some videos give exactly one row (usually 360p) and newer ones give none. Reaching the rest would mean running the site's signature code or reimplementing its streaming protocol — circumventing an access control, which this project does not do. `SLASH_YT_FORMAT_PROBE` re-measures any page rather than leaving this as a belief |
+| Shut the machine down when the downloads finish | "Nothing is running" is not "everything finished". A queue holding a paused transfer, or a failed one, has not finished — and ending the session under it throws away a download somebody meant to come back to in the morning | `shouldFire` is pure and requires that something actually **completed** and that nothing is paused, failed or waiting. Everything that ends the session then waits `COMPLETION_GRACE_MS` behind a notification that calls it off. The commands are Windows' own — there is no Electron API for sleep or shutdown, and shelling out is the honest way to say so |
+| Download the video YouTube is playing | Three separate walls, measured rather than assumed. **(1)** The page publishes no addresses: 30 formats, 0 with a URL, 0 signed. **(2)** The media arrives as `application/vnd.yt-ump` over XHR with no content length — YouTube's own transport framing, protobuf chunks its player unwraps in the page, not a file. **(3)** When a session *does* get the classic `video/mp4` path, those addresses work — `bare=200 session=206 page=206`, and 206 to the engine's own `Range: bytes=0-0` — but they carry `expire=` and go stale, which is where the 403s came from | Quality *selection* is solved and is the site's own public player API: `getAvailableQualityLevels` then `setPlaybackQualityRange`, verified reading six levels and switching 720p→1080p. Whatever the player then fetches becomes downloadable. UMP responses are recognised as `kind: 'transport'` and **excluded with a sentence**, because a file assembled from them would not play; stale addresses get a 403 message naming the cause and pointing at **New address…**. Reassembling UMP would mean reimplementing their delivery protocol, which is out of scope and stays out |
+| Name a downloaded stream after the file it came from | Streaming sites name the manifest after its role in the protocol: `index.m3u8`, `master.m3u8`, and on YouTube every stream is `videoplayback`. Deriving the name from the path gave a two-hour film called **`index.ts`**, and `.ts` was not in the video extension list either, so it was filed under "other" — out of the Video folder and out of the video filter both | `mediaFilename` prefers the **page title** and falls back to the path only when the path names something real (`The.Matrix.1999.1080p.mp4` still wins). No extension is guessed, because the container is not known until the manifest has been read |
+| Match IDM on YouTube | IDM does download it — 4K MKV down to 144p MP4, seen in a screenshot on a video Slash could offer nothing for. It gets the full `adaptiveFormats` list with working addresses and muxes video to audio. Reaching that list means impersonating a different client or running the site's signature code, because the web client is served `application/vnd.yt-ump` and a page with no addresses on it. An earlier round here leaned on IDM's release notes never naming YouTube; that was weak evidence and the wrong conclusion | Slash still does not defeat access controls itself. `YtDlpService` hands those pages to a **user-installed** yt-dlp — off by default, never bundled, never downloaded, never auto-installed — and adopts the transfer into the same downloads list via `adoptExternal`, labelled **via yt-dlp** so a download the browser could not make itself never looks like one it did. The capability lives in a program the user chose to install, which is how mpv and most media applications resolve the same question |
+| Bundle yt-dlp with the installer so it just works | Licensing allows it — yt-dlp is **The Unlicense**, public domain — so nothing legal stops it. What stops it is time: releases carry extractor fixes every few weeks (2026.08.19 nine days after 2026.07.04, and its notes name the YouTube extractor), and **Slash has no auto-update because it is unsigned**. A copy frozen into the installer breaks within a month and cannot be repaired short of reinstalling 188 MB. `yt-dlp.exe` is also a PyInstaller build, which AV heuristics flag, and the installer already shows "unknown publisher" | A **managed install** instead: one click fetches the current release from the official repository into `userData` — not the program directory, so updating never needs elevation and uninstalling Slash takes it with it. `chooseAsset` validates the download is from `github.com` under `/yt-dlp/yt-dlp/releases/download/` (an exact host test: `github.com.evil.test` fails it), the bytes are checked against the published SHA-512 **before** anything is marked installed, and a release with no checksum is refused outright. Verified for real: 17,840,399 bytes, checksum verified, and the installed binary then listed 2160p→144p on a live watch page |
+| Split a file eight ways and it arrives eight times faster | The split was **static**: N equal ranges decided before a byte moved, one connection each, `Promise.all` over the array. A transfer then finishes no sooner than its **slowest** connection — one bad CDN node, one shaped path, and seven connections sit idle having finished while the eighth carries the file alone. Measured against a fixture holding one connection to 2 MB/s: 4 MB it alone had to serve, a 2.00 s floor nothing else could help with | A connection that runs out of work **steals half of whatever is furthest from done** rather than retiring — dynamic segmentation, which is what IDM's speed claim actually rests on. `planSplit` is pure and cuts the *unfetched remainder*, never the range, so no byte already on disk changes hands; `fetchSegment` re-reads `segment.end` after every chunk and surrenders mid-response. Same fixture: **1.19 s**, the throttled connection relieved of 4.00 MB down to 2.13 MB, 15 segments from 8. Connections default to 8 (was 4) and cap at 16 (was 8) — past sixteen the bottleneck has moved to the link while the odds of being treated as abuse have not |
+| Read YouTube's formats out of the page | On a measured watch page all **30** formats carried neither `url` **nor** `signatureCipher`: the player negotiates each piece with the server as it plays, so no address exists on the page. Counting only *signed* formats reported "0 formats, 0 signed", which the picker rendered as "there is nothing on this page" | `analyseFormats` counts those separately as `serverDriven` and the note says the address does not exist until the player asks for it. Signed formats are now reported **even when something else was offerable** — a page listing 360p plus twenty signed higher resolutions used to explain nothing |
+| Sign in with Google from inside the browser | Google's FedCM is not implemented in Electron — the same wall that breaks `claude.ai/login` here. An in-app Google button cannot work, and a button that cannot work is worse than no button | Loopback PKCE, the standard desktop flow: a one-shot listener bound to `127.0.0.1`, the **system browser** for the sign-in itself, `state` compared in constant time, and the listener closed the moment the code arrives. The refresh token is `safeStorage`-encrypted beside the profile; the access token is not persisted at all, being short-lived and one more place to be found. No secure store means **no sign-in**, not a readable fallback |
+| Trust a rewards balance the browser reports | Slash Coin is meant to become tradeable, and a balance the client owns is a balance a text editor can forge. The client runs on a machine its owner controls, so its clock, its device id and its request volume are all attacker-chosen | The browser reports closed **intervals** and displays whatever the server returns; it never computes a total and uploads one. `record_coin_intervals` in Postgres is the only write path in, and the overlap rule is a **GiST exclusion constraint rather than a code path** — twenty machines signed into one account earn the time of one, and that holds even if the function is wrong. `supabase/coinProbe.py` attacks it 27 ways through PostgREST with a real signed JWT, because the management API runs as `postgres`, bypasses RLS, and would pass every test while a real client sailed through |
+| Catch a bad entry by naming the error codes it might raise | The per-entry handler listed `invalid_text_representation` and missed `invalid_datetime_format`, so one entry reading `"not-a-date"` aborted the **whole batch** instead of being skipped — which a hostile client could have used to throw away an honest user's fortnight of unreported time. Nothing threw that a caller could see; the batch simply returned an error | Caught by *category* (`data_exception`, all of 22xxx). Found by the probe rather than by reading, which is the entire argument for having one |
+| Credit the time between two samples | A suspended laptop wakes with a clock eight hours further on, and a naive timer banks all of it. It is the easiest way to farm this with no tooling whatsoever | Time accrues only between two consecutive samples that were **both** qualifying and less than `MAX_SAMPLE_GAP_MS` apart. A larger gap, or a clock that moved backwards, closes the interval at its last known-good sample and starts a new one. `earningRules` is pure and clock-injected precisely so this is testable, and the invariant the server depends on — claimed seconds never exceed the reported span — is asserted directly |
+| Ask "is a window focused" with `focusedWindow()` | It falls back to `this.windows[0]` so callers always get one, which is right for showing a notice and wrong for deciding who gets paid: a browser sitting behind somebody's IDE would have earned all afternoon | The tracker tests `this.windows.find((w) => w.isFocused)` and treats `undefined` as unfocused |
+| Tell a browser user from an advertiser at signup | `handle_new_user` made every new account an advertiser, which was right when advertisers were the only people who signed in. Supabase's OAuth `/authorize` carries no custom signup metadata, so a Google sign-in from the browser is indistinguishable from one from the ad portal — every coin collector would have appeared in the advertiser list, and in whatever the admin application counts as demand | The browser says so itself immediately after signing in, via `mark_browser_account()`. It removes the auto-created advertiser row **only while it is untouched** — the moment a campaign or a payment exists it deletes nothing, so somebody who both advertises and browses keeps both |
+| Block YouTube's ads by deleting `adPlacements` and be done | YouTube moved this account to **server-stitched ads** (SSAP). Measured by `SLASH_YT_ADS_PROBE` on a real watch page: the accessor installed, all three fields correctly gone — and `adBreakHeartbeatParams` present with `ssap` active. The strip was working perfectly and adverts played anyway, which is exactly what "the ad blocker broke" looks like from outside | `adBreakHeartbeatParams` joins the stripped list and `playerConfig.ssap` is deleted alongside it; the probe now reports `ssapPresent: false`. This is **not** a promise: a break stitched into the same stream as the video cannot be filtered out of the video it is inside, and no network rule reaches it either. The probe re-measures rather than leaving this as a belief |
+| Assume an advert on screen means the blocker failed | The video strip and the *slots* around it are different mechanisms with different fixes. A watch page with every ad field removed still showed a full sponsored panel beside the player, because `#player-ads` is rendered from a separate response and no field removal reaches it | `FilterEngine` still does no general cosmetic filtering — a browser hiding elements site-wide on rules it did not write is a much larger promise. The YouTube script carries a fixed list of YouTube's own ad containers, on YouTube only, and **hides** rather than removes them so the site's own scripts still find every node they expect. The probe asserts *visibility*, not presence, because the nodes are supposed to still be there |
+| Use a Desktop OAuth client for a Supabase Google sign-in | Supabase's flow is server-side: Google redirects to `https://<ref>.supabase.co/auth/v1/callback`, and a Desktop client's redirect URIs are fixed to loopback and custom schemes. The console does not even offer the field. Measured end to end: `redirect_uri_mismatch`, Error 400, Access blocked | The Google client must be **Web application**. The loopback listener in `RewardsService` is a *second*, separate hop — Google → Supabase → `127.0.0.1` — which is why the project's redirect allow list matters and does not remove the need for a Web client |
+| Sell the placement with an audience figure | Every instinct of a landing page says put "12,000 daily readers" under the hero, and Slash cannot measure that honestly: impression counts arrive aggregated, hours late, and only from browsers that were reopened. A number there would also contradict the reach section further down its own page | The advertise page sells what is verifiable — hours are exact, placements are exclusive, review is by a person, nothing about readers is collected — and states plainly that no audience figure is published yet. `lowestRate` derives the "from $X an hour" line from the served rate card rather than holding a second copy, so the headline cannot drift out of step with the table beneath it, and it is unit-tested because it is a claim about money |
+| Animate content in as it scrolls | A reveal that depends on an observer firing is one bug away from a blank marketing page — and these are the two pages somebody reads before signing up or spending money | `.slash-reveal` is fully opaque by default and only starts hidden inside `prefers-reduced-motion: no-preference`; `useReveal` marks everything revealed immediately when `IntersectionObserver` is missing, and uses one observer per page rather than one per card. Every animation on these pages is transform/opacity only, and the two that repeat are the coin and the placement pulse, both of which are the thing the page is about |
+| Verify a loopback OAuth callback by matching the `state` you sent | Supabase runs the Google leg itself and keeps its own `state` for it; what reaches the listener is `?code=…` with no echo of ours. Requiring a match would have rejected **every** genuine sign-in — after the client type, the secret and the allow list were all finally correct, which is the worst moment for a check to fail | `checkCallback` accepts an absent state and refuses a present-but-wrong one, and is a pure tested function rather than logic inside an HTTP handler that needs a real Google account to exercise. The binding here is **PKCE**, as RFC 8252 intends: the code is worthless without the `code_verifier` generated in-process and never transmitted. Google itself has no public API for creating a sign-in OAuth client — the only programmatic one is IAP-locked — so `supabase/configureGoogle.py` automates everything after the console step and then walks the real authorize chain rather than trusting the config it just wrote |
+| Tell the user Google refuses sign-in from Slash | Two different mechanisms were conflated. **FedCM** genuinely is unavailable in Electron and genuinely does break `claude.ai/login`. **`disallowed_useragent`** is Google's embedded-webview policy, it is decided by the user agent, and Slash's carries no `Electron` token — measured by `SLASH_GOOGLE_UA_PROBE`, which loads Google's real sign-in form in a Slash tab with `blocked: false`. The notice was not merely wrong, it **caused** the failure it claimed to explain: it pushed people to finish a sign-in in a different browser than they began it in, and a provider that cannot resolve its own flow state falls back to its configured site address — the `localhost:3000` dead end | The blanket `accounts.google.com` hand-off hint is gone and its tests are reversed to assert silence. `RewardsService.signIn` **returns** the authorize URL instead of calling `shell.openExternal`, and the renderer opens it in a Slash tab, so the whole flow stays in one browser. `completeSignIn` remains as the escape hatch for a code that still ends up somewhere unexpected |
+| Depend on the identity provider honouring the `redirect_to` you gave it | Supabase falls back to **its own** configured site address whenever it cannot resolve the flow behind a returning code, and on this project that address answers nothing — `ERR_CONNECTION_REFUSED` at `localhost:3000`, with the authorization code sitting right there in the failed URL. The loopback listener is never reached, so no amount of fixing the listener helps | The sign-in runs in a Slash tab, so **this browser is the thing looking at that address**. `watchForSignIn` takes the code off any main-frame navigation carrying one while a sign-in is pending, exchanges it and closes the tab. `SLASH_SIGNIN_PROBE` arms a real sign-in, navigates to the dead address on purpose and asserts the code was taken — a first version of that probe passed without testing anything, because an earlier step had already consumed the pending sign-in |
+| Write a regex into a source file with a shell heredoc | `` inside a Python heredoc is the **backspace escape**, not a word boundary. It wrote a literal 0x08 byte into the guard, which then read as `/[?#].*^Hcode=/` and matched nothing — no error, no warning, and the feature silently did not work while every test passed | The guard reuses `extractCode`, the same tested function the paste fallback uses, rather than a second pattern that has to agree with it. Verified by grepping the file for control bytes, not by reading it — a backspace is invisible in every editor and in the diff |
+| Report a blocker as working because no advert appeared | `SLASH_YT_ADS_PROBE` asked "is an advert on screen" once, seconds after load, and reported PASS. Most of a video is not an ad break, so it passed on a page that showed an advert moments later — twice, and it was believed both times. The rebuilt probe watches for a full minute, runs a **control with the blocker off**, and refuses to conclude anything unless the video actually played (`currentTime` advancing) and an advert appeared in the control. It now reports INVALID or INCONCLUSIVE where it used to report PASS | The honest state: `autoplayPolicy: 'user-gesture-required'` means a scripted `play()` is refused and the player never lays out under automation (`video.getBoundingClientRect()` is 0×0), so **the A/B cannot currently be run at all**. Field-stripping is verified to work — `accessorInstalled: true`, `adFieldsLeft: []` on real pages — and adverts still reach users, so they are arriving by a path the strip does not cover, server-stitched insertion being the obvious candidate. The settings copy now says adverts will get through rather than promising they will not |
+| Send your own `state` to an auth service that runs the OAuth leg for you | Supabase passes it **straight through to Google** instead of generating its own, then cannot resolve a flow keyed by it when Google hands it back: `error_code=bad_oauth_state`. Measured A/B against the live endpoint — without a state it emits a UUID it can look up (`9ba1ad63-…`), with one it emits ours verbatim. This cost several rounds because the symptom was invisible: an unresolvable state made it redirect to its configured **site address**, which pointed at a dev server that was not running, so it presented as `ERR_CONNECTION_REFUSED` on a machine-local port and looked like a redirect or allow-list fault | No `state` parameter is sent. The provider owns its own; the binding for this flow is **PKCE**, and the verifier never leaves the process. The site address now points at the sign-in listener itself, so a fallback lands where the sign-in was going anyway rather than somewhere that answers nothing — which is also what finally made the real error readable |
+
+## Architecture rules
+
+- **Three view layers per window.** chrome view (full bounds) → page view (inset into the chrome's
+  content hole) → transparent overlay view (full bounds, hidden by default). Anything that must
+  visually cover a web page — command bar, dialogs, permission prompts, context menus — renders in
+  the overlay.
+- **A CSS panel in the chrome document renders *underneath* the page view.** The page view is a
+  native layer composited above the DOM. So side panels (history, bookmarks, downloads, settings)
+  **inset** the page via `layout:setRightPanelWidth` → `ViewLayoutManager.setRightPanelWidth` rather
+  than floating over it. Anything that genuinely must float goes in the overlay view instead.
+- **Only the active tab's view is attached to the window.** Background tabs keep their
+  `WebContentsView` alive but detached — they carry on loading and playing audio without being
+  composited. Chromium composites every attached view, so leaving N in the tree costs GPU work for
+  N-1 invisible pages.
+- **`Tab` holds its `WebContentsView` optionally.** A tab with a null view is a completely normal tab
+  that simply is not rendering. This is what makes Phase 3 hibernation a state change rather than a
+  refactor, and it is also how internal pages (the new tab page) work: no view is attached and the
+  chrome document shows through the content hole.
+- **Workspace isolation is fixed at creation and cannot be toggled.** An isolated workspace owns a
+  `persist:ws-<id>` partition; flipping the flag later would strand every cookie in the old
+  partition. The supported route to isolation is *Duplicate as isolated*. Moving a tab across an
+  isolation boundary necessarily reloads it signed out — warn first, never do it silently.
+- **Only `HIBERNATED` frees memory.** FROZEN (detached + marked hidden + muted) buys CPU. Never
+  quote a byte figure for freezing. Hibernation records the real working set immediately before
+  destroying the renderer and reports it as **measured**; everything else is an **estimate** and
+  must be labelled so in the UI.
+- **Nothing may sleep a tab except through `ResourcePolicyEngine.blockersFor`.** That includes
+  user-initiated actions — a button press is not a reason to destroy a half-filled form. The engine
+  is pure and clock-injected precisely so every guard is unit-tested.
+- **Every session must come from `SessionRegistry`.** It applies `SessionHardening` before handing
+  one out. A partition created anywhere else would silently start with Chromium's defaults —
+  permissive where ours are not — while looking identical from the outside.
+- **Keyboard shortcuts live in the application menu** (`src/main/menu.ts`), not in renderer
+  `keydown` handlers. Focus normally sits in the page view — a web page — so the chrome document
+  never sees Ctrl+T. Menu accelerators fire regardless of which native view has focus. Commands
+  needing renderer state are forwarded as a `ui:command` event.
+- **`ipc/registry.ts` is the only file permitted to call `ipcMain.handle`.** Every handler is wrapped
+  with a sender allowlist (chrome/overlay frames only), a zod parse of the payload, and `Result`
+  wrapping so nothing throws across the boundary.
+- **`shared/ipc/contracts.ts` is the single source of truth** for channel names and payload schemas.
+  Adding a channel means adding a contract there first.
+- **All web content runs `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`.**
+  This includes our own chrome UI — it needs only `ipcRenderer` via `contextBridge`, which works
+  sandboxed.
+- **`preload/content.ts` has zero privileges.** It runs in web pages. It may capture scroll position
+  and run Readability extraction, nothing more.
+- **Engines live under `src/main/<domain>/`** (they need privileged APIs) but are defined as
+  interfaces in `src/shared/types/` and consumed only through those interfaces.
+- **Rust migration seam:** `ResourceSampler` and `EmbeddingWorker` are the two candidates. Both are
+  interfaces with an in-process TS implementation, invoked asynchronously, so either can become a
+  sidecar speaking JSON-RPC over stdio without touching callers.
+- **The embedding runtime never loads in the main process.** `src/main/memory/embedding/worker.ts`
+  is a second rollup entry (`out/main/embeddingWorker.js`) launched with `utilityProcess.fork`.
+  Loading ONNX blocks its thread for hundreds of milliseconds; in main that is every tab switch and
+  every IPC reply. The worker imports nothing from `shared/types` — the vector width is passed in
+  the `prepare` message — because importing a schema module drags zod into a 4 KB bundle.
+- **A tab showing an error has no page view.** `Tab.needsView` is false while `error` is set, so
+  the view is detached and the chrome's `ErrorPage` fills the content hole — the same mechanism as
+  the new tab page and the hibernation placeholder. Chromium's own failure page cannot say whether
+  Slash Shield refused the request, which is the whole point of having our own. Retrying clears the
+  error and **must reattach the view**; `navigate` and `reload` both do.
+- **Reader mode carries text blocks, never HTML.** Readability's `content` is markup derived from a
+  web page, and the overlay that renders it holds the privileged IPC bridge. `readerScript.ts`
+  walks the parsed DOM in a detached container and returns typed blocks, which React escapes.
+- **Vertical tabs inset the native page view.** `tabStripPosition: 'left'` widens
+  `ViewLayoutManager.setSidebarWidth` by `VERTICAL_TAB_STRIP_WIDTH`. Moving the strip in React alone
+  would draw the tab column underneath the page — same trap as side panels.
+- **The importer reads bookmarks and history only.** Chromium's passwords are DPAPI-encrypted
+  against the user's own account and *could* be decrypted here. Lifting a credential store on the
+  strength of one "Import" button is not a thing this browser does. Chromium locks `History` while
+  running, so it is copied — with its `-wal` — before being read.
+- **The embedding model is bundled and `allowRemoteModels` is `false`.** `resources/models/` ships
+  via `extraResources`, so it lands *beside* app.asar — the ONNX runtime opens those files natively
+  and cannot read through the archive. A missing file fails loudly instead of silently reaching for
+  huggingface.co. Verify by moving `resources/models` aside and re-running the semantic probe.
+- **`memory_vectors` is created at runtime, never in a migration.** A vec0 virtual table needs the
+  sqlite-vec extension loaded, and a failed migration takes the whole database, and therefore the
+  browser, down with it. `VectorStore.enable()` creates it the first time the feature is switched on.
+- **vec0 rowids must be bound as `BigInt`.** better-sqlite3 passes a plain JS number to SQLite as a
+  float and vec0 rejects it ("Only integers are allows for primary key values"). Every insert and
+  delete against `memory_vectors` binds `BigInt(id)`.
+- **Deleting a page deletes its vectors first.** `ON DELETE CASCADE` reaches `memory_chunks` but not
+  a virtual table, so `MemoryRepository` holds the `VectorStore` and calls `forgetPage` *before* the
+  page row goes. `VectorStore.enable()` also prunes orphans left by a session where the extension
+  never loaded.
+- **The profile is chosen before `app.whenReady()`, and nothing may read a path before it.**
+  `prepareUserDataPath()` then `applyProfile()`, in that order, at the very top of `main/index.ts`.
+  `app.setPath('userData', …)` is silently ignored once anything has opened a file under the old
+  path — there is no error, the browser simply uses the wrong profile's data and writes to it. The
+  profile list is therefore plain JSON beside the directories, not SQLite: it has to be readable
+  before the database exists.
+- **A deletion that has to reach another device is a row, not an absence.** Bookmarks and reading
+  list items write to `sync_tombstones` *before* the row goes, while their identity can still be
+  read. Without that, "missing here" is indistinguishable from "new there" and every deleted item
+  comes back on the next sync. Bookmarks carry a `guid` for the same reason: the AUTOINCREMENT
+  primary key is unique on one machine and meaningless on any other.
+- **Media detection is a network observer, and a deliberately partial one.** `MediaSniffer`
+  lists only what it can hand to the download engine as a complete file. It recognises HLS/DASH
+  manifests and DRM licence traffic so `sniffNote` can say *why* there is nothing to download —
+  offering a button that produces an unplayable file is worse than a sentence. Reassembling
+  segments or touching encrypted streams is out of scope and must stay that way.
+- **Anything the queue starts must claim its slot before its first `await`.** `pump` starts
+  whatever is queued and not already live, so a `begin*` method that awaits before calling
+  `this.live.set` leaves a window for a second pump to start the same download again. The two runs
+  then race over the same part files and the download **completes**, silently, having produced only
+  half the video. `beginJoined` shipped with exactly that bug and it was invisible to typecheck,
+  lint and 854 unit tests — only `SLASH_STREAM_PROBE` caught it.
+- **The list of ad placements existed in three places, and adding one broke all three differently.** `SponsoredTileSchema` and `SponsorBatchSchema` each carried their own copy, and `asPlacement` in `SponsorService` carried a third as an inline predicate. Adding `rail` to the first only meant the batch schema rejected **the entire fetch** — not the unknown creative, every campaign in it — with one line in a log; and once that was fixed, `asPlacement` silently mapped the unknown value to `'tile'`, so rail creatives were written correctly, read back as tiles, and filled the wrong placement while their own stayed empty. Nothing threw either time. All three now reference `PLACEMENTS`, and a test round-trips every placement through both schemas so the next one added cannot repeat it.
+- **The start page reads sponsor status once, so a batch arriving later never reached it.** `NewTabPage` fetched with an empty dependency array, and it is drawn by the chrome document — which mounts at launch, before any batch has been fetched. Batches arrive asynchronously seconds later, so the banner and background placements were invisible until the next restart, on inventory somebody had paid for. `SponsorService` now broadcasts `sponsor:changed` on both cache write and clear, and the page and the tile subscribe.
+- **A queue is a label, and a folder is not guaranteed to exist.** Downloads carry a `queue` string with no foreign key, so deleting a queue strands nothing — `selectStartable` falls back to the first. That function is pure and clock-injected because a download can be held by its own schedule, its queue's pause, its queue's limit *or* the global cap, and only a tested function can say which; `whyHeld` turns that into the sentence the row shows. Category sorting then broke an assumption nothing had ever written down: the default downloads folder always exists, so no code path created one. The first video into a `Video/` folder failed with ENOENT until `destinationFor` learned to `mkdir` — **after** `confinedPath` has verified the path, never before, so this cannot create a directory outside the download folder.
+- **On Windows, `yt-dlp` is often a `.cmd` shim, and Node will not spawn one.** pip installs `yt-dlp.exe`, but scoop and npm install a batch shim — not an executable image, and `spawn` refuses it with EINVAL since the argument-injection fix. So `spawnTool` goes through the shell for those, quoting every argument by hand: `cmd.exe` splits on whitespace and the download folder usually has a space, and the format selector `bv*[height<=2160]+ba` contains a `<` that cmd reads as **input redirection** — which is exactly how the probe failed, with "The system cannot find the file specified" and no other clue. `SLASH_EXTERNAL_PROBE` therefore uses a `.cmd` fixture on purpose; a `.exe` one would have tested only the case that already worked.
+- **`SettingsSchema.partial()` is not a patch schema, and using it as one silently reset every other setting.** Every field here carries a `.default()`, and `.partial()` wraps that in an optional **without removing it** — so an absent key still parses to its default. Measured: `SettingsSchema.partial().parse({ blockAds: false })` returns **all 74 keys**. Fed to `SettingsStore.update`, which merges the patch over the current settings, that meant changing any one setting reset every other to its default: turn two switches on, and the first came back off. It reads as "most of the switches do not work" and it affected sliders and selects identically. `SettingsPatchSchema` strips the default before making the key optional, so an absent key is genuinely absent. `SLASH_TOGGLES_PROBE` clicks real switches and compares the settings object either side — the only check that separates "the control moved" from "the value changed", which is exactly where these came apart.
+- **Explaining a setting well and rendering it well are different jobs.** Principle 7 asks these screens to say what a setting costs in plain language, and they did — seventeen groups of three-line paragraphs, with the control ahead of the text so it sat in a different place on every row. The screen was hard to use *because* it was thorough. Nothing was deleted: `splitHint` leads with the first sentence and puts the rest behind **More**, `Toggle` is now label-left/switch-right so there is a column to run an eye down, and each group is one card with hairlines between rows. The sentence split is pure and tested against decimals (`4.3 MB`), lowercase continuations (`net.request`) and fragment openers (`Off by default.`), because a settings screen that has quietly cut a sentence in half is worse than one that never split it.
+- **A tab strip that predicts its own overflow must fail towards scrolling, never towards clipping.** `available` subtracted the pinned tabs and the new-tab button but **not the strip's own `px-2`**, so it believed it had 16px more room than it had. Near the boundary `overflowing` stayed false while the run genuinely did not fit, and the not-overflowing branch was `overflow-hidden` — so tabs past the edge were clipped with no way to scroll to them. Not narrow: unreachable, unclickable, uncloseable. The padding is now subtracted, a measured `scrollWidth > clientWidth` is OR-ed with the prediction, and the strip is **always** `overflow-x-auto`; centring is the only thing the prediction still decides, because being able to reach a tab is not a preference. `SLASH_SESSION_PROBE` sweeps tab counts down through the boundary — it reaches `scrollWidth === clientWidth` exactly — and asserts the invariant at every width.
+- **An `opacity-0` control still takes clicks.** The compact close button is `absolute inset-0 m-auto` over the middle of the tab, so while invisible it was swallowing clicks meant to switch to that tab and closing it instead. `pointer-events-none` until `group-hover` fixes it. Invisible is not inert.
+- **A session that is only written at quit is not written at all for the users who need it.** `session-end` requires an orderly quit; a crash, or a browser somebody gave up on and ended from Task Manager, writes nothing — so restore fell back to an automatic snapshot taken **every five minutes**. Open twenty tabs, hit a problem four minutes in, kill it, and there is no record of any of them. `noteChange()` now records the session ~4s after the tabs stop changing, debounced because opening a window of twenty tabs is twenty changes and each capture reads scroll from every live renderer. Measured: 30 tabs in a snapshot 5 seconds old, with nothing quit.
+- **A maximised window's `getBounds()` is bigger than the screen.** On Windows the frame extends past every edge by the invisible resize border: measured, `getBounds()` returns `{x:-8, y:-8, width:1936, height:1048}` on a 1920×1032 work area while `getContentBounds()` returns `{x:0, y:0, width:1920, height:1032}`. Auto-hide's reveal band, computed from `bounds.y`, was therefore `[-8, 0)` — entirely above the screen, where no cursor can ever be, so the chrome never came back on a maximised window and came back fine on a restored one. `SLASH_AUTOHIDE_PROBE` now **maximises before testing**, because the restored case is the one that passes either way.
+- **Auto-hide is driven from main's cursor poll, in both directions, with two different thresholds.** Hiding used to be a DOM `mouseleave`, which fires the instant the pointer crosses into the page — so the bars vanished while the pointer was still on its way to a tab. That is what "not working intelligently" meant. Reveal now triggers on the top `CHROME_REVEAL_BAND` pixels and hide only once the pointer is `CHROME_HIDE_MARGIN` **below the chrome's own bottom**; the gap is hysteresis, and with a single threshold a pointer resting near the boundary flips the state every poll. The poll deliberately does **not** require window focus — it used to, so moving the pointer to the top of a window you had just clicked away from did nothing. `setChromeHeight` tweens the native page view's inset over the same 260ms the CSS rows animate, because animating only the rows left the bars fading in over a page that had already jumped to meet them.
+- **`webContents.sendInputEvent` cannot test anything the OS decides.** It injects an event into a view's renderer, which is *below* the layer where window hit-testing, drag regions and the resize border are resolved — so a probe built on it passed against the auto-hide bug, and passed just as happily against the pre-fix code when that was restored to check. Anything about where a real pointer actually lands has to move the real cursor: `SLASH_AUTOHIDE_PROBE` reports the window rectangle and waits while a driver outside the process sets `[System.Windows.Forms.Cursor]::Position`. It also refuses to conclude anything unless it first observed the chrome collapsed and the pointer parked away from the edge — a run that begins with the cursor already at the top reveals on contact and proves nothing, which is exactly what the second run did.
+- **Segments hand each other byte ranges while both are in flight, so the arithmetic is pure and the file is read back.** Work-stealing is the one change in this engine that can corrupt a file without failing anything: a gap or a doubled region does not throw, does not fail a request and does not stop the download reaching 100% — it writes a file that opens, plays for a while, and is wrong in the middle. So the split lives in `planSplit` where a coverage invariant (`[0, total)` tiled with no gap and no overlap) is asserted over a whole run of steals *and* over donors that keep fetching between them, and `SLASH_SEGMENT_PROBE` re-checks that same invariant against eight real connections racing over one file handle before comparing a SHA-256. The donor is shrunk **synchronously** with the read of its `receivedBytes` — one tick, no await between — because otherwise the boundary can be computed behind a cursor that has already moved past it.
+- **A download path is not verified until a probe has run it and read the file back.** "State =
+  completed" means the code finished, not that the file is right. `SLASH_STREAM_PROBE` generates a
+  real video with the bundled ffmpeg, segments it into real HLS, serves it from a real server, runs
+  the real `DownloadQueue`, and checks the **duration and stream count** of the result — because a
+  stream assembled out of order still produces a file that opens and plays for a few seconds.
+- **A page script that is a string needs its own test.** `EXTRACT_SCRIPT` is evaluated in the page's
+  own world, so a syntax error or a typo'd property fails no build, no typecheck, and no runtime
+  check anybody sees — `extract` catches it and the feature reports "nothing to download" for ever.
+  `extractScript.test.ts` runs it through `new Function` against stand-ins for the page globals.
+  Every string-of-code here deserves the same, and this one was written after shipping the failure
+  twice.
+- **A `webRequest` listener must be filtered, and its callback must do almost nothing.** An
+  unfiltered listener is a main-process callback for *every response on every page*, and
+  `ContentBlocker` already spends one. Media detection filters to `media`/`xhr`/`object` at
+  registration — the exclusion has to happen before the callback exists, because by the time it
+  runs the headers have already been marshalled across. The callback then dedupes by URL, because a
+  playing video re-requests the same file several times a second and re-ranking on each would be a
+  cost paid constantly. `detectPageMedia` **removes** the listener rather than skipping its body.
+  This is principle 1, and it was learned by shipping the unfiltered version.
+- **Pausing only *asks* a transfer to stop, so the slot stays claimed until it has.** The segment
+  loops are asleep on the bandwidth throttle and take a moment to notice. `pause` therefore leaves
+  the entry in `live` and lets the continuation in `begin` capture the byte counts, free the slot
+  and pump — because releasing it immediately let a quick Resume start a **second** transfer over
+  the first, which re-downloaded the whole file and then deleted the new transfer's own live entry
+  as it finally unwound. `pump` also skips anything already in `live` for the same reason. The file
+  came out correct either way; only the count of bytes the server was asked for showed it.
+- **A download's destination is chosen once and reused for its whole life.** `uniquePath` refuses to
+  overwrite an existing file, which is right on the first attempt and wrong on every one after —
+  the file it collides with is the download's own partial. Re-deriving it made every resume *and
+  every automatic retry* start again under a new name (`film (1).mp4`, `film (2).mp4`).
+- **"Centred" means centred in the window, not in the space left over.** The tab strip and the
+  address field are both flanked by controls, so `justify-center` on the row centres them between
+  those controls — visibly off-centre, in the way that looks wrong without being obviously wrong.
+  Tabs get their own row that reserves nothing (the window controls moved to the workspace row
+  above), and the toolbar is three columns whose outer two are `flex-1 basis-0` so they are always
+  equal. Centring the tab strip is also gated on `overflowing`: `justify-center` on a scrolling flex
+  row spills the overflow *both* ways, putting the first tab at a negative scroll offset that cannot
+  be reached at all.
+- **The workspace switcher is a row, not a rail, and that was a page-width decision.** A left rail
+  cost 56px of every page permanently, for a control used a few times a day and one that — unlike a
+  side panel — could not be dismissed. As a row it costs height once, gives the page its full width
+  back, and has room for workspace *names* instead of icons that had to be learned by position.
+  `setSidebarWidth` now insets the page by nothing unless the tab strip is vertical.
+- **Crawling and clipboard-reading are capabilities to bound at the source, not to promise about.**
+  The site grabber fetches pages with `net.request` and **never loads them in a renderer** — a
+  crawler that opened each page in a real view would run its scripts, fire its analytics and play
+  its media across twenty pages nobody chose to visit. Same-origin is not a setting, depth and page
+  counts are clamped in main so a renderer cannot ask for a bigger crawl, and `robots.txt` is
+  honoured because this is a browser making requests *as the user, wearing their cookies* — which
+  is precisely why the comparison to a standalone grabber does not hold. `ClipboardWatcher` reads
+  only when a window takes focus, never on a timer, so it cannot see what is copied inside another
+  application; `readOffer` is pure and its tests are the privacy boundary, not a convenience check.
+- **A finished feature with no way to reach it is not finished.** Seven capabilities were wired end
+  to end in main — freeze, download priority, scheduled start, profile rename, mission discard,
+  clearing the permission log, and the whole `ai:activity` audit trail — with no renderer caller,
+  and four enforced settings had no control anywhere. Two of those were principle violations rather
+  than gaps: the AI audit log is the evidence for "AI never acts without approval", and
+  `aiMayReadPageContent` is the switch principle 2 promises. A channel with a handler and no caller
+  should be treated as an unfinished feature, not as spare capacity.
+- **Protocol is decided by the bytes that came back, never by the address.** `planStream` fetches
+  the manifest once and dispatches on its content: `#EXTM3U` to the HLS reader, `<MPD` to the DASH
+  one. `isStreamUrl` survives only as a last-resort fallback for a caller that knew nothing, because
+  real CDNs serve both from paths with no extension at all.
+- **A `SegmentTemplate` count is an estimate, and packagers land either side of it.** The spec says
+  `ceil(periodDuration / segmentDuration)`; ffmpeg encoding twelve seconds at two seconds a segment
+  declared six and wrote *seven* for the audio, because AAC frames do not land on second boundaries.
+  So the plan carries the estimate plus a five-segment look-ahead, and `optionalFrom` marks where a
+  **404 means the stream ended** rather than that the download failed. A gap before that index is
+  still a failure — that is a hole in the middle of a video. The tolerance is for absence
+  specifically (404/410): finishing early on a 500 would hand somebody a truncated file reported as
+  complete.
+- **Media identity is not the URL.** A player re-requests its manifest with a fresh token every few
+  minutes, and keying the ledger by address grew a row per token. `mediaIdentity` strips a **named
+  list** of credential and clock parameters and keeps everything else — dropping the whole query
+  string would merge genuinely different videos, and picking a row that plays a different film is a
+  worse failure than showing one twice. The stored address is always refreshed to the newest one,
+  because the older token has expired.
+- **A filename from the network is not a path.** `Content-Disposition`, a manifest's segment names
+  and a page's title are all attacker-controlled. `sanitiseFilename` reduces one to a single
+  component and `confinedPath` then **resolves the result and verifies it landed inside the folder** —
+  a string transform is a blocklist, and a blocklist is a thing you can be wrong about. The
+  comparison appends a separator, because `/downloads-evil` starts with `/downloads`.
+- **Retrying is a decision about the failure, not a count.** A 404 retried four times is four
+  pointless requests and a minute of a bar that was never going to move; a 401 retried four times is
+  how an account gets rate-limited. `classifyFailure` splits permanent from transient, `Retry-After`
+  wins over our own backoff, the backoff is jittered so downloads that dropped together do not
+  return as a burst, and the wait is cancellation-aware — a download cancelled during a sixty-second
+  backoff must not resurrect itself when the timer fires.
+- **A media download is not verified by a status code; it is verified by reading the bytes back.**
+  `SLASH_MEDIA_ACCESS_PROBE` loads three real video pages, takes the URL the browser itself saw, and
+  fetches it ten ways — bare, session-only, referrer-only, origin-only, and so on — one variable at
+  a time. Coarser buckets were the first version and were not enough: "the headers broke it" is not
+  something you can fix. It then runs the **real** `planStream` and reads segment one back, because
+  a CDN answering 200 with an error page produces a download that completes and a file that will
+  not play. Four separate faults were found this way, three of them ours, none visible to
+  typecheck, lint or 865 unit tests.
+- **Anything that reaches a page's fields goes through `insertText`, never script.** Passwords and
+  addresses both: `preload/content.ts` reports which *kinds* of field exist and holds the element
+  references, main asks it to focus one, then types the value through Chromium's own input pipeline.
+  `executeJavaScript` would put the value in script source in the page's own world; sending it to
+  the content preload would hand it to a process running untrusted web content.
+
+## Stack
+
+Electron 43 (Chromium 150, Node 24.18) · React 19 · TypeScript 5.9 (**not 7** — typescript-eslint
+peer-caps at `<6.1.0`) · Vite 7 (**not 8** — electron-vite 5 peer-caps at `^7`) · electron-vite 5 ·
+Tailwind 4 · Zustand 5 · zod 4 · better-sqlite3 13.
+
+`package.json` has no `"type": "module"`: main and preload emit CJS, the reliable path for native
+modules and sandboxed preloads. Tooling configs use `.mjs`.
+
+### Two build constraints that are easy to trip over
+
+**Never add a native module that requires compilation.** This project's path contains spaces
+(`Projects - Slash Developments\Slash Browser`) and **node-gyp refuses to build any module whose
+path contains a space** ([nodejs/node-gyp#65](https://github.com/nodejs/node-gyp/issues/65)). There
+is no flag for this. better-sqlite3 works only because v13 ships **N-API prebuilds** (`prebuilds/win32-x64.node`,
+named by platform+arch with no ABI version), and N-API binaries are ABI-stable across both Node and
+Electron — so the shipped binary loads as-is. Hence `npmRebuild: false` and no `install-app-deps`
+postinstall; adding either brings back a build that cannot succeed here. A future native dependency
+must either ship N-API prebuilds or move the repo to a space-free path.
+
+*(Chosen over the built-in `node:sqlite`, which does also have FTS5 — verified. better-sqlite3 wins
+on a newer SQLite (3.53.4 vs 3.49.1), a non-experimental API, and mature transaction/prepared-statement
+ergonomics. `node:sqlite` remains a viable fallback if the prebuild story ever breaks.)*
+
+**Never import `shared/ipc/contracts.ts` from a preload.** It pulls zod and every schema into a
+bundle evaluated before each privileged view's first paint — it cost 137 KB before the split. Import
+runtime values from the zod-free `shared/ipc/channels.ts`; schema-derived types are `import type` and
+erase to nothing. Current preload: ~1 KB.
+
+## Commands
+
+```bash
+npm run dev        # electron-vite dev server
+npm run typecheck  # both tsconfig projects
+npm test           # vitest, pure logic only — no electron import
+npm run lint
+npm run package    # NSIS installer into release/
+```
+
+## Working agreements
+
+- Do not start a phase before the previous one is stable. Phase order is in `docs/PLAN.md`.
+- No placeholder implementations for core features. If Electron cannot support something, implement
+  the closest correct alternative and document the gap in the table above.
+- Every phase ends with: `npm run typecheck` clean, tests green, and a manual script in
+  `docs/testing/phase-N.md` that also re-runs earlier phases' scripts as regression checks.
+- Never auto-classify a user's tabs, index page content, or contact an AI provider without an
+  explicit opt-in already recorded in settings.

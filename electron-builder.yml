@@ -1,0 +1,185 @@
+appId: dev.slash.browser
+productName: Slash
+copyright: Copyright © 2026 Slash Developments
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+  # better-sqlite3 ships a prebuild for every platform (~17 MB total). A Windows
+  # x64 build needs exactly one of them; the rest are 15 MB of dead weight in the
+  # installer. ADDING A PLATFORM TARGET MEANS UPDATING THIS LIST.
+  - '!**/node_modules/better-sqlite3/prebuilds/darwin-*.node'
+  - '!**/node_modules/better-sqlite3/prebuilds/linux-*.node'
+  - '!**/node_modules/better-sqlite3/prebuilds/linuxmusl-*.node'
+  - '!**/node_modules/better-sqlite3/prebuilds/win32-arm64.node'
+  # sqlite-vec publishes one package per platform and installs all of them.
+  - '!**/node_modules/sqlite-vec-darwin-*'
+  - '!**/node_modules/sqlite-vec-linux-*'
+  # onnxruntime-node carries the runtime for every platform — roughly 270 MB, of
+  # which a Windows x64 build needs about 15. THIS LIST NEEDS UPDATING IF A
+  # PLATFORM TARGET IS ADDED.
+  - '!**/node_modules/onnxruntime-node/bin/napi-v*/darwin/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v*/linux/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**'
+  # The DirectML execution provider — 38 MB of GPU DLLs for a code path we never
+  # take. The embedding worker asks for CPU with a single thread on purpose: a
+  # background convenience does not get to contend with the compositor for the
+  # GPU. Verified by deleting these from a packaged build and re-running the
+  # semantic probe, which still passed. TAKING THE GPU PATH MEANS RESTORING THEM.
+  - '!**/node_modules/onnxruntime-node/bin/**/DirectML.dll'
+  - '!**/node_modules/onnxruntime-node/bin/**/dxcompiler.dll'
+  - '!**/node_modules/onnxruntime-node/bin/**/dxil.dll'
+  # sharp is NOT excluded, tempting though it is: nothing here runs an image
+  # model, but transformers.js requires it at the *top level* of its bundle
+  # (`src/utils/image.js`), so removing it makes `require('@huggingface/
+  # transformers')` throw before the worker can load anything. Verified by
+  # renaming node_modules/sharp and watching the import fail. Only its
+  # non-Windows binaries go.
+  - '!**/node_modules/@img/sharp-darwin*'
+  - '!**/node_modules/@img/sharp-linux*'
+  - '!**/node_modules/@img/sharp-libvips-darwin*'
+  - '!**/node_modules/@img/sharp-libvips-linux*'
+  - '!**/node_modules/@img/sharp-wasm32*'
+  - '!**/node_modules/@img/sharp-win32-!(x64)*'
+
+# better-sqlite3 is a native module: keep it unpacked so the .node binary is a
+# real file on disk rather than an entry inside app.asar, which cannot be dlopen'd.
+#
+# Everything with a native binary has to be unpacked for the same reason: a
+# .node addon or a .dll cannot be dlopen'd from inside app.asar.
+# The embedding model, shipped rather than downloaded on first use — see
+# resources/models/README.md for why. It goes beside app.asar, not inside it:
+# the ONNX runtime opens these files natively and cannot read through an archive.
+extraResources:
+  - from: resources/models
+    to: models
+  # Filter lists, beside app.asar rather than inside it — the compiler reads
+  # them with plain fs, and a native file open cannot see through the archive.
+  - from: resources/filters
+    to: filters
+  # ffmpeg, for joining a video stream to its separate audio stream. ~88 MB, and
+  # the single largest thing in the installer — it is here because every site
+  # above 720p sends picture and sound separately, and without it those download
+  # as two files nobody asked for. Fetched by "npm run fetch:ffmpeg", which pins
+  # a checksum, rather than committed — git would carry every version for ever.
+  # A build without it still works: Muxer.available() is false, the picker
+  # offers the two streams, and the UI says why.
+  - from: resources/ffmpeg
+    to: ffmpeg
+
+asar: true
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+  # vec0.dll, loaded through SQLite's extension mechanism.
+  - '**/node_modules/sqlite-vec-windows-x64/**'
+  # onnxruntime_binding.node plus the ONNX Runtime DLLs beside it.
+  - '**/node_modules/onnxruntime-node/**'
+  # sharp's addon, loaded by transformers.js at import time whether or not any
+  # image model is ever used.
+  - '**/node_modules/@img/**'
+  - '**/node_modules/sharp/**'
+
+# better-sqlite3 v13 ships N-API prebuilds (prebuilds/win32-x64.node, resolved by
+# platform+arch with no ABI version in the name). N-API binaries are ABI-stable
+# across both Node and Electron, so the shipped binary loads in Electron as-is.
+#
+# Rebuilding is therefore not merely unnecessary, it is actively harmful here:
+# node-gyp refuses to build any module whose path contains a space, and this
+# project lives under "Projects - Slash Developments\Slash Browser".
+# See https://github.com/nodejs/node-gyp/issues/65
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # electron-builder converts this to a multi-size .ico and embeds it in the exe,
+  # so the taskbar, Alt+Tab and window all show it instead of Electron's logo.
+  icon: build/icon.png
+  #
+  # --- code signing -----------------------------------------------------------
+  #
+  # Deliberately driven by environment variables and nothing else, so this
+  # repository never contains a certificate or its password.
+  #
+  #   CSC_LINK           path to the .pfx, or its base64 contents
+  #   CSC_KEY_PASSWORD   the password for it
+  #
+  # With neither set, electron-builder skips signing and the build still
+  # succeeds — which is the current state, and why every artefact reports
+  # NotSigned. Setting them is the whole of what turns this build signed; no code
+  # change is involved.
+  #
+  # Until then Windows SmartScreen shows "unknown publisher" to every user, and
+  # an EV certificate additionally starts with no reputation, so the warning
+  # persists for a while after the first signed release.
+  signAndEditExecutable: true
+  # Refuse to install an update whose signature does not match the installed
+  # app's. Meaningless while unsigned, and exactly right the moment it is not —
+  # it is the check that stops a tampered update being accepted.
+  verifyUpdateCodeSignature: true
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# File types Slash offers to open.
+#
+# Being the default *browser* registers http and https, and nothing else — which
+# is why a PDF kept opening in Edge even after Slash was made the default. A PDF
+# is a file association, a separate registration from a protocol one, and
+# Windows will not infer it.
+#
+# These make Slash *choosable* for each type in Settings → Default apps and in
+# "Open with". As with the browser association itself, Windows does not let an
+# application select itself; the installer can only put it on the list.
+fileAssociations:
+  - ext: pdf
+    name: PDF Document
+    description: Portable Document Format
+    role: Viewer
+    icon: build/icon.ico
+  - ext: htm
+    name: HTML Document
+    role: Viewer
+    icon: build/icon.ico
+  - ext: html
+    name: HTML Document
+    role: Viewer
+    icon: build/icon.ico
+  - ext: svg
+    name: SVG Image
+    role: Viewer
+    icon: build/icon.ico
+  - ext: webp
+    name: WebP Image
+    role: Viewer
+    icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Slash
+  # Registers Slash under StartMenuInternet and RegisteredApplications, which is
+  # what makes it appear in Settings → Default apps. Windows will not let an
+  # application make itself the default; this is what makes it *choosable*, and
+  # without it the in-app offer would open a list Slash is not in.
+  include: build/installer.nsh
+
+# Cross-platform targets are intentionally left unconfigured until the browser is
+# stable on Windows. Adding them is a config change, not a code change — nothing
+# in src/ may assume a Windows-only API.
+#
+# mac:
+#   target: [dmg]
+#   category: public.app-category.productivity
+# linux:
+#   target: [AppImage, deb]
+#   category: Network

@@ -1,0 +1,453 @@
+import { describe, it, expect } from 'vitest'
+import {
+  classifyMedia,
+  formatSize,
+  rankCandidates,
+  suggestedFilename,
+  sniffNote,
+  mediaUrlExpiry,
+  mediaUrlHasExpired,
+  isExpiringMediaHost,
+  toDownloadable,
+  containerOf,
+  MediaLedger,
+  type SniffedMedia
+} from './mediaSniffing'
+
+const BIG = 50_000_000
+
+describe('classifyMedia — what counts as media', () => {
+  it('recognises a complete video file', () => {
+    const found = classifyMedia('https://cdn.example.com/film.mp4', 'video/mp4', BIG)
+    expect(found).toMatchObject({ kind: 'file', label: 'Video file' })
+  })
+
+  it('recognises audio', () => {
+    expect(classifyMedia('https://x.com/a.mp3', 'audio/mpeg', BIG)?.label).toBe('Audio file')
+  })
+
+  it('sees through a query string', () => {
+    // Extensions hide behind tokens and signatures on every real CDN.
+    const found = classifyMedia('https://cdn.x.com/film.mp4?token=abc&expires=1', '', BIG)
+    expect(found?.kind).toBe('file')
+  })
+
+  it('recognises HLS and DASH manifests', () => {
+    expect(classifyMedia('https://x.com/master.m3u8', '', null)?.label).toBe('HLS stream')
+    expect(classifyMedia('https://x.com/manifest.mpd', '', null)?.label).toBe('DASH stream')
+    expect(classifyMedia('https://x.com/p', 'application/vnd.apple.mpegurl', null)?.kind).toBe(
+      'stream'
+    )
+  })
+
+  it('trusts the content type when the path says nothing', () => {
+    expect(classifyMedia('https://x.com/stream/9f2a', 'video/mp4', BIG)?.kind).toBe('file')
+  })
+})
+
+describe('classifyMedia — what must be left out', () => {
+  it('drops stream segments', () => {
+    // A two-hour film is thousands of these. Listing them makes the panel
+    // unusable, and downloading one gives somebody four unplayable seconds.
+    expect(classifyMedia('https://x.com/seg-0001.ts', 'video/mp2t', 500_000)).toBeNull()
+    expect(classifyMedia('https://x.com/chunk.m4s', 'video/mp4', 500_000)).toBeNull()
+  })
+
+  it('drops responses too small to be the thing anybody wants', () => {
+    // Posters, beacons and probes. Offering them buries the real file.
+    expect(classifyMedia('https://x.com/preview.mp4', 'video/mp4', 40_000)).toBeNull()
+  })
+
+  it('keeps a file whose size the server never stated', () => {
+    // Unknown is not the same as small, and chunked responses report nothing.
+    expect(classifyMedia('https://x.com/film.mp4', 'video/mp4', null)?.kind).toBe('file')
+  })
+
+  it('ignores anything that is not media', () => {
+    expect(classifyMedia('https://x.com/app.js', 'application/javascript', BIG)).toBeNull()
+    expect(classifyMedia('https://x.com/a.png', 'image/png', BIG)).toBeNull()
+  })
+
+  it('ignores non-http schemes', () => {
+    expect(classifyMedia('blob:https://x.com/abc', 'video/mp4', BIG)).toBeNull()
+    expect(classifyMedia('data:video/mp4;base64,AAAA', 'video/mp4', BIG)).toBeNull()
+  })
+})
+
+describe('classifyMedia — DRM', () => {
+  it('labels a protected stream rather than offering it', () => {
+    // Recognised so it can be refused with a reason. A download that produces
+    // an unplayable file is worse than an honest refusal.
+    for (const url of [
+      'https://x.com/widevine/license',
+      'https://x.com/playready/rights',
+      'https://licenseserver.example.com/get'
+    ]) {
+      expect(classifyMedia(url, 'application/octet-stream', BIG)?.kind).toBe('protected')
+    }
+  })
+
+  it('treats protection as decisive, whatever the extension says', () => {
+    expect(classifyMedia('https://drmtoday.com/a.mp4', 'video/mp4', BIG)?.kind).toBe('protected')
+  })
+})
+
+describe('rankCandidates', () => {
+  const make = (over: Partial<SniffedMedia>): SniffedMedia => ({
+    url: 'https://x.com/a.mp4',
+    kind: 'file',
+    media: 'video',
+    label: 'Video file',
+    size: 1000,
+    contentType: 'video/mp4',
+    ...over
+  })
+
+  it('puts a complete file above a manifest', () => {
+    // A file downloads to something playable without assembly.
+    const ranked = rankCandidates([
+      make({ url: 'https://x.com/m.m3u8', kind: 'stream', size: null }),
+      make({ url: 'https://x.com/film.mp4', size: 900 })
+    ])
+    expect(ranked[0]?.kind).toBe('file')
+  })
+
+  it('puts the bigger file first', () => {
+    // The small one is usually the advert that played before the feature.
+    const ranked = rankCandidates([
+      make({ url: 'https://x.com/ad.mp4', size: 2_000_000 }),
+      make({ url: 'https://x.com/film.mp4', size: 900_000_000 })
+    ])
+    expect(ranked[0]?.url).toContain('film')
+  })
+
+  it('puts protected streams last', () => {
+    const ranked = rankCandidates([
+      make({ url: 'https://x.com/drm', kind: 'protected' }),
+      make({ url: 'https://x.com/film.mp4' })
+    ])
+    expect(ranked[ranked.length - 1]?.kind).toBe('protected')
+  })
+
+  it('deduplicates, keeping whichever knows its size', () => {
+    // The same URL arrives twice, once from a range request reporting nothing.
+    const ranked = rankCandidates([
+      make({ url: 'https://x.com/film.mp4', size: null }),
+      make({ url: 'https://x.com/film.mp4', size: 5000 })
+    ])
+    expect(ranked).toHaveLength(1)
+    expect(ranked[0]?.size).toBe(5000)
+  })
+})
+
+describe('formatSize', () => {
+  it('reads the way a person would say it', () => {
+    expect(formatSize(900)).toBe('900 B')
+    expect(formatSize(1536)).toBe('1.5 KB')
+    expect(formatSize(50_000_000)).toBe('48 MB')
+  })
+
+  it('says so when the server never told us', () => {
+    expect(formatSize(null)).toBe('unknown size')
+    expect(formatSize(0)).toBe('unknown size')
+  })
+})
+
+describe('suggestedFilename', () => {
+  it('uses the name in the path', () => {
+    expect(suggestedFilename('https://x.com/movies/film.mp4', 'file')).toBe('film.mp4')
+  })
+
+  it('strips a query string', () => {
+    expect(suggestedFilename('https://x.com/film.mp4?token=a', 'file')).toBe('film.mp4')
+  })
+
+  it('names a stream by date, since a manifest name is not the video', () => {
+    expect(suggestedFilename('https://x.com/master.m3u8', 'stream')).toMatch(/^video-.*\.mp4$/)
+  })
+
+  it('never returns an empty name', () => {
+    // A download with no name is one nobody finds again.
+    expect(suggestedFilename('https://x.com/', 'file')).toMatch(/^video-.*\.mp4$/)
+    expect(suggestedFilename('https://x.com/9f2a', 'file')).toMatch(/^video-.*\.mp4$/)
+  })
+})
+
+describe('media kind', () => {
+  it('separates audio from video, since the panel groups by it', () => {
+    expect(classifyMedia('https://x.com/a.mp3', 'audio/mpeg', BIG)?.media).toBe('audio')
+    expect(classifyMedia('https://x.com/a.mp4', 'video/mp4', BIG)?.media).toBe('video')
+  })
+
+  it('leaves it unset for a manifest or a licence, which are neither', () => {
+    expect(classifyMedia('https://x.com/m.m3u8', '', null)?.media).toBeNull()
+    expect(classifyMedia('https://x.com/widevine/l', '', null)?.media).toBeNull()
+  })
+})
+
+describe('containerOf', () => {
+  it('reads the extension when there is one', () => {
+    expect(containerOf('https://x.com/film.webm', 'video/webm')).toBe('webm')
+  })
+
+  it('falls back to the content type', () => {
+    expect(containerOf('https://x.com/stream/9f2a', 'video/mp4')).toBe('mp4')
+  })
+
+  it('says nothing rather than guessing', () => {
+    expect(containerOf('https://x.com/stream/9f2a', '')).toBeNull()
+  })
+})
+
+describe('toDownloadable', () => {
+  const found = (over: Partial<SniffedMedia>): SniffedMedia => ({
+    url: 'https://x.com/film.mp4',
+    kind: 'file',
+    media: 'video',
+    label: 'Video file',
+    size: 50_000_000,
+    contentType: 'video/mp4',
+    ...over
+  })
+
+  it('offers complete files', () => {
+    const [first] = toDownloadable([found({})])
+    expect(first).toMatchObject({ url: 'https://x.com/film.mp4', kind: 'video', container: 'mp4' })
+    expect(first?.label).toBe('film.mp4 · 48 MB')
+  })
+
+  it('offers a stream, which is now joined on download', () => {
+    // Was refused until the segment assembler existed. It is offered without a
+    // size, because a playlist has no length of its own and guessing from the
+    // manifest's few kilobytes would be a number that is simply wrong.
+    const [first] = toDownloadable([found({ kind: 'stream', media: null, label: 'HLS stream' })])
+    expect(first?.sizeBytes).toBeNull()
+    expect(first?.label).toContain('joined on download')
+  })
+
+  it('still offers nothing for a protected stream', () => {
+    // The line that does not move. A button producing an unplayable file is
+    // worse than no button.
+    expect(toDownloadable([found({ kind: 'protected', media: null })])).toEqual([])
+  })
+
+  it('keeps the ranking, so the feature is above the advert', () => {
+    const list = toDownloadable([
+      found({ url: 'https://x.com/ad.mp4', size: 1_000_000 }),
+      found({ url: 'https://x.com/film.mp4', size: 900_000_000 })
+    ])
+    expect(list[0]?.url).toContain('film')
+  })
+})
+
+describe('sniffNote', () => {
+  const one = (kind: SniffedMedia['kind']): SniffedMedia => ({
+    url: 'https://x.com/a',
+    kind,
+    media: null,
+    label: '',
+    size: null,
+    contentType: ''
+  })
+
+  it('says nothing when there is something to download', () => {
+    expect(sniffNote([one('file')])).toBeNull()
+    expect(sniffNote([])).toBeNull()
+  })
+
+  it('names encryption as the reason, rather than looking broken', () => {
+    expect(sniffNote([one('protected')])).toContain('encrypted')
+  })
+
+  it('has nothing to explain about a stream, now that streams download', () => {
+    expect(sniffNote([one('stream')])).toBeNull()
+  })
+
+  it('says nothing when a stream is on offer beside a protected one', () => {
+    // There is something downloadable here, so a refusal note would be wrong.
+    expect(sniffNote([one('stream'), one('protected')])).toBeNull()
+  })
+})
+
+describe('MediaLedger', () => {
+  const item = (url: string, size = 1000): SniffedMedia => ({
+    url,
+    kind: 'file',
+    media: 'video',
+    label: 'Video file',
+    size,
+    contentType: 'video/mp4'
+  })
+
+  it('keeps tabs apart', () => {
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4'))
+    ledger.record(2, item('https://x.com/b.mp4'))
+    expect(ledger.forTab(1).map((m) => m.url)).toEqual(['https://x.com/a.mp4'])
+  })
+
+  it('answers with nothing for a tab that has fetched nothing', () => {
+    expect(new MediaLedger().forTab(99)).toEqual([])
+  })
+
+  it('drops the previous video once the new one has been seen', () => {
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/first.mp4'))
+    ledger.advance(1)
+    ledger.record(1, item('https://x.com/second.mp4'))
+    expect(ledger.forTab(1).map((m) => m.url)).toEqual(['https://x.com/second.mp4'])
+  })
+
+  it('still answers with the previous video until the new one arrives', () => {
+    // YouTube's route change and the new video's first request race. Clearing on
+    // the route change alone would empty the panel exactly when it is asked.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/first.mp4'))
+    ledger.advance(1)
+    expect(ledger.forTab(1).map((m) => m.url)).toEqual(['https://x.com/first.mp4'])
+  })
+
+  it('handles a request that lands just before the route change', () => {
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/first.mp4'))
+    ledger.record(1, item('https://x.com/second.mp4'))
+    ledger.advance(1)
+    ledger.advance(1)
+    // Nothing in the newest two generations; the most recent that has anything wins.
+    expect(ledger.forTab(1)).toHaveLength(2)
+  })
+
+  it('caps what one tab can accumulate', () => {
+    const ledger = new MediaLedger()
+    for (let i = 0; i < MediaLedger.MAX_PER_TAB + 20; i += 1) {
+      ledger.record(1, item(`https://x.com/${i}.mp4`))
+    }
+    expect(ledger.forTab(1).length).toBeLessThanOrEqual(MediaLedger.MAX_PER_TAB)
+  })
+
+  it('forgets a closed tab', () => {
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4'))
+    ledger.forget(1)
+    expect(ledger.forTab(1)).toEqual([])
+  })
+})
+
+describe('MediaLedger — the cost of a playing video', () => {
+  const item = (url: string, size: number | null = 1000): SniffedMedia => ({
+    url,
+    kind: 'file',
+    media: 'video',
+    label: 'Video file',
+    size,
+    contentType: 'video/mp4'
+  })
+
+  it('reports a genuinely new file as a change', () => {
+    expect(new MediaLedger().record(1, item('https://x.com/a.mp4'))).toBe(true)
+  })
+
+  it('reports the same URL again as no change', () => {
+    // Byte-range requests are how seeking and buffering work: the same URL
+    // arrives many times a second. Treating each as news would mean a full
+    // re-rank and an IPC broadcast per request, for a button already on screen.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4'))
+    expect(ledger.record(1, item('https://x.com/a.mp4'))).toBe(false)
+  })
+
+  it('does not grow when the same URL repeats', () => {
+    const ledger = new MediaLedger()
+    for (let i = 0; i < 500; i += 1) ledger.record(1, item('https://x.com/a.mp4'))
+    expect(ledger.forTab(1)).toHaveLength(1)
+  })
+
+  it('still learns the size from a later response', () => {
+    // The first range request reports no length; a later one does. The entry is
+    // updated even though this is not a change worth broadcasting.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4', null))
+    ledger.record(1, item('https://x.com/a.mp4', 900_000))
+    expect(ledger.forTab(1)[0]?.size).toBe(900_000)
+  })
+
+  it('treats the same URL on a new document as new', () => {
+    // Reloading a page really is a fresh offer, and the chip has to reappear.
+    const ledger = new MediaLedger()
+    ledger.record(1, item('https://x.com/a.mp4'))
+    ledger.advance(1)
+    expect(ledger.record(1, item('https://x.com/a.mp4'))).toBe(true)
+  })
+})
+
+describe('expiring media addresses', () => {
+  it('offers a googlevideo response — measurement says it downloads', () => {
+    // This asserted the opposite for one build. The theory was that these
+    // addresses were locked to the player's session; SLASH_MEDIA_ACCESS_PROBE
+    // against a live watch page says otherwise — bare=200, session=206,
+    // page=206, and 206 to both `Range: bytes=0-0` and a real range.
+    const found = classifyMedia(
+      'https://rr1---sn-nau-jhc6.googlevideo.com/videoplayback?itag=18&expire=4102444800',
+      'video/mp4',
+      12_345_678
+    )
+    expect(found?.kind).toBe('file')
+    expect(toDownloadable([found!])).toHaveLength(1)
+  })
+
+  it('reads the deadline the address carries', () => {
+    expect(mediaUrlExpiry('https://h/v?expire=1767225600')).toBe(1767225600000)
+    expect(mediaUrlExpiry('https://h/v?itag=18')).toBeNull()
+    expect(mediaUrlExpiry('not a url')).toBeNull()
+  })
+
+  it('ignores a short number that cannot be a timestamp', () => {
+    // `e=30` is a duration or an id, not a deadline. Guessing a lifetime from
+    // it would produce a confident, wrong explanation.
+    expect(mediaUrlExpiry('https://h/v?e=30')).toBeNull()
+  })
+
+  it('knows when one has gone stale', () => {
+    const past = 'https://h/videoplayback?expire=1000000000'
+    expect(mediaUrlHasExpired(past)).toBe(true)
+    expect(mediaUrlHasExpired('https://h/videoplayback?expire=4102444800')).toBe(false)
+  })
+
+  it('recognises the hosts whose addresses expire', () => {
+    expect(isExpiringMediaHost('https://rr1---x.googlevideo.com/videoplayback?a=1')).toBe(true)
+    expect(isExpiringMediaHost('https://cdn.example/film.mp4')).toBe(false)
+  })
+})
+
+describe('player transport framing', () => {
+  it('does not offer a UMP response as a download', () => {
+    // Measured on a live watch page: YouTube serves media as
+    // `application/vnd.yt-ump` over XHR with no content length. It is not a
+    // file — it is protobuf-framed chunks its own player unwraps — so saving
+    // one produces something nothing will play.
+    const found = classifyMedia(
+      'https://rr1---sn-nau-jhc6.googlevideo.com/videoplayback?expire=4102444800',
+      'application/vnd.yt-ump',
+      null
+    )
+    expect(found?.kind).toBe('transport')
+    expect(toDownloadable([found!])).toEqual([])
+  })
+
+  it('explains the transport case rather than saying nothing was found', () => {
+    const found = classifyMedia('https://x.googlevideo.com/videoplayback', 'application/vnd.yt-ump', null)!
+    expect(sniffNote([found])).toContain('does not exist as a file')
+  })
+
+  it('still offers the same host when it serves an ordinary file', () => {
+    // The host serves both paths depending on the session, which is why this
+    // matches on the content type and not the hostname.
+    const found = classifyMedia(
+      'https://rr1---x.googlevideo.com/videoplayback?itag=18&expire=4102444800',
+      'video/mp4',
+      9_000_000
+    )!
+    expect(found.kind).toBe('file')
+    expect(toDownloadable([found])).toHaveLength(1)
+  })
+})

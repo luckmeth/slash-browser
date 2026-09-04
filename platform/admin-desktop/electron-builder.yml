@@ -1,0 +1,58 @@
+appId: com.slashdevelopments.operations
+productName: Slash Operations
+copyright: Slash Developments
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the shell. The Next server is extraResources, because Node cannot require
+# through an asar archive -- server.js and its node_modules have to be real
+# files on disk.
+files:
+  - main.js
+  # The setup rules, required by main.js. Omitting a file main.js requires
+  # produces a packaged app that cannot start at all, with the module name as
+  # its only symptom.
+  - credentials.js
+  - preload.js
+  - setup.html
+  - starting.html
+  - package.json
+
+# The Next server is copied by scripts/after-pack.js, not listed here:
+# electron-builder strips node_modules out of extraResources whatever filter
+# you give it, and node_modules is the payload.
+afterPack: scripts/after-pack.js
+
+extraResources:
+  # Project URL and anon key. Public by design; the service-role key is asked
+  # for on first run and never enters this build.
+  - from: public-config.json
+    to: public-config.json
+
+# Nothing here needs compiling, and this project lives under a path containing
+# spaces -- node-gyp refuses to build anything at all under one. Same constraint
+# as the browser; see ../../CLAUDE.md.
+npmRebuild: false
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    # A portable build too: this is an internal tool, and being able to hand
+    # somebody a single file that leaves nothing behind is worth the extra
+    # artefact.
+    - target: portable
+      arch: [x64]
+  # Unsigned, like the browser. Windows SmartScreen will warn on first run and
+  # that is the honest state of things until a certificate exists.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Slash Operations
