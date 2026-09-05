@@ -26,13 +26,37 @@
  * Pure so every one of these rules is tested rather than reasoned about.
  */
 
+/** One downloadable package: the same three fields, per platform. */
+export interface PlatformPackage {
+  fileUrl?: string | null
+  sha512?: string | null
+  size?: number | null
+}
+
 export interface FeedEntry {
   version: string
   releaseUrl?: string | null
+  /**
+   * The Windows installer, kept at the top level for ever.
+   *
+   * Every Slash released before macOS existed reads exactly these three flat
+   * fields and knows nothing about `platforms`. Moving the Windows package
+   * into the map would strand every one of those installs on the version they
+   * are running, silently, with the Updates screen still saying all is well.
+   * So the flat fields stay, and stay Windows.
+   */
   fileUrl?: string | null
   sha512?: string | null
   size?: number | null
   notes?: string | null
+  /**
+   * Per-platform packages, keyed `<platform>-<arch>` as Node reports them:
+   * `win32-x64`, `darwin-arm64`, `darwin-x64`.
+   *
+   * Newer builds read this first and fall back to the flat fields. Older ones
+   * ignore it entirely, which is the whole point of adding rather than moving.
+   */
+  platforms?: Record<string, PlatformPackage> | null
 }
 
 export interface InstallPlan {
@@ -49,8 +73,14 @@ export type PlanVerdict =
   | { readonly ok: true; readonly plan: InstallPlan }
   | { readonly ok: false; readonly problem: string }
 
-/** A Windows installer, and nothing else. Rejecting by extension is crude and correct. */
-const INSTALLER = /\.exe$/i
+/**
+ * An installer this browser knows how to handle, and nothing else.
+ *
+ * Rejecting by extension is crude and correct: a name that arrived over the
+ * network is not evidence of anything, and this is only ever used to decide
+ * what to call a file on disk.
+ */
+const INSTALLER = /\.(exe|dmg)$/i
 const HEX_512 = /^[0-9a-f]{128}$/i
 const BASE64_512 = /^[A-Za-z0-9+/]{86}==$/
 
@@ -115,6 +145,40 @@ export function packageFileName(fileUrl: string, version: string): string {
   return INSTALLER.test(clean) && clean.length <= 120 ? clean : `Slash-Setup-${version}.exe`
 }
 
+/** How Node names this machine, and how the feed keys its packages. */
+export function platformKey(platform: string, arch: string): string {
+  return `${platform}-${arch}`
+}
+
+/** The key for the running process. Separate so the rules above stay pure. */
+export function currentPlatformKey(): string {
+  return platformKey(process.platform, process.arch)
+}
+
+/**
+ * The package this machine should install, out of everything the feed offers.
+ *
+ * The flat top-level fields are **Windows only**, because that is what they
+ * have always been and what every older install still reads. Falling back to
+ * them on a Mac would hand macOS an `.exe`, which would download, verify
+ * against its checksum perfectly, and then be unopenable — a failure that
+ * looks like a corrupt download rather than a category error.
+ *
+ * So: the map first, and the flat fields only for Windows x64.
+ */
+export function selectPackage(entry: FeedEntry, key: string): PlatformPackage {
+  const named = entry.platforms?.[key]
+  if (named && (named.fileUrl ?? '') !== '') return named
+
+  if (key === 'win32-x64') {
+    return { fileUrl: entry.fileUrl, sha512: entry.sha512, size: entry.size }
+  }
+
+  // Nothing for this machine. The caller reports check-only rather than
+  // offering a package it cannot run.
+  return {}
+}
+
 /**
  * Turns a feed entry into something installable, or says why not.
  *
@@ -123,15 +187,20 @@ export function packageFileName(fileUrl: string, version: string): string {
  * back to pointing at the release page. It is a refusal only when a feed
  * offers a package it cannot substantiate.
  */
-export function planInstall(entry: FeedEntry, feedUrl: string): PlanVerdict {
-  const fileUrl = (entry.fileUrl ?? '').trim()
-  const sha512 = (entry.sha512 ?? '').trim()
+export function planInstall(
+  entry: FeedEntry,
+  feedUrl: string,
+  key: string = 'win32-x64'
+): PlanVerdict {
+  const chosen = selectPackage(entry, key)
+  const fileUrl = (chosen.fileUrl ?? '').trim()
+  const sha512 = (chosen.sha512 ?? '').trim()
 
   if (fileUrl === '' || sha512 === '') {
     return {
       ok: false,
       problem:
-        'This release does not publish a package and a checksum, so Slash cannot install it for you. Open the release page and download it there.'
+        'This release does not publish a package and a checksum for this kind of computer, so Slash cannot install it for you. Open the release page and download it there.'
     }
   }
 
@@ -148,7 +217,7 @@ export function planInstall(entry: FeedEntry, feedUrl: string): PlanVerdict {
     return { ok: false, problem: 'The published checksum is not a SHA-512, so nothing can be verified against it.' }
   }
 
-  const size = Number(entry.size ?? 0)
+  const size = Number(chosen.size ?? 0)
   if (!Number.isFinite(size) || size < 0 || size > MAX_PACKAGE_BYTES) {
     return { ok: false, problem: 'The published package size is not plausible for an installer.' }
   }

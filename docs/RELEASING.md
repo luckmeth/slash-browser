@@ -147,3 +147,76 @@ together.
 | `gh release create` returns 404 | The token cannot see the releases repository, or the repository has no commits. |
 | Browsers never notice | The releases repository is not public, or `updateFeedUrl` was cleared. |
 | "The package did not match its published checksum" | The asset was replaced after publishing. Cut a new version. |
+
+## macOS
+
+Tagging builds the Mac disk images too, in a second job that runs **after** the
+Windows one:
+
+```
+Slash-<version>-arm64.dmg   Apple Silicon
+Slash-<version>-x64.dmg     Intel
+```
+
+The ordering is deliberate. The Windows job publishes the release and a
+Windows-only `latest.json`; the macOS job then adds both DMGs and rewrites the
+feed with a `platforms` map. A Mac build that fails therefore leaves exactly the
+feed Slash published before macOS existed, rather than leaving every Windows
+install with no feed at all.
+
+### The feed grows a map, and never loses its flat fields
+
+```json
+{
+  "version": "0.3.0",
+  "fileUrl": "…/Slash-0.3.0-x64.exe",
+  "sha512": "…",
+  "size": 176000000,
+  "platforms": {
+    "win32-x64":    { "fileUrl": "…/Slash-0.3.0-x64.exe",   "sha512": "…", "size": 176000000 },
+    "darwin-arm64": { "fileUrl": "…/Slash-0.3.0-arm64.dmg", "sha512": "…", "size": 150000000 },
+    "darwin-x64":   { "fileUrl": "…/Slash-0.3.0-x64.dmg",   "sha512": "…", "size": 160000000 }
+  }
+}
+```
+
+The top-level `fileUrl`/`sha512`/`size` are **the Windows installer, for ever**.
+Every Slash released before macOS existed reads only those three fields; moving
+them into the map would strand each of those installs on the version it is
+running, silently, with its Updates screen still reporting all is well.
+
+### These builds are not signed
+
+macOS refuses an un-notarized application far more firmly than Windows does —
+*"Slash is damaged and can't be opened"* — and on Apple Silicon an unsigned
+binary does not launch at all. `identity: null` in `electron-builder.yml`
+produces an ad-hoc signature, which is the difference between needing a
+right-click → **Open** and not running.
+
+To distribute properly, buy a Developer ID ($99/year) and add these secrets;
+no code changes:
+
+| Secret | What it is |
+|---|---|
+| `CSC_LINK` | base64 of the `.p12` certificate |
+| `CSC_KEY_PASSWORD` | its password |
+| `APPLE_ID` | the Apple account used for notarization |
+| `APPLE_APP_SPECIFIC_PASSWORD` | an app-specific password for that account |
+| `APPLE_TEAM_ID` | the team the certificate belongs to |
+
+### Two things that cost money or break quietly
+
+- **Private-repo macOS minutes bill at 10×** the Linux rate. A build is roughly
+  15 minutes, so it consumes ~150 minutes of the allowance each release.
+- **Each architecture is packaged in its own pass**, with its own ffmpeg fetched
+  first (`FFMPEG_ARCH`). `extraResources` copies whatever sits in
+  `resources/ffmpeg`, so building both in one electron-builder run puts one
+  architecture's binary inside both images. That packages perfectly and only
+  shows up later as a browser that cannot transcode on half the Macs it reaches.
+
+### Untested
+
+Nobody has run any of this on a Mac. The build, the DMGs, the drag-to-Applications
+update path and the Gatekeeper behaviour are all reasoned from the toolchain's
+documented behaviour, not observed. Treat the first macOS release as something to
+verify by hand, not to announce.

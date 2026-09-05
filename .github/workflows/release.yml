@@ -231,3 +231,139 @@ jobs:
           name: slash-installer
           path: release/Slash-*-x64.exe
           retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # macOS, deliberately *after* the Windows release rather than beside it.
+  #
+  # The Windows job publishes the release and a Windows-only `latest.json`. This
+  # one adds the two DMGs and rewrites the feed with a `platforms` map. If this
+  # job fails, or is never run, what remains is exactly the feed Slash published
+  # before macOS existed — so a broken Mac build degrades to today's behaviour
+  # instead of leaving every Windows install without an update feed.
+  #
+  # Not signed with a Developer ID. See the `mac:` block in electron-builder.yml
+  # for what that costs the user, and what turns it on.
+  # ---------------------------------------------------------------------------
+  macos:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # One architecture at a time, each with its own ffmpeg. `extraResources`
+      # copies whatever is in `resources/ffmpeg` into the bundle, so building
+      # both arches in one electron-builder run would ship the arm64 binary
+      # inside the Intel DMG — a browser that packages perfectly and cannot
+      # transcode a thing on half the Macs it reaches.
+      - name: Build the Apple Silicon DMG
+        env:
+          FFMPEG_PLATFORM: darwin
+          FFMPEG_ARCH: arm64
+        run: |
+          rm -rf resources/ffmpeg
+          npm run fetch:ffmpeg
+          npm run build
+          npx electron-builder --mac dmg --arm64 --publish never
+
+      - name: Build the Intel DMG
+        env:
+          FFMPEG_PLATFORM: darwin
+          FFMPEG_ARCH: x64
+        run: |
+          rm -rf resources/ffmpeg
+          npm run fetch:ffmpeg
+          npx electron-builder --mac dmg --x64 --publish never
+
+      - name: Measure both disk images
+        id: measure
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ARM="release/Slash-${VERSION}-arm64.dmg"
+          INTEL="release/Slash-${VERSION}-x64.dmg"
+
+          ls -la release/*.dmg
+          test -f "$ARM"   || { echo "::error::$ARM was not produced";   exit 1; }
+          test -f "$INTEL" || { echo "::error::$INTEL was not produced"; exit 1; }
+
+          {
+            echo "version=$VERSION"
+            echo "arm=$ARM"
+            echo "intel=$INTEL"
+            echo "armSha=$(shasum -a 512 "$ARM"   | cut -d' ' -f1)"
+            echo "intelSha=$(shasum -a 512 "$INTEL" | cut -d' ' -f1)"
+            echo "armSize=$(stat -f%z "$ARM")"
+            echo "intelSize=$(stat -f%z "$INTEL")"
+          } >> "$GITHUB_OUTPUT"
+
+      # Rewrites the feed the Windows job published, adding a package per
+      # platform. The flat Windows fields are carried through untouched: every
+      # Slash released before this reads only those, and moving them would
+      # strand each of those installs silently on the version it is running.
+      - name: Add the macOS packages to the feed
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          VERSION: ${{ steps.measure.outputs.version }}
+          ARM_SHA: ${{ steps.measure.outputs.armSha }}
+          INTEL_SHA: ${{ steps.measure.outputs.intelSha }}
+          ARM_SIZE: ${{ steps.measure.outputs.armSize }}
+          INTEL_SIZE: ${{ steps.measure.outputs.intelSize }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --repo "$RELEASES_REPO" \
+            --pattern latest.json --output existing.json --clobber
+
+          BASE="https://github.com/${RELEASES_REPO}/releases/download/${GITHUB_REF_NAME}"
+          node -e "
+            const fs = require('fs')
+            const feed = JSON.parse(fs.readFileSync('existing.json', 'utf8'))
+            const v = process.env.VERSION
+
+            feed.platforms = {
+              // The same package the flat fields name, said again in the new
+              // shape so a newer client never has to fall back.
+              'win32-x64': {
+                fileUrl: feed.fileUrl,
+                sha512:  feed.sha512,
+                size:    feed.size
+              },
+              'darwin-arm64': {
+                fileUrl: '${BASE}/Slash-' + v + '-arm64.dmg',
+                sha512:  process.env.ARM_SHA,
+                size:    Number(process.env.ARM_SIZE)
+              },
+              'darwin-x64': {
+                fileUrl: '${BASE}/Slash-' + v + '-x64.dmg',
+                sha512:  process.env.INTEL_SHA,
+                size:    Number(process.env.INTEL_SIZE)
+              }
+            }
+            fs.writeFileSync('release/latest.json', JSON.stringify(feed, null, 2))
+          "
+          cat release/latest.json
+
+          gh release upload "$GITHUB_REF_NAME" \
+            "${{ steps.measure.outputs.arm }}" \
+            "${{ steps.measure.outputs.intel }}" \
+            "release/latest.json" \
+            --repo "$RELEASES_REPO" --clobber
+
+          {
+            echo "### macOS"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Apple Silicon | $(( ARM_SIZE / 1048576 )) MB |"
+            echo "| Intel | $(( INTEL_SIZE / 1048576 )) MB |"
+            echo ""
+            echo "Not signed with a Developer ID: opening these needs a right-click → Open."
+          } >> "$GITHUB_STEP_SUMMARY"

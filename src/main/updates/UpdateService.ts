@@ -10,7 +10,7 @@ import type { UpdateStatus } from '@shared/types/updates'
 import { createLogger } from '../logger'
 import { installGate } from './installGate'
 import { packagesToRemove } from './prunePackages'
-import { planInstall, type InstallPlan } from './updatePlan'
+import { currentPlatformKey, planInstall, type InstallPlan } from './updatePlan'
 import { REWARDS_ANON_KEY_DEFAULT } from '@shared/types/rewards'
 
 /** Whether an address is this project's own REST API, which needs a key. */
@@ -48,7 +48,25 @@ const FeedSchema = z.object({
   fileUrl: z.string().url().optional(),
   sha512: z.string().max(200).optional(),
   size: z.number().nonnegative().optional(),
-  notes: z.string().max(4000).optional()
+  notes: z.string().max(4000).optional(),
+  /**
+   * Packages for other kinds of machine, keyed `<platform>-<arch>`.
+   *
+   * Optional, and unknown keys are simply never looked up -- a feed naming
+   * `linux-x64` is not an error here, it is a package this build has no use
+   * for. The flat fields above stay Windows for ever, because every install
+   * released before this existed reads only those.
+   */
+  platforms: z
+    .record(
+      z.string().max(40),
+      z.object({
+        fileUrl: z.string().url().optional(),
+        sha512: z.string().max(200).optional(),
+        size: z.number().nonnegative().optional()
+      })
+    )
+    .optional()
 })
 
 /** A check that hangs must not leave the UI on "checking" forever. */
@@ -183,7 +201,7 @@ export class UpdateService {
 
       // What the feed offers to fetch, if anything. A feed carrying only a
       // version is the check-only feed this browser has always understood.
-      const verdict = planInstall(parsed.data, feed)
+      const verdict = planInstall(parsed.data, feed, currentPlatformKey())
       this.plan = verdict.ok ? verdict.plan : null
       this.packagePath = null
       this.status = { ...this.status, notes: parsed.data.notes ?? '', progress: 0 }
@@ -479,6 +497,31 @@ export class UpdateService {
       // The consent is the Update button. Nothing is silent that the user did
       // not ask for, and the bytes were checked against the published checksum
       // before this point.
+      // macOS installs by dragging, and that is not a limitation to route
+      // around. A DMG has to be mounted and the bundle copied over the running
+      // application, which is a thing Slash cannot do to itself safely — and
+      // doing it badly leaves somebody with a half-replaced .app and no
+      // browser. Opening the image is what every unsigned Mac application
+      // does, and the user finishes it in Finder, where they can see what is
+      // happening.
+      //
+      // The check, the download and the checksum are identical to Windows.
+      // Only this last step differs, and the honest version of it is one
+      // sentence rather than an untested file copy.
+      if (process.platform !== 'win32') {
+        const failure = await shell.openPath(packagePath)
+        if (failure !== '') {
+          log.warn(`could not open the disk image: ${failure}`)
+          return { ok: false, detail: 'The disk image could not be opened.' }
+        }
+        log.info(`opened the disk image for ${this.plan.version}`)
+        return {
+          ok: true,
+          detail:
+            'The disk image is open. Drag Slash into Applications, replacing the old copy, then reopen it.'
+        }
+      }
+
       const started = this.launchInstaller(packagePath)
       if (!started) {
         // Falls back to the visible wizard rather than failing: a wizard is a

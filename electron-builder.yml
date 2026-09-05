@@ -173,13 +173,46 @@ nsis:
   # without it the in-app offer would open a list Slash is not in.
   include: build/installer.nsh
 
-# Cross-platform targets are intentionally left unconfigured until the browser is
-# stable on Windows. Adding them is a config change, not a code change — nothing
-# in src/ may assume a Windows-only API.
+# macOS. One DMG per architecture rather than a universal binary: a universal
+# build carries two copies of Electron and two of ffmpeg, so it is roughly
+# double the download for a file where half is dead weight on any given Mac.
 #
-# mac:
-#   target: [dmg]
-#   category: public.app-category.productivity
+# **These builds are not signed with a Developer ID**, and on macOS that is a
+# much harder wall than the "unknown publisher" warning Windows shows. An
+# unsigned, un-notarized app is refused by Gatekeeper — "Slash is damaged and
+# can't be opened" — and on Apple Silicon it will not launch at all without at
+# least an ad-hoc signature, which is what `identity: null` produces below.
+# Opening it still takes a deliberate right-click → Open, or removing the
+# quarantine attribute by hand. Buying a Developer ID and setting CSC_LINK,
+# CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID is
+# the whole of what changes that; no code here has to move.
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.productivity
+  # The 1024x1024 PNG, not an .icns: electron-builder converts it on the macOS
+  # runner, and keeping one source image means the Windows and macOS icons
+  # cannot drift apart. An .icns committed here would be a second copy to
+  # forget to update.
+  icon: build/icon.png
+  # Ad-hoc signing. Without it an arm64 build is killed on launch rather than
+  # merely warned about, so this is the difference between "needs a right-click"
+  # and "does not run at all".
+  identity: null
+  darkModeSupport: true
+  # The browser opens URLs handed to it by the OS, which on macOS arrives as an
+  # `open-url` event against a registered scheme rather than through argv.
+  extendInfo:
+    NSHighResolutionCapable: true
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# Linux stays unconfigured: nothing in src/ assumes a Windows-only API, but
+# nobody has run this on Linux, and an untested target in a release pipeline is
+# a promise the project cannot keep.
+#
 # linux:
 #   target: [AppImage, deb]
 #   category: Network
