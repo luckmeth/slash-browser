@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Straight from src/renderer/styles.css. The accent is blue. -->
+    <color name="slash_accent">#FF6EA8FE</color>
+    <color name="slash_surface">#FF0D0F14</color>
+    <!-- The icon field: the gradient from build/logo.svg, flattened to its
+         midpoint. An adaptive icon background must be a single colour or a
+         drawable, and this is the value the gradient reads as at icon size. -->
+    <color name="ic_launcher_background">#FF151517</color>
+</resources>

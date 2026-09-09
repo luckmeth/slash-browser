@@ -1,0 +1,39 @@
+<!--
+  The Slash mark for the launcher icon: the S cut by a diagonal, from
+  build/logo.svg. Adaptive-icon foregrounds are 108dp with only the middle 72dp
+  guaranteed visible, so the 64-unit glyph is placed on a 108 viewport and
+  scaled to sit inside that safe zone.
+
+  Drawn as three filled outlines rather than strokes because a <vector> cannot
+  express the mask that cuts the slash out of the bowls; the gap is baked into
+  the arc geometry instead. CHANGING THIS MEANS CHANGING build/logo.svg AND
+  BrandMark.tsx, or the launcher icon stops matching the mark in the window.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="22" android:translateY="22" android:scaleX="1.0" android:scaleY="1.0">
+        <!-- Upper bowl, cut short of the slash. -->
+        <path
+            android:strokeColor="#FFF2F5FA"
+            android:strokeWidth="7.25"
+            android:strokeLineCap="butt"
+            android:fillColor="#00000000"
+            android:pathData="M 43.5 19.5 A 11.6 11.6 0 1 0 30.6 32.1" />
+        <!-- Lower bowl, the same arc rotated half a turn. -->
+        <path
+            android:strokeColor="#FFF2F5FA"
+            android:strokeWidth="7.25"
+            android:strokeLineCap="butt"
+            android:fillColor="#00000000"
+            android:pathData="M 20.5 44.5 A 11.6 11.6 0 1 0 33.4 31.9" />
+        <!-- The slash, overshooting both bowls at each end. -->
+        <path
+            android:strokeColor="#FFF2F5FA"
+            android:strokeWidth="5.75"
+            android:strokeLineCap="butt"
+            android:pathData="M 20.5 55.5 L 43.5 8.5" />
+    </group>
+</vector>

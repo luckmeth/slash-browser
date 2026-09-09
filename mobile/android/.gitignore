@@ -1,0 +1,14 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+/app/build/
+
+# Built by `npm run core:build` from src/. Committing it would mean two sources
+# of truth for the same logic, and the stale one always wins an argument.
+/app/src/main/assets/core/

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Slash updates itself from its own feed, because Android signing is a
+      free self-signed keystore and the desktop's "unsigned, so no auto-update"
+      constraint does not apply here. Android still shows its own confirmation
+      for every install; there is no way to skip that short of being a system
+      app, and a browser that could replace itself silently is a browser that
+      could be made to replace itself with something else.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application
+        android:name=".SlashApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Slash"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.Slash">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:launchMode="singleTask"
+            android:label="Slash"
+            android:theme="@style/Theme.Slash">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              A browser that cannot receive a link is not a default browser.
+              This is the entire mechanism by which one is handed a click, and
+              the desktop had to learn the same lesson about its own argv.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
+        <!-- SLASH_ANDROID_SPIKE. Kept: it is the regression check for the four
+             capabilities the whole shell rests on. -->
+        <activity
+            android:name=".spike.SpikeActivity"
+            android:exported="true"
+            android:label="Slash Spike" />
+        <receiver
+            android:name=".updates.UpdateReceiver"
+            android:exported="false" />
+
+    </application>
+
+</manifest>

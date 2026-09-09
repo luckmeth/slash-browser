@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Extends an AppCompat theme so SpikeActivity (an AppCompatActivity) and
+      MainActivity (a ComponentActivity hosting Compose) share one theme.
+      Compose paints its own colours; this is only what the window shows before
+      the first composition, so it must be the page ground - a default white
+      here flashes bright on every cold start of a dark browser.
+    -->
+    <style name="Theme.Slash" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/slash_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

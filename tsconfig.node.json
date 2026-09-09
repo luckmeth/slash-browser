@@ -34,6 +34,8 @@
   "include": [
     "src/main/**/*.ts",
     "src/shared/**/*.ts",
+    "src/core/**/*.ts",
+    "mobile/core/**/*.ts",
     "electron.vite.config.ts",
     "vitest.config.ts"
   ]

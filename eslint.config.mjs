@@ -11,14 +11,27 @@ export default tseslint.config(
     // portal/ and platform/ are separate Node and Next applications with their
     // own toolchains. Linting them with the browser's config reports thousands
     // of failures about globals and JSX settings that do not apply to them.
-    ignores: ['out/**', 'release/**', 'node_modules/**', 'dist/**', 'portal/**', 'platform/**']
+    // `mobile/android/**` is a Gradle project — Kotlin sources ESLint has no
+    // opinion on, plus build outputs. The one JavaScript file under it is the
+    // *generated* core bundle, which is minified output of `src/` and gitignored;
+    // linting a build artefact reports errors about code nobody wrote and that
+    // no edit can fix.
+    ignores: [
+      'out/**',
+      'release/**',
+      'node_modules/**',
+      'dist/**',
+      'portal/**',
+      'platform/**',
+      'mobile/android/**'
+    ]
   },
   {
     // Build-time scripts. They run on plain Node — `process`, `console` and
     // `Buffer` are exactly what they are for — and never reach the application
     // bundle, so the browser config's assumption that Node globals are absent
     // does not hold here.
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'mobile/core/**/*.mjs'],
     languageOptions: {
       globals: { process: 'readonly', console: 'readonly', Buffer: 'readonly', URL: 'readonly' }
     }
