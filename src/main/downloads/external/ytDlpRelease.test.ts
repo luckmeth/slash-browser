@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checksumFor, chooseAsset, isOfficialDownload, YTDLP_RELEASE_API } from './ytDlpRelease'
+import { checksumFor, chooseAsset, isOfficialDownload, YTDLP_RELEASE_API, shouldRefreshYtDlp, YTDLP_REFRESH_INTERVAL_MS } from './ytDlpRelease'
 
 const OFFICIAL = 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe'
 const SUMS = 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/SHA2-512SUMS'
@@ -129,5 +129,54 @@ describe('checksumFor', () => {
 
   it('ignores a line that is not a sum', () => {
     expect(checksumFor('# a comment\nnot a checksum yt-dlp.exe\n')).toBeNull()
+  })
+})
+
+
+describe('shouldRefreshYtDlp', () => {
+  const base = {
+    enabled: true,
+    managed: true,
+    lastCheckedAt: 0,
+    now: YTDLP_REFRESH_INTERVAL_MS + 1
+  }
+
+  it('refreshes a managed copy once the interval has passed', () => {
+    expect(shouldRefreshYtDlp(base)).toBe(true)
+  })
+
+  it('does nothing when the switch is off', () => {
+    expect(shouldRefreshYtDlp({ ...base, enabled: false })).toBe(false)
+  })
+
+  it('never touches a yt-dlp the user installed themselves', () => {
+    // The clause that matters most. pip, scoop and winget copies belong to the
+    // user and to whatever else on their machine uses them; replacing one would
+    // be Slash reaching outside its own directory to change other software.
+    expect(shouldRefreshYtDlp({ ...base, managed: false })).toBe(false)
+    // Not even when it is years old.
+    expect(
+      shouldRefreshYtDlp({ ...base, managed: false, now: YTDLP_REFRESH_INTERVAL_MS * 100 })
+    ).toBe(false)
+  })
+
+  it('waits out the interval rather than checking on every launch', () => {
+    expect(shouldRefreshYtDlp({ ...base, now: 1 })).toBe(false)
+    expect(shouldRefreshYtDlp({ ...base, now: YTDLP_REFRESH_INTERVAL_MS - 1 })).toBe(false)
+  })
+
+  it('refreshes exactly on the boundary', () => {
+    expect(shouldRefreshYtDlp({ ...base, now: YTDLP_REFRESH_INTERVAL_MS })).toBe(true)
+  })
+
+  it('treats a backwards clock as due rather than as never due', () => {
+    // A corrected system clock or a restored machine leaves a future
+    // `lastCheckedAt`. Reading that as "not yet" would mean a copy that can
+    // never update again.
+    expect(shouldRefreshYtDlp({ ...base, lastCheckedAt: 10_000, now: 5_000 })).toBe(true)
+  })
+
+  it('checks a fortnight, from the release cadence rather than a round number', () => {
+    expect(YTDLP_REFRESH_INTERVAL_MS).toBe(14 * 24 * 60 * 60 * 1000)
   })
 })

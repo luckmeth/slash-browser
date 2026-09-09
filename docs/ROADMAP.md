@@ -46,6 +46,24 @@ Added most recently:
   the settings copy now states that adverts fund the browser and cannot be turned off. The operator
   keys remain, because a publisher still needs a network off-switch.
 
+Added 9 September 2026 — the shield-reliability pass:
+
+- **The YouTube ad strip actually runs.** Two faults: a tab that has never navigated has no renderer,
+  so the CDP install was never answered; and `Page.enable` had been removed as an optimisation, which
+  silently disabled document-start injection altogether. Install time on a clean profile went from
+  *never answered* / 2296 ms to **73 ms**, and `SLASH_YT_TIMING_PROBE` reports `ran=true accessor=true`
+  with no ad fields left on cold, warm and restored navigations.
+- **A shield self-check.** `ShieldVerifier` asks a real page once a session whether the strip ran, and
+  Settings says so beside the switch. Built because nothing in the product could notice the fault above.
+- **`npm run probe`.** One command for the 64 probes, with an explicit manifest of which are safe to
+  run unattended and why the rest are not.
+- **Tests for every page-world script.** `youtubeAdScript`, `contextMenuScript` and
+  `popupDefuserScript` — 36 cases. They were strings of JavaScript with no test at all.
+- **yt-dlp stays current**, not merely installed: a fortnightly check that only ever replaces the copy
+  Slash owns.
+- **Android downloads rows repaint.** Rebuilt on an immutable data class behind one
+  `State<List<Download>>`; the previous design had failed three times.
+
 Also already present, contrary to older versions of this file: **empty states** in History,
 Bookmarks and Downloads, and a tab strip that **shrinks** tabs to fit (and, since the last QA pass,
 scrolls once shrinking bottoms out).

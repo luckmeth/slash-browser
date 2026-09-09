@@ -1,0 +1,35 @@
+{
+  "$comment": [
+    "Which probes can be run unattended, and which cannot.",
+    "",
+    "This file is deliberately conservative and deliberately incomplete. A probe",
+    "is only listed as 'unattended' once somebody has actually run it that way and",
+    "watched it reach a verdict. Everything else is either listed with the reason",
+    "it needs a human, or left out entirely — and `npm run probe -- --list` shows",
+    "the unclassified ones as exactly that.",
+    "",
+    "The alternative — assuming a probe is safe because its name sounds safe —",
+    "produces a harness that reports failures nobody trusts, which is worse than",
+    "having no harness. Add entries here as you verify them."
+  ],
+  "unattended": {
+    "SLASH_SHIELD_WARMUP_PROBE": {
+      "timeoutMs": 120000,
+      "note": "Renderer lifecycle and history side effects of the shield warm-up. Local only."
+    },
+    "SLASH_YT_TIMING_PROBE": {
+      "timeoutMs": 240000,
+      "network": true,
+      "note": "Loads real YouTube watch pages and asks whether the ad strip ran. Needs a network and a clean profile."
+    }
+  },
+  "manual": {
+    "SLASH_AUTOHIDE_PROBE": "Needs a real pointer moved by something outside the process. `sendInputEvent` cannot test what the window manager decides, and a version built on it passed against the bug.",
+    "SLASH_YT_ADS_PROBE": "Cannot currently run its A/B at all: `autoplayPolicy: 'user-gesture-required'` means a scripted play() is refused and the player never lays out under automation.",
+    "SLASH_SIGNIN_PROBE": "Needs a real Google account and a live Supabase project.",
+    "SLASH_AUTH_PROBE": "Needs a real Google account.",
+    "SLASH_GOOGLE_UA_PROBE": "Loads Google's real sign-in form; meaningful only when watched.",
+    "SLASH_INSTALL_PROBE": "Touches the updater's install path. Run it deliberately, not as part of a sweep.",
+    "SLASH_UPDATE_PROBE": "Talks to the release feed and can download a package."
+  }
+}

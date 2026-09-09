@@ -63,6 +63,8 @@ export interface WindowDeps {
   fillAddress?: (contents: WebContents, id: number) => void
   /** Installs the YouTube ad-break filter on a new page view. */
   observeYouTube?: (contents: WebContents) => void
+  shieldReady?: (contents: WebContents) => Promise<void>
+  shieldNeededFor?: (url: string) => boolean
   /** Follows a new page view's navigations for media detection. */
   observeMedia?: (contents: WebContents) => void
   /**
@@ -339,6 +341,8 @@ export class BrowserWindowController {
           this.deps.observeYouTube?.(contents)
           this.observePageFullscreen(contents)
         },
+        shieldReady: (contents) => this.deps.shieldReady?.(contents) ?? Promise.resolve(),
+        shieldNeededFor: (url) => this.deps.shieldNeededFor?.(url) ?? false,
         observeMedia: (contents) => this.deps.observeMedia?.(contents),
         installPageContextMenu: (contents) =>
           installPageContextMenu(contents, this.contextMenuDeps()),

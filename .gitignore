@@ -20,3 +20,4 @@ portal/data/
 # ffmpeg, fetched by "npm run fetch:ffmpeg". ~88 MB, and git would keep every
 # version of it for ever. Checksum-pinned in that script; see docs/DOWNLOAD-MANAGER.md.
 resources/ffmpeg/
+probe-results/

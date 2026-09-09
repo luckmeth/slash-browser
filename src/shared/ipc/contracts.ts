@@ -239,6 +239,19 @@ export type UiCommand = z.infer<typeof UiCommandSchema>
 
 // --- invoke channels --------------------------------------------------------
 
+/**
+ * Whether Slash has actually seen its ad strip run in a page.
+ *
+ * Four states rather than a boolean, because "we could not read the page" and
+ * "the script did not run" are different facts and collapsing them would make
+ * this check worse than not having one.
+ */
+export const ShieldVerificationSchema = z.object({
+  verdict: z.enum(['unknown', 'verified', 'failed', 'off']),
+  at: z.number().nullable(),
+  host: z.string().nullable()
+})
+
 export const invokeContracts = {
   'app:info': { request: z.void(), response: AppInfoSchema },
   'diagnostics:dbStatus': { request: z.void(), response: DbStatusSchema },
@@ -799,6 +812,15 @@ export const invokeContracts = {
    * for, and the figure it wants is the window's rather than one page's.
    */
   'blocking:sessionTotals': { request: z.void(), response: ShieldCountsSchema },
+  /**
+   * The last self-check of the page-world ad strip.
+   *
+   * Exists because the strip stopped running entirely and nothing in the
+   * product could notice: the protocol replied, the log said it was installed,
+   * and this screen said the blocker was on. Asking the page is the only check
+   * that separates "installed" from "running".
+   */
+  'shield:verification': { request: z.void(), response: ShieldVerificationSchema },
   'blocking:setSiteAllowed': {
     request: z.object({ host: z.string(), allowed: z.boolean(), tabId: z.string() }),
     response: BlockingStatusSchema
@@ -1762,7 +1784,8 @@ export const eventContracts = {
   'ui:command': UiCommandSchema,
   'shield:popupBlocked': PopupBlockedSchema,
   'shield:navigationBlocked': NavigationNoticeSchema,
-  'shield:navigationWarned': NavigationNoticeSchema
+  'shield:navigationWarned': NavigationNoticeSchema,
+  'shield:verificationChanged': ShieldVerificationSchema
 } as const satisfies Record<EventChannel, z.ZodType>
 
 export type EventPayload<C extends EventChannel> = z.infer<(typeof eventContracts)[C]>

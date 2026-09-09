@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { net } from 'electron'
 import { z } from 'zod'
 import { decrypt, deriveKey, encrypt, verifier, verifierMatches } from './crypto'
+import {
+  historyItemId,
+  selectSyncable,
+  mergeVisit,
+  isHistoryPayload,
+  type HistoryRow
+} from './historySync'
 import { mergeItems, nextCursor, type SyncItem } from './merge'
 import type { Database } from '../db/Database'
 import type { SettingsStore } from '../settings/SettingsStore'
@@ -288,6 +295,52 @@ export class SyncService {
       })
     }
 
+    if (this.settings.getAll().syncHistory) {
+      const history = this.db.connection
+        .prepare<[], {
+          url: string
+          title: string
+          favicon_url: string | null
+          last_visited_at: number
+        }>(
+          `SELECT url, title, favicon_url, last_visited_at
+             FROM history_visits
+            ORDER BY last_visited_at DESC
+            LIMIT 20000`
+        )
+        .all()
+        .map<HistoryRow>((row) => ({
+          url: row.url,
+          title: row.title,
+          faviconUrl: row.favicon_url,
+          lastVisitedAt: row.last_visited_at
+        }))
+
+      // The LIMIT above only bounds the query; `selectSyncable` applies the
+      // retention window and the real cap. Both happen before anything is
+      // encrypted, because encryption is the expensive part of this loop.
+      for (const entry of selectSyncable(history, Date.now())) {
+        items.push({
+          // HMAC under the sync key, never the URL itself. A history collection
+          // keyed by plaintext URLs would hand the server the one thing this
+          // browser promises never to send.
+          id: historyItemId(key, entry.url),
+          collection: 'history',
+          updatedAt: entry.lastVisitedAt,
+          deleted: false,
+          payload: encrypt(
+            key,
+            JSON.stringify({
+              url: entry.url,
+              title: entry.title,
+              faviconUrl: entry.faviconUrl,
+              lastVisitedAt: entry.lastVisitedAt
+            })
+          )
+        })
+      }
+    }
+
     const tombstones = this.db.connection
       .prepare<[], { collection: string; item_id: string; deleted_at: number }>(
         'SELECT collection, item_id, deleted_at FROM sync_tombstones'
@@ -331,6 +384,7 @@ export class SyncService {
         try {
           if (item.collection === 'bookmarks') this.applyBookmark(item, JSON.parse(json))
           else if (item.collection === 'reading') this.applyReading(item, JSON.parse(json))
+          else if (item.collection === 'history') this.applyHistory(JSON.parse(json))
         } catch (error) {
           log.warn(`could not apply ${item.collection}/${item.id}`, error)
         }
@@ -351,6 +405,60 @@ export class SyncService {
          ON CONFLICT(collection, item_id) DO UPDATE SET deleted_at = excluded.deleted_at`
       )
       .run(item.collection, item.id, item.updatedAt)
+  }
+
+  /**
+   * Writes a history entry that arrived from another device.
+   *
+   * Keyed on the URL from the *decrypted payload*, not on `item.id` — the id is
+   * an HMAC and cannot be turned back into a URL, which is the entire point of
+   * it. The URL lives inside the ciphertext, where only a device holding the key
+   * can read it.
+   *
+   * `visit_count` is deliberately absent from the update clause and from the
+   * payload. Counts stay local; summing them across devices inflates on every
+   * sync, fastest for the pages visited most.
+   */
+  private applyHistory(data: unknown): void {
+    if (!isHistoryPayload(data)) return
+
+    const local = this.db.connection
+      .prepare<[string], {
+        url: string
+        title: string
+        favicon_url: string | null
+        last_visited_at: number
+      }>('SELECT url, title, favicon_url, last_visited_at FROM history_visits WHERE url = ?')
+      .get(data.url)
+
+    const merged = mergeVisit(
+      local
+        ? {
+            url: local.url,
+            title: local.title,
+            faviconUrl: local.favicon_url,
+            lastVisitedAt: local.last_visited_at
+          }
+        : null,
+      data
+    )
+    if (!merged) return
+
+    this.db.connection
+      .prepare(
+        `INSERT INTO history_visits (url, title, favicon_url, visit_count, last_visited_at)
+         VALUES (@url, @title, @favicon, 1, @visitedAt)
+         ON CONFLICT(url) DO UPDATE SET
+           title = excluded.title,
+           favicon_url = excluded.favicon_url,
+           last_visited_at = excluded.last_visited_at`
+      )
+      .run({
+        url: merged.url,
+        title: merged.title,
+        favicon: merged.faviconUrl,
+        visitedAt: merged.lastVisitedAt
+      })
   }
 
   private applyBookmark(item: SyncItem, data: Record<string, unknown>): void {

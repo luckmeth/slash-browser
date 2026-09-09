@@ -145,6 +145,8 @@ export const INVOKE_CHANNELS = [
   'shield:setSiteLock',
   'shield:setMode',
   'shield:clearActivity',
+  'shield:verification',
+  'shield:verification',
 
   // --- reading list ---
   'reading:list',
@@ -391,6 +393,20 @@ export const EVENT_CHANNELS = [
   /** A top-level navigation was refused, or flagged and allowed. */
   'shield:navigationBlocked',
   'shield:navigationWarned',
+  /**
+   * Whether the page-world ad strip was observed actually running.
+   *
+   * Pushed rather than polled because the check happens once, seconds after
+   * a YouTube page settles — long after the settings screen was opened.
+   */
+  'shield:verificationChanged',
+  /**
+   * Whether the page-world ad strip was observed actually running.
+   *
+   * Pushed rather than polled because the check happens once, seconds after
+   * a YouTube page settles — long after the settings screen was opened.
+   */
+  'shield:verificationChanged',
   /**
    * The active tab started playing something downloadable.
    *

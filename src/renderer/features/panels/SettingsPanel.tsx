@@ -15,6 +15,7 @@ import { ToolbarSection } from './ToolbarSection'
 import { PasswordsSection } from './PasswordsSection'
 import { NewTabSection } from './NewTabSection'
 import { SponsorSection } from './SponsorSection'
+import { ShieldVerificationNotice } from './ShieldVerificationNotice'
 import { RewardsSection } from './RewardsSection'
 import { ShortcutEditor } from './ShortcutEditor'
 import { AddressSection } from './AddressSection'
@@ -300,6 +301,13 @@ export function SettingsPanel(): React.JSX.Element {
           disabled={!settings.allowPageScripts || !settings.blockAds}
           onChange={(blockYouTubeVideoAds) => update({ blockYouTubeVideoAds })}
         />
+        {/*
+          The switch above states an intention. This states an observation, and
+          they came apart badly once: the strip stopped running entirely while
+          every signal — the protocol reply, the log, this screen — said it was
+          on. It stays silent until there is something to report.
+        */}
+        <ShieldVerificationNotice />
         {/*
           Said plainly, because a shield icon invites the assumption that this is
           antivirus. It is not, and a browser cannot be.
@@ -662,9 +670,23 @@ export function SettingsPanel(): React.JSX.Element {
 
         <Toggle
           label="Use yt-dlp for sites Slash cannot download"
-          hint="Some sites — YouTube among them — serve video in a form no browser can turn into a file on its own. Reaching those means defeating the site's access controls, which Slash does not do. If you install yt-dlp yourself, Slash will hand those pages to it and show the result in this list. Slash never installs or bundles it, and every download it makes is labelled."
+          hint="Some sites — YouTube among them — serve video in a form no browser can turn into a file on its own. Reaching those means defeating the site's access controls, which Slash does not do. Those pages are handed to yt-dlp, a separate public-domain program, and every download it makes is labelled so it never looks like one Slash made itself."
           checked={settings.useExternalDownloader}
           onChange={(useExternalDownloader) => update({ useExternalDownloader })}
+        />
+
+        <Toggle
+          label="Fetch yt-dlp automatically on first run"
+          hint="Slash downloads it once, from the official yt-dlp repository, and checks the bytes against the published SHA-512 before installing. It goes beside your profile, not into Program Files, so updating never needs administrator rights and uninstalling Slash takes it with it. This is the only thing a fresh install fetches on its own — turn it off and the button below does the same job when you ask."
+          checked={settings.ytDlpInstallOnFirstRun}
+          onChange={(ytDlpInstallOnFirstRun) => update({ ytDlpInstallOnFirstRun })}
+        />
+
+        <Toggle
+          label="Keep yt-dlp up to date"
+          hint="Checks for a newer release every couple of weeks and replaces it the same way, checksum and all. This matters more than it sounds: yt-dlp ships extractor fixes every few weeks, and a stale copy does not fail loudly — it just stops being able to download particular sites. Only ever replaces the copy Slash installed beside your profile; a yt-dlp you installed yourself is left alone."
+          checked={settings.ytDlpAutoUpdate}
+          onChange={(ytDlpAutoUpdate) => update({ ytDlpAutoUpdate })}
         />
 
         {settings.useExternalDownloader && <ExternalDownloaderRow />}
@@ -682,6 +704,13 @@ export function SettingsPanel(): React.JSX.Element {
             </Note>
           </Field>
         )}
+
+        <Toggle
+          label="Notify when a download finishes"
+          hint="Names the file, and clicking the notification shows it in your file manager. Separate from the queue action above, which is about what happens when everything finishes."
+          checked={settings.notifyOnDownloadComplete}
+          onChange={(notifyOnDownloadComplete) => update({ notifyOnDownloadComplete })}
+        />
 
         <Field label="Speed limit">
           <select

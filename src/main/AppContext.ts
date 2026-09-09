@@ -89,6 +89,8 @@ import { PopupGuard } from './shield/PopupGuard'
 import { RedirectGuard } from './shield/RedirectGuard'
 import { GestureTracker } from './shield/GestureTracker'
 import { ScriptletInjector } from './shield/inject/ScriptletInjector'
+import { ShieldVerifier } from './shield/ShieldVerifier'
+import { DownloadPresenter } from './downloads/DownloadPresenter'
 import { CosmeticFilter } from './shield/adblock/CosmeticFilter'
 import { buildYouTubeAdScript } from './shield/youtubeAdScript'
 import { buildPopupDefuserScript } from './shield/inject/popupDefuserScript'
@@ -260,7 +262,7 @@ export class AppContext {
   readonly cleanup = new CleanupService()
   readonly insight = new PageInsightService()
   readonly downloadEngine: DownloadQueue
-  private readonly ytDlp: YtDlpService
+  readonly ytDlp: YtDlpService
   /** Where engine downloads are written down, so they survive a quit. */
   readonly engineDownloadRepository: EngineDownloadRepository
   readonly guardian: DownloadGuardian
@@ -297,8 +299,39 @@ export class AppContext {
    * and the `window.open` defuser, and yields it to DevTools on demand.
    */
   readonly injector: ScriptletInjector
+
+  /**
+   * Asks a real page whether the injector's work actually happened.
+   *
+   * The injector can only report that the protocol accepted its command,
+   * and there was a period where that was true while the script never ran.
+   */
+  readonly shieldVerifier: ShieldVerifier
+  private readonly downloadPresenter: DownloadPresenter
   /** The script switches as they were, so a change can be noticed. */
   private lastScriptSwitches = ''
+
+  /**
+   * The settings that decide which page scripts get installed.
+   *
+   * One function, used to seed and to compare, because two copies of this list
+   * that disagree would either refresh constantly or never.
+   */
+  private scriptSwitchesOf(settings: {
+    allowPageScripts: boolean
+    blockAds: boolean
+    blockYouTubeVideoAds: boolean
+    restoreContextMenu: boolean
+    blockPopups: boolean
+  }): string {
+    return [
+      settings.allowPageScripts,
+      settings.blockAds,
+      settings.blockYouTubeVideoAds,
+      settings.restoreContextMenu,
+      settings.blockPopups
+    ].join('|')
+  }
   /**
    * Whether this launch has already asked about an update.
    *
@@ -370,11 +403,21 @@ export class AppContext {
     // DownloadManager, while explicitly managed transfers get segmenting,
     // queueing and retries.
     this.engineDownloadRepository = new EngineDownloadRepository(this.db)
+    this.downloadPresenter = new DownloadPresenter(
+      () => this.windows.map((w) => w.browserWindow),
+      () => this.settings.getAll().notifyOnDownloadComplete
+    )
     this.downloadEngine = new DownloadQueue(
       () => this.downloads.directory(),
       () => this.settings.getAll().downloadConnections,
       () => this.settings.getAll().downloadBandwidthLimit,
-      (items) => this.broadcastAll('downloadEngine:changed', items),
+      (items) => {
+        this.broadcastAll('downloadEngine:changed', items)
+        // Taskbar progress and per-file completion notices. Driven from the
+        // same event the panel is, so it cannot fall out of step with what the
+        // Downloads Center shows.
+        this.downloadPresenter.update(items)
+      },
       this.engineDownloadRepository,
       () => this.settings.getAll().downloadQueues,
       () => this.settings.getAll().sortDownloadsByCategory,
@@ -451,6 +494,13 @@ export class AppContext {
       () => this.settings.getAll().blockAds
     )
     this.injector = new ScriptletInjector(() => this.settings.getAll().allowPageScripts)
+    this.shieldVerifier = new ShieldVerifier(
+      () => {
+        const settings = this.settings.getAll()
+        return settings.blockAds && settings.blockYouTubeVideoAds
+      },
+      (state) => this.broadcastAll('shield:verificationChanged', state)
+    )
     this.translation = new TranslationService(this.providers, this.settings)
     this.addresses = new AddressBook(this.db)
     this.remoteConfig = new RemoteConfigService(this.settings, (config) =>
@@ -833,6 +883,17 @@ export class AppContext {
 
     registerHandlers(this)
 
+    // Seeded from the settings as they are *now*.
+    //
+    // It started as `''`, which meant the first settings write of a session
+    // never matched and always forced a full detach-and-reinstall of every
+    // tab's page scripts — however unrelated the setting was. Anything that
+    // writes a setting at startup therefore tore down script injection at the
+    // exact moment it was being established, which is where the duplicate
+    // installs in `SLASH_YT_TIMING_PROBE` came from and a second slow CDP round
+    // trip the YouTube strip could not afford.
+    this.lastScriptSwitches = this.scriptSwitchesOf(this.settings.getAll())
+
     this.settings.onChange((next) => {
       this.broadcastAll('settings:changed', next)
       this.activity.sync()
@@ -840,16 +901,14 @@ export class AppContext {
       // Which page scripts are installed is decided once per debugger
       // attachment, so a tab already open would otherwise keep whatever was
       // decided when it attached — a feature switched on and nothing happening.
-      const scriptSwitches = [
-        next.allowPageScripts,
-        next.blockAds,
-        next.blockYouTubeVideoAds,
-        next.restoreContextMenu,
-        next.blockPopups
-      ].join('|')
+      const scriptSwitches = this.scriptSwitchesOf(next)
       if (scriptSwitches !== this.lastScriptSwitches) {
         this.lastScriptSwitches = scriptSwitches
         this.injector.refresh(this.allPageContents())
+        // The previous verdict was about a different configuration, and a
+        // stale "verified" beside a switch somebody just changed is exactly
+        // the reassurance this check exists to stop giving.
+        this.shieldVerifier.reset()
       }
       // Switching Slash Coin on is the first moment the browser is allowed to
       // ask the rewards service anything, so the rate and the daily maximum are
@@ -985,6 +1044,12 @@ export class AppContext {
         // window to pass `true` from.
         void this.memory.indexPage(contents, url, isPrivate)
 
+        // At most once a session, and only on a site where the ad strip is
+        // supposed to have run. Deliberately here rather than during a
+        // navigation: principle 1, and the answer is no less true a second
+        // later.
+        void this.shieldVerifier.notePageLoaded(contents, url)
+
         // Mission Mode records the visit and may offer to save a digression. It
         // never blocks: the suggestion is the entire intervention.
         const suggestion = this.missions.notePageVisited(url, contents.getTitle())
@@ -1039,6 +1104,8 @@ export class AppContext {
         this.injector.observe(contents)
         this.cosmetics.observe(contents)
       },
+      shieldReady: (contents) => this.injector.ready(contents),
+      shieldNeededFor: (url) => this.injector.needsEarlyInstall(url),
       observeMedia: (contents) => {
         this.mediaSniffer.observe(contents)
         this.watchForSignIn(contents)

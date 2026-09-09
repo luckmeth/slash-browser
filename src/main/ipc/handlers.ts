@@ -2243,6 +2243,8 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('blocking:sessionTotals', () => ok(ctx.blocker.activity.sessionCounts()))
 
+  ipc.handle('shield:verification', () => ok(ctx.shieldVerifier.current()))
+
   ipc.handle('blocking:setSiteAllowed', (request, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')

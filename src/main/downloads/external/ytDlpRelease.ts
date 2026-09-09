@@ -108,3 +108,49 @@ export function checksumFor(sums: string, name = ASSET_NAME): string | null {
   }
   return null
 }
+
+
+/**
+ * How often a managed yt-dlp is worth re-checking.
+ *
+ * Two weeks, from the release cadence rather than a round number: extractor
+ * fixes ship every few weeks (2026.08.19 came nine days after 2026.07.04, and
+ * its notes name the YouTube extractor). Checking daily would be a request a
+ * fresh install makes unasked for no benefit; checking never is how the
+ * first-run install quietly becomes useless a month later.
+ */
+export const YTDLP_REFRESH_INTERVAL_MS = 14 * 24 * 60 * 60 * 1000
+
+/**
+ * Whether to look for a newer yt-dlp now.
+ *
+ * Pure and clock-injected because every clause is a decision about making an
+ * unattended network request, and principle 2 does not let those be decided
+ * inside an async method nobody can test.
+ *
+ * The clause that matters most is `managed`. A yt-dlp the user installed
+ * themselves — pip, scoop, winget — belongs to them and to whatever else on
+ * their machine uses it. Slash replacing it would be reaching outside its own
+ * directory to change somebody else's software, which it does not do however
+ * stale the copy is.
+ */
+export function shouldRefreshYtDlp(options: {
+  enabled: boolean
+  /** False for a copy the user installed themselves. */
+  managed: boolean
+  lastCheckedAt: number
+  now: number
+  intervalMs?: number
+}): boolean {
+  if (!options.enabled) return false
+  if (!options.managed) return false
+
+  const interval = options.intervalMs ?? YTDLP_REFRESH_INTERVAL_MS
+  const elapsed = options.now - options.lastCheckedAt
+
+  // A clock that moved backwards — a corrected system time, a restored
+  // machine — reads as a negative age. Treated as due rather than as never
+  // due, because the alternative is a copy that can never update again.
+  if (elapsed < 0) return true
+  return elapsed >= interval
+}

@@ -4,7 +4,12 @@ import { join } from 'node:path'
 import { app, net } from 'electron'
 import { createHash } from 'node:crypto'
 import { createLogger } from '../../logger'
-import { checksumFor, chooseAsset, YTDLP_RELEASE_API } from './ytDlpRelease'
+import {
+  checksumFor,
+  chooseAsset,
+  shouldRefreshYtDlp,
+  YTDLP_RELEASE_API
+} from './ytDlpRelease'
 import {
   parseFormats,
   parseProgress,
@@ -309,6 +314,117 @@ export class YtDlpService {
    * from the official repository. This writes a file it will then execute; both
    * checks are the minimum that deserves.
    */
+  /**
+   * Installs on first run, once, in the background.
+   *
+   * Slash cannot download most video sites on its own; that capability lives in
+   * yt-dlp. Leaving it behind a button in Settings meant the feature existed and
+   * nobody found it — which is the same failure as a channel with no caller.
+   *
+   * Three things keep this from being a browser that phones home:
+   *
+   *  - It is a **setting**, on by default and off in one click, and the copy
+   *    beside it says what the request is and where it goes.
+   *  - It is **attempted once**. A machine with no network, or a release with no
+   *    checksum, must not retry on every launch for ever — so the attempt is
+   *    recorded whether or not it succeeded, and Settings still offers the
+   *    manual button afterwards.
+   *  - It does nothing at all if a usable yt-dlp is already present, including
+   *    one the user installed themselves.
+   *
+   * Never awaited by anything on the browsing path. A first run with no network
+   * is an ordinary state, not an error worth showing.
+   */
+  async installOnFirstRun(
+    enabled: () => boolean,
+    alreadyAttempted: () => boolean,
+    markAttempted: () => void
+  ): Promise<void> {
+    if (!enabled() || alreadyAttempted()) return
+    if ((await this.locate()) !== null) {
+      // Already available — record it so this never runs again.
+      markAttempted()
+      return
+    }
+
+    markAttempted()
+    log.info('first run: fetching yt-dlp')
+    const result = await this.install().catch((error: unknown) => ({
+      ok: false,
+      version: null,
+      note: String(error)
+    }))
+    if (result.ok) {
+      log.info(`first run: yt-dlp ${result.version ?? ''} installed`)
+    } else {
+      // Silent to the user. They did not ask for this yet, and a modal about a
+      // component they have not tried to use would be worse than the gap.
+      log.warn(`first run: could not install yt-dlp — ${result.note}`)
+    }
+  }
+
+  /**
+   * Replaces a stale managed yt-dlp with the current release.
+   *
+   * **Why installing once was not enough.** `installOnFirstRun` fetches a
+   * working copy, and CLAUDE.md already records why bundling one is wrong:
+   * releases carry extractor fixes every few weeks, so a frozen copy breaks
+   * within a month. Installing once re-creates that same problem a month
+   * later — the difference being that the user now believes the feature works.
+   * A stale extractor does not announce itself; it fails per-site, which reads
+   * as "Slash cannot download this video" rather than as a component needing an
+   * update.
+   *
+   * Bounded by the same rules as the first-run install: only the copy Slash
+   * owns in `userData`, only from the official repository, checksum verified
+   * before anything is replaced, off in one switch, and the check itself is
+   * recorded whether or not it succeeded so a machine with no network does not
+   * retry on every launch.
+   */
+  async refreshIfStale(
+    enabled: () => boolean,
+    lastCheckedAt: () => number,
+    markChecked: () => void,
+    now: () => number = () => Date.now()
+  ): Promise<void> {
+    const found = await this.locate()
+    if (found === null) return
+
+    if (
+      !shouldRefreshYtDlp({
+        enabled: enabled(),
+        managed: found === this.managedPath(),
+        lastCheckedAt: lastCheckedAt(),
+        now: now()
+      })
+    ) {
+      return
+    }
+
+    // Recorded before the attempt, not after, so a repeated failure cannot turn
+    // into a request on every launch.
+    markChecked()
+
+    const installed = await this.version(found)
+    const result = await this.install().catch((error: unknown) => ({
+      ok: false,
+      version: null,
+      note: String(error)
+    }))
+
+    if (result.ok) {
+      log.info(
+        installed !== null && result.version === installed
+          ? `yt-dlp is current (${installed})`
+          : `yt-dlp updated ${installed ?? 'unknown'} -> ${result.version ?? 'unknown'}`
+      )
+    } else {
+      // Silent to the user: the copy they have still works, and a modal about a
+      // component that is merely a fortnight old would be noise.
+      log.warn(`could not refresh yt-dlp — ${result.note}`)
+    }
+  }
+
   async install(): Promise<{ ok: boolean; version: string | null; note: string }> {
     try {
       const release = await fetchJson(YTDLP_RELEASE_API)

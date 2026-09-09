@@ -1,6 +1,6 @@
 # Sync
 
-Bookmarks and the reading list, between a person's own machines.
+Bookmarks, the reading list and — when switched on separately — history, between a person's own machines.
 
 **Off by default and inert without an endpoint.** A fresh install contacts nothing.
 
@@ -20,8 +20,22 @@ So the server holds, per item:
 | `deleted` | Tombstone flag |
 | `payload` | Base64 `iv \| tag \| ciphertext`. Empty for a tombstone |
 
-**History is not synced.** It is the largest and most revealing thing the browser holds, and sending
-it anywhere — even encrypted — is a different promise from the one this browser makes.
+**History syncs only if you turn it on, under its own switch.**
+
+It was previously not synced at all, and the reason given still stands: history is the largest and
+most revealing thing the browser holds. So `syncHistory` is separate from `syncEnabled` and off even
+when sync is on — turning on bookmark sync must not quietly start uploading browsing history.
+
+Three things had to be solved before it could be offered at all:
+
+| Problem | What would go wrong | What is done |
+|---|---|---|
+| **Identity** | Reading-list items travel under their own URL. Doing that for history would put every page somebody visited on the server in the clear — the exact thing the encryption exists to prevent. A plain `sha256(url)` is no better: URLs are public and low-entropy, so one precomputed table reverses the lot | The id is an **HMAC-SHA256 under the sync key**. Same URL on your two devices gives the same id because both derived the same key; the server, which never has the key, cannot go from id back to URL at all |
+| **Volume** | Bookmarks are hundreds of rows; history is tens of thousands, and every item offered is encrypted on every pass | A 90-day retention window **and** a hard cap of 5,000 entries, both applied before any encryption. Newest first, so being capped costs you the oldest pages rather than random ones |
+| **Counters** | Summing `visit_count` across devices inflates it on every sync — the classic distributed-counter bug, and it grows fastest for the pages you visit most, which is exactly what ordering depends on | Visit counts are **local and never synced**. What travels is the URL, title and last visit time; `mergeVisit` takes the later visit and leaves each device's own count alone |
+
+The collection is `history`, and its `id` is the HMAC — so unlike `reading`, the id row in the table
+below reveals nothing.
 
 ### What leaks
 
@@ -29,7 +43,12 @@ Stated plainly, because a claim of "encrypted" that quietly omits this is not ho
 
 - **Reading-list ids are URLs in the clear.** The item's identity has to be stable across devices,
   and the URL is the only natural key the table has. The title, favicon and read state are
-  encrypted; the address is not. Bookmarks do not have this problem — they travel by random guid.
+  encrypted; the address is not. Bookmarks do not have this problem — they travel by random guid,
+  and **history ids are HMACs under the sync key**, because the reading-list shortcut would have
+  been indefensible applied to every page somebody has visited.
+- **How many history entries you have, and when.** The ids reveal nothing, but a server still sees
+  a count and a timestamp per entry — so it can tell roughly how much you browse and when, without
+  learning any of what you browsed.
 - **Item count, timing and sizes are visible.** A server can see how many things you have, roughly
   how large each is, and when you change them.
 - **The device id** is a random UUID per installation. It is not derived from anything about the

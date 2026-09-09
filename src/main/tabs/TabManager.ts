@@ -25,6 +25,31 @@ const log = createLogger('tabs')
 /** Index in the window's contentView child list where the page view belongs. */
 const PAGE_VIEW_INDEX = 1
 
+/**
+ * How long a navigation may wait for the page-world shield to be installed.
+ *
+ * Generous, because the measured install against a live renderer is 5–67 ms, so
+ * reaching this at all means something is wrong. Bounded, because an unbounded
+ * await here would mean a browser that never navigates.
+ */
+const SHIELD_WAIT_CEILING_MS = 1_500
+
+/**
+ * Whether this `WebContents` has a renderer process yet.
+ *
+ * `getOSProcessId()` returns **0** for a view that has never navigated — the
+ * state every freshly built tab is in — and that is the difference between a
+ * CDP command that is answered in milliseconds and one that is never answered
+ * at all. Measured, not inferred: see `afterShield`.
+ */
+function hasRenderer(contents: WebContents): boolean {
+  try {
+    return !contents.isDestroyed() && contents.getOSProcessId() > 0
+  } catch {
+    return false
+  }
+}
+
 export interface ClosedTab {
   url: string
   title: string
@@ -57,6 +82,15 @@ export interface TabManagerHooks {
   installPageContextMenu: (contents: WebContents) => void
   /** Wires a new page view's navigation events into Redirect X-Ray. */
   observeRedirects?: (tabId: string, contents: WebContents) => void
+  /**
+   * Resolves once page-world protection is registered for this view.
+   *
+   * Awaited before the first load so the YouTube ad strip is in place before
+   * the page can read its player data — see `ScriptletInjector.ready`.
+   */
+  shieldReady?: (contents: WebContents) => Promise<void>
+  /** Whether this destination is one worth delaying the load for. */
+  shieldNeededFor?: (url: string) => boolean
   /** Wires a new page view into media detection, so it can be offered for download. */
   observeMedia?: (contents: WebContents) => void
   /**
@@ -764,7 +798,8 @@ export class TabManager {
     // error has just been cleared, so the renderer has to come back — otherwise
     // the page loads correctly into a view nobody can see.
     if (this.activeId === id) this.attachView(tab)
-    void tab.contents?.loadURL(url)
+    const target = tab.contents
+    if (target) this.afterShield(target, url, () => void target.loadURL(url))
     this.scheduleEmit()
   }
 
@@ -942,7 +977,95 @@ export class TabManager {
   private buildView(tab: Tab): void {
     const view = createPageView(this.workspaces.sessionFor(tab.snapshot.workspaceId))
     tab.attachView(view)
+    const contents = view.webContents
 
+    // Read **now**, before anything can navigate. The warm-up below loads a
+    // blank document, and `did-navigate` patches `tab.snapshot.url` — so a
+    // closure that re-read the snapshot later found `about:blank` and loaded
+    // that instead of the page the user asked for. The tab then sat blank for
+    // twenty seconds with the correct address logged one line above it.
+    // Captured by value so there is nothing to re-read.
+    const initialUrl = tab.snapshot.url
+    const saved = tab.takeSavedNavigation()
+
+    const start = (): void => {
+      if (contents.isDestroyed() || tab.view !== view) return
+      this.wireView(tab, view)
+
+      // Restore navigation history if this tab is waking from hibernation, so
+      // the Back button survives. Falls back to a plain load when there is
+      // none.
+      //
+      // Both branches go through `afterShield`. The restore branch used to
+      // `return` before the wait entirely, which is precisely the path a
+      // browser takes when it reopens with restored tabs — the case the ad race
+      // was actually reported from.
+      if (saved && saved.entries.length > 0) {
+        this.afterShield(contents, initialUrl, () => {
+          try {
+            contents.navigationHistory.restore({ entries: saved.entries, index: saved.index })
+          } catch (error) {
+            log.warn(`could not restore navigation history for ${tab.id}`, error)
+            void contents.loadURL(initialUrl)
+          }
+        })
+        return
+      }
+      this.afterShield(contents, initialUrl, () => {
+        contents.loadURL(initialUrl).catch((error: unknown) => {
+          log.warn(`initial load of ${initialUrl} failed`, error)
+        })
+      })
+    }
+
+    // The renderer warm-up, and the reason it happens *here* rather than beside
+    // the navigation it serves.
+    //
+    // `SLASH_SHIELD_WARMUP_PROBE`: a view that has never navigated has no
+    // renderer process at all (`getOSProcessId()` returns 0), and
+    // `Page.addScriptToEvaluateOnNewDocument` is serviced in the renderer — so
+    // the shield's install was never answered until the navigation to YouTube
+    // spawned one, ~300 ms into the life of the page it was supposed to
+    // protect. A blank document costs a spawn the tab was going to pay for
+    // anyway and takes the install from *never* to 4 ms.
+    //
+    // It runs before `wireView` so that it is invisible. With the tab's own
+    // listeners already attached, the blank navigation patched the tab's URL,
+    // put `about:blank` in the omnibox, and **recorded it as a visit in the
+    // user's history**.
+    if (!this.needsWarmUp(contents, initialUrl)) {
+      start()
+      return
+    }
+    void contents
+      .loadURL('about:blank')
+      .catch(() => undefined)
+      .then(start)
+  }
+
+  /**
+   * Whether this view should be given a blank document before it navigates.
+   *
+   * Only where the shield is time-critical, and only when there is no renderer
+   * yet. Principle 1 forbids adding latency to the browsing path, and every
+   * other destination's scripts are defensive rather than time-critical — a
+   * pop-up defuser that installs 60 ms late has missed nothing, because nothing
+   * has tried to open a window yet.
+   */
+  private needsWarmUp(contents: WebContents, url: string): boolean {
+    // An escape hatch, and the reason it exists: the warm-up navigates
+    // `about:blank` -> the real site, which is a **cross-process** swap, and a
+    // script registered against the first renderer carrying over to the second
+    // is an assumption rather than a fact. This switch is what lets the probe
+    // measure the fix against the unfixed code — a fix that has never been
+    // shown capable of failing has not been tested.
+    if (process.env['SLASH_NO_SHIELD_WARMUP'] === '1') return false
+    if (!this.hooks.shieldNeededFor?.(url)) return false
+    return !hasRenderer(contents)
+  }
+
+  /** Everything that listens to a page. Split out so the warm-up can precede it. */
+  private wireView(tab: Tab, view: WebContentsView): void {
     attachTabEvents(view.webContents, tab, {
       onChanged: () => this.scheduleEmit(),
       siteZoomFor: (url) => this.hooks.siteZoomFor?.(url) ?? null,
@@ -977,19 +1100,89 @@ export class TabManager {
     this.hooks.observeMedia?.(view.webContents)
 
     if (tab.snapshot.isMuted) view.webContents.setAudioMuted(true)
+  }
 
-    // Restore navigation history if this tab is waking from hibernation, so the
-    // Back button survives. Falls back to a plain load when there is none.
-    const saved = tab.takeSavedNavigation()
-    if (saved && saved.entries.length > 0) {
+  /**
+   * Runs a navigation, with the page-world shield installed **first**.
+   *
+   * The bug this exists for: adverts played on the first YouTube video after a
+   * fresh start and on no video after it. The cause, measured by
+   * `SLASH_SHIELD_WARMUP_PROBE` rather than reasoned about:
+   *
+   *     never navigated      pid      0 ->      0   install never (> 5000ms)
+   *     after about:blank    pid  32028 ->  32028   install 5ms
+   *
+   * **A tab that has never navigated has no renderer process** — `getOSProcessId()`
+   * returns literally 0 — and `Page.addScriptToEvaluateOnNewDocument` is serviced
+   * *in* the renderer. So the install command sat unanswered indefinitely, and
+   * the thing that finally answered it was the renderer spawned by the
+   * navigation to YouTube. The shield was being switched on by the very page it
+   * was supposed to be protecting, ~300 ms into that page's life, which is after
+   * the player has read `ytInitialPlayerResponse`. Every navigation afterwards
+   * found it already installed — exactly the shape of "only the first video".
+   *
+   * An earlier round here simply waited longer, which is why the ceilings looked
+   * circular (250 -> installed 423, 900 -> 1196, 2500 -> 2897): with no renderer
+   * to answer, waiting bought nothing and delayed the page. The fix is not a
+   * longer wait but **a renderer to install into** — a blank document, which
+   * costs a spawn the tab was going to pay for anyway.
+   */
+  private afterShield(contents: WebContents, url: string, run: () => void): void {
+    if (contents.isDestroyed()) return
+
+    // Ordinary browsing is never held up. Principle 1 forbids adding latency to
+    // the browsing path, and "we might need a script eventually" is not a
+    // reason to make every page wait for a debugger.
+    if (!this.hooks.shieldNeededFor?.(url)) {
+      run()
+      return
+    }
+
+    // Bounded, and it degrades to navigating unprotected rather than to not
+    // navigating at all. An await with no ceiling is how the Android port
+    // shipped a browser that opened with no tabs and no error explaining why.
+    //
+    // The renderer this waits on was warmed in `buildView`, so on the path that
+    // matters this promise is already a few milliseconds old.
+    void Promise.race([
+      this.hooks.shieldReady?.(contents) ?? Promise.resolve(),
+      new Promise<void>((resolve) => setTimeout(resolve, SHIELD_WAIT_CEILING_MS))
+    ]).then(() => {
+      if (contents.isDestroyed()) return
+      log.debug(`shield seam releasing navigation to ${url}`)
+      this.forgetWarmUpEntry(contents)
+      run()
+    })
+  }
+
+  /**
+   * Drops the `about:blank` the warm-up left behind, once the real page has
+   * committed.
+   *
+   * Measured, because it is exactly the kind of side effect that is easy to
+   * assume away: Chromium replaces the *initial* empty document on the next
+   * navigation, but a blank page we asked for explicitly is a history entry
+   * like any other. The probe found it — `entries=2 about:blank=1`, with Back
+   * enabled on a tab the user had just opened — and a Back button that returns
+   * to a blank page is a worse bug than the advert.
+   *
+   * One-shot, and only for an entry at index 0 that is genuinely ours.
+   */
+  private forgetWarmUpEntry(contents: WebContents): void {
+    const drop = (): void => {
       try {
-        view.webContents.navigationHistory.restore({ entries: saved.entries, index: saved.index })
-        return
+        if (contents.isDestroyed()) return
+        const entries = contents.navigationHistory.getAllEntries()
+        if (entries.length < 2) return
+        if (entries[0]?.url !== 'about:blank') return
+        contents.navigationHistory.removeEntryAtIndex(0)
       } catch (error) {
-        log.warn(`could not restore navigation history for ${tab.id}`, error)
+        // A history that will not be edited is a cosmetic fault, not a reason
+        // to fail the navigation that is already under way.
+        log.debug('could not drop the warm-up history entry', error)
       }
     }
-    void view.webContents.loadURL(tab.snapshot.url)
+    contents.once('did-navigate', drop)
   }
 
   private attachView(tab: Tab): void {

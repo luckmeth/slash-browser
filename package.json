@@ -2,7 +2,7 @@
   "name": "slash",
   "version": "0.2.9",
   "private": true,
-  "description": "Slash \u2014 an intelligent, high-performance, privacy-respecting desktop browser",
+  "description": "Slash — an intelligent, high-performance, privacy-respecting desktop browser",
   "author": "Slash Developments",
   "license": "UNLICENSED",
   "main": "./out/main/index.js",
@@ -21,7 +21,11 @@
     "package": "npm run build && electron-builder --win --publish never",
     "logo": "node scripts/apply-logo.mjs",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
-    "package:mac": "npm run build && electron-builder --mac dmg --publish never"
+    "core:boundary": "node scripts/core-boundary.mjs",
+    "core:build": "node mobile/core/build.mjs",
+    "core:check": "node mobile/core/build.mjs --check",
+    "package:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "probe": "node scripts/probe.mjs"
   },
   "dependencies": {
     "@ghostery/adblocker": "^2.18.2",

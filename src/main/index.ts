@@ -391,6 +391,36 @@ if (!app.requestSingleInstanceLock()) {
         runYouTubeStateProbe(window)
       )
     }
+    // yt-dlp, fetched once on first run so the download feature works without a
+    // trip to Settings. Deliberately not awaited: it is a network request on a
+    // background task, and a first launch with no network is ordinary.
+    void context.ytDlp
+      .installOnFirstRun(
+        () => context.settings.getAll().ytDlpInstallOnFirstRun,
+        () => context.settings.getAll().ytDlpFirstRunAttempted,
+        () => context.settings.update({ ytDlpFirstRunAttempted: true })
+      )
+      // Then, and only for the copy Slash owns, keep it current. Sequenced
+      // after the install rather than beside it so a fresh machine does not
+      // fetch the same release twice.
+      .then(() =>
+        context.ytDlp.refreshIfStale(
+          () => context.settings.getAll().ytDlpAutoUpdate,
+          () => context.settings.getAll().ytDlpLastUpdateCheck,
+          () => context.settings.update({ ytDlpLastUpdateCheck: Date.now() })
+        )
+      )
+
+    if (process.env['SLASH_SHIELD_WARMUP_PROBE']) {
+      void import('./dev/shieldWarmupProbe').then(({ runShieldWarmupProbe }) =>
+        runShieldWarmupProbe(context)
+      )
+    }
+    if (process.env['SLASH_YT_TIMING_PROBE']) {
+      void import('./dev/youtubeTimingProbe').then(({ runYouTubeTimingProbe }) =>
+        runYouTubeTimingProbe(window, context)
+      )
+    }
     if (process.env['SLASH_YT_ADS_PROBE']) {
       void import('./dev/youtubeAdProbe').then(({ runYouTubeAdProbe }) =>
         runYouTubeAdProbe(window, context)

@@ -4,6 +4,8 @@ import { stripPlayerResponse, PLAYER_URL_PATTERN } from './playerResponseFilter'
 
 const log = createLogger('inject')
 
+
+
 /**
  * One script that runs in a page's own JavaScript context.
  *
@@ -43,6 +45,76 @@ export interface MainWorldScript {
 export class ScriptletInjector {
   private readonly scripts: MainWorldScript[] = []
   private readonly attached = new Set<number>()
+
+  /**
+   * Ordering trace, for `SLASH_YT_TIMING_PROBE`.
+   *
+   * Every step of the install is a separate CDP round trip, and whether they
+   * land before the page's own requests is the entire question behind "ads only
+   * play on the first video". That is a race, and a race cannot be settled by
+   * reading the code — so the steps announce themselves and the probe records
+   * the order they actually happened in.
+   */
+  onTrace: ((event: string, detail?: string) => void) | null = null
+
+  /**
+   * Resolves once this tab's scripts are actually registered.
+   *
+   * The install is two CDP round trips, and they were fire-and-forget: the tab
+   * was created, the install was *started*, and `loadURL` ran on the next line.
+   * Measured on a real watch page, registration completed **535–1085 ms** after
+   * the navigation began — because CDP replies queue behind the renderer, and
+   * the renderer is at its busiest parsing the first heavy page of a cold
+   * start. YouTube's player had already read `ytInitialPlayerResponse` by then,
+   * so the advert played; every navigation afterwards found the script already
+   * registered, which is why only the first video showed one.
+   *
+   * Awaiting this before the *first* load moves those round trips to a renderer
+   * that has nothing else to do, where they take a few milliseconds.
+   */
+  private readonly installs = new Map<number, Promise<void>>()
+
+  ready(contents: WebContents): Promise<void> {
+    return this.installs.get(contents.id) ?? Promise.resolve()
+  }
+
+  /**
+   * Whether a destination should have its scripts in place before it loads.
+   *
+   * **This used to be YouTube only**, on the reasoning that the strip was the
+   * only time-critical script and that principle 1 forbids making every page
+   * wait for a debugger. The first half was right; the second was an assumption
+   * about cost that had never been measured.
+   *
+   * It has been now. `SLASH_SHIELD_WARMUP_PROBE` times a fresh view to a loaded
+   * page both ways, interleaved, five runs each:
+   *
+   *     straight to the page   238ms, 66ms, 61ms, 65ms, 297ms   median 66ms
+   *     blank document first    72ms, 72ms, 72ms, 75ms,  68ms   median 72ms
+   *
+   * **Six milliseconds on the median**, because the blank document buys a
+   * renderer spawn the tab was going to pay for anyway — and the warmed arm is
+   * markedly steadier, since the spawn stops competing with the page's own
+   * parse. That is affordable, and what it buys is the other two scripts: the
+   * pop-up defuser and the right-click restorer now register **before** a page's
+   * own code runs rather than a few hundred milliseconds into it.
+   *
+   * Still not everything. `about:`, `file:` and internal pages get nothing,
+   * because no script here would act on them and a blank document before a blank
+   * document is pure waste.
+   */
+  needsEarlyInstall(url: string): boolean {
+    if (this.scripts.every((script) => !script.enabled())) return false
+    try {
+      return /^https?:$/.test(new URL(url).protocol)
+    } catch {
+      return false
+    }
+  }
+
+  private trace(event: string, detail?: string): void {
+    this.onTrace?.(event, detail)
+  }
   /**
    * Whether YouTube player responses should be filtered on the wire.
    *
@@ -75,6 +147,35 @@ export class ScriptletInjector {
   }
 
   observe(contents: WebContents): void {
+    // Attached **here**, at tab creation, rather than only when a navigation
+    // starts.
+    //
+    // This is the fix for adverts playing on the first YouTube video after a
+    // cold start and on no video after it. Every step of the install —
+    // `debugger.attach`, `Fetch.enable`, `Page.enable`,
+    // `addScriptToEvaluateOnNewDocument` — is an asynchronous round trip, and
+    // hanging all of them off `did-start-navigation` means they race the page
+    // they are supposed to be protecting. YouTube's `/youtubei/v1/player` call
+    // goes out very early, so on the *first* navigation of a fresh process —
+    // the one that also pays for the first debugger attach — the player
+    // response was frequently already on its way before `Fetch.enable` landed.
+    // It was therefore never paused, never stripped, and its ad breaks played.
+    //
+    // On every navigation afterwards `attach` returns early because the tab is
+    // already in `attached`, the filter is already enabled, and the adverts are
+    // gone — which is exactly the shape of the report: first video only.
+    //
+    // Attaching at creation moves the whole handshake into tab setup, before a
+    // URL has been asked for at all.
+    //
+    // `SLASH_YT_LAZY_ATTACH=1` restores the old, lazy behaviour. It exists so
+    // the timing probe can be run against the bug as well as against the fix —
+    // a probe that has only ever seen the fixed code has not been shown to be
+    // capable of failing, which is the trap `SLASH_AUTOHIDE_PROBE` fell into.
+    if (process.env['SLASH_YT_LAZY_ATTACH'] !== '1') {
+      this.attach(contents)
+    }
+
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame) return
       if (!/^https?:/i.test(details.url)) return
@@ -86,7 +187,10 @@ export class ScriptletInjector {
     // stops that being a permanent loss of protection for the tab.
     contents.on('devtools-opened', () => this.detach(contents))
     contents.on('devtools-closed', () => this.attach(contents))
-    contents.on('destroyed', () => this.attached.delete(contents.id))
+    contents.on('destroyed', () => {
+      this.attached.delete(contents.id)
+      this.installs.delete(contents.id)
+    })
   }
 
   private attach(contents: WebContents): void {
@@ -96,6 +200,7 @@ export class ScriptletInjector {
     const active = this.scripts.filter((script) => script.enabled())
     if (active.length === 0) return
 
+    this.trace('attach-start')
     try {
       if (contents.debugger.isAttached()) {
         log.debug('debugger already in use; leaving it alone')
@@ -117,16 +222,43 @@ export class ScriptletInjector {
       .map((script) => `try{${script.source()}}catch(e){}`)
       .join('\n')
 
-    void contents.debugger
+    // `Page.enable` **is required**, and removing it was a real bug.
+    //
+    // It was dropped in an earlier round on the reasoning that `enable` only
+    // turns a domain's *events* on, that we use no Page events, and that it was
+    // measurably expensive — 606 ms against a busy renderer versus 3 ms for
+    // `Fetch.enable`. The reasoning was wrong: Chromium wires up document-start
+    // script injection as part of enabling the domain, so
+    // `addScriptToEvaluateOnNewDocument` **resolved successfully and the script
+    // never ran**. Measured by `SLASH_YT_TIMING_PROBE`, which asks the page
+    // whether the script's own stylesheet is present: `ran=false` on every
+    // navigation of every run. The ad strip was not merely late, it was absent.
+    //
+    // Two lessons worth keeping. A command resolving is not the same as the
+    // command having an effect, and the probe only caught it because it asks
+    // the *page* rather than trusting the protocol's reply.
+    //
+    // It is affordable again because of the warm-up in `TabManager.buildView`:
+    // the 606 ms was a renderer busy parsing YouTube, and this now runs against
+    // an idle blank document instead.
+    const install = contents.debugger
       .sendCommand('Page.enable')
-      .then(() =>
-        contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+      .then(() => {
+        this.trace('page-enabled')
+        return contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
           source,
-          // Must cover the navigation already in flight, not just the next one.
+          // Covers a navigation already in flight as well — a tab woken from
+          // hibernation, or one whose load began before this landed.
           runImmediately: true
         })
-      )
-      .then(() => log.debug(`installed ${active.length} script(s)`))
+      })
+    this.installs.set(contents.id, install.then(() => undefined).catch(() => undefined))
+
+    void install
+      .then(() => {
+        this.trace('script-installed', String(active.length))
+        log.debug(`installed ${active.length} script(s)`)
+      })
       .catch((error: unknown) => {
         log.warn('could not install scripts', error)
         this.detach(contents)
@@ -158,6 +290,7 @@ export class ScriptletInjector {
         responseHeaders?: { name: string; value: string }[]
       }
       const requestId = paused.requestId
+      this.trace('player-paused', String(paused.responseStatusCode ?? 'none'))
       log.debug(`paused a player response (status ${paused.responseStatusCode ?? 'none'})`)
 
       const letThrough = (): void => {
@@ -167,6 +300,14 @@ export class ScriptletInjector {
       }
 
       // Only responses carry a status; a paused *request* is continued at once.
+      //
+      // An attempt was made to hold the watch *document* here until the strip
+      // was registered — using the fast browser-side Fetch domain to gate the
+      // slow renderer-side Page one. It does not work: a page-target Fetch
+      // domain never sees the main-frame document request, because that request
+      // is issued by the browser for the frame rather than by the page. The
+      // trace confirmed it, with no pause ever recorded. Recorded here so the
+      // next person does not spend the same afternoon on it.
       if (paused.responseStatusCode === undefined) {
         letThrough()
         return
@@ -182,6 +323,7 @@ export class ScriptletInjector {
             return
           }
 
+          this.trace('player-stripped', outcome.removed.join(','))
           log.debug(`stripped ${outcome.removed.join(', ')} from a player response`)
           return contents.debugger.sendCommand('Fetch.fulfillRequest', {
             requestId,
@@ -208,7 +350,10 @@ export class ScriptletInjector {
           }
         ]
       })
-      .then(() => log.debug('player response filtering enabled'))
+      .then(() => {
+        this.trace('fetch-enabled')
+        log.debug('player response filtering enabled')
+      })
       .catch((error: unknown) => log.warn('could not enable response filtering', error))
   }
 

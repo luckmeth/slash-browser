@@ -303,6 +303,19 @@ export const SettingsSchema = z.object({
    * leaves the machine, and no key derived from it is stored.
    */
   syncEnabled: z.boolean().default(false),
+  /**
+   * Whether history joins them.
+   *
+   * A **separate** switch from `syncEnabled`, and off even when sync is on,
+   * because history is a different order of exposure from a bookmark list and
+   * turning sync on should not quietly start uploading it. It is also the one
+   * collection whose ids are HMACs rather than natural keys: reading-list items
+   * travel under their own URL, which is a small leak for a few saved articles
+   * and an unacceptable one for every page somebody has visited.
+   *
+   * Bounded by a retention window and a hard cap — see `historySync.ts`.
+   */
+  syncHistory: z.boolean().default(false),
   /** Where the encrypted blobs go. Empty by default; see docs/sync.md. */
   syncEndpoint: z.string().default(''),
   /** Bearer token for the sync account, if the server wants one. */
@@ -399,6 +412,52 @@ export const SettingsSchema = z.object({
   useExternalDownloader: z.boolean().default(false),
   /** Explicit path to yt-dlp. Empty means look on PATH. */
   externalDownloaderPath: z.string().default(''),
+  /**
+   * Announce each finished download, naming the file.
+   *
+   * The queue-level "Downloads finished" notice is a *completion action* the
+   * user opts into; this is the ordinary per-file one every browser has. On by
+   * default because a transfer that only appears on a panel you had to open is
+   * a transfer nobody sees.
+   */
+  notifyOnDownloadComplete: z.boolean().default(true),
+  /**
+   * Fetch yt-dlp automatically the first time Slash runs.
+   *
+   * Slash cannot download most video sites on its own — that capability lives in
+   * yt-dlp, a separate public-domain program — and requiring a trip to Settings
+   * before the feature works means most people never find it.
+   *
+   * It is still a **request to github.com that a fresh install makes on its
+   * own**, which principle 2 does not let pass silently: the download is from
+   * the official repository only, its bytes are checked against the published
+   * SHA-512 before anything is marked installed, and this switch turns it off.
+   * Nothing else about the browser reaches the network unasked.
+   */
+  ytDlpInstallOnFirstRun: z.boolean().default(true),
+  /**
+   * Whether the first-run fetch has been tried.
+   *
+   * Not a preference — a record, so a machine that was offline on first launch
+   * does not re-attempt on every start for ever. Settings still offers the
+   * manual install button, which is the recovery path.
+   */
+  ytDlpFirstRunAttempted: z.boolean().default(false),
+  /**
+   * Keep the managed yt-dlp current.
+   *
+   * Installing once is not enough: extractor fixes ship every few weeks, so a
+   * copy fetched today stops being able to download video within a month or
+   * two — silently, because a stale extractor fails per-site rather than
+   * loudly. This checks every two weeks and only replaces the copy in
+   * `userData`.
+   *
+   * It never touches a yt-dlp the user installed themselves. That one belongs
+   * to them and to whatever else on the machine uses it.
+   */
+  ytDlpAutoUpdate: z.boolean().default(true),
+  /** When the update check last ran. A record, not a preference. */
+  ytDlpLastUpdateCheck: z.number().int().min(0).default(0),
   /** Ceiling in bytes per second across all downloads. 0 = unlimited. */
   downloadBandwidthLimit: z.number().int().min(0).default(0),
   /**
