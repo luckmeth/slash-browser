@@ -28,6 +28,16 @@ on:
         description: 'Build and check, but publish nothing'
         type: boolean
         default: true
+      # The macOS job used to run only for tags, which meant a dry run silently
+      # skipped it in 0s — and it was the only job that had ever failed. A check
+      # that cannot exercise the thing that breaks is not much of a check.
+      #
+      # Off by default because private-repository macOS minutes bill at **10x**,
+      # so this is a cost to opt into rather than one to pay on every dry run.
+      include_macos:
+        description: 'Also build the macOS disk images (billed at 10x)'
+        type: boolean
+        default: false
 
 # Nothing is written to *this* repository: the release goes to the releases
 # repository using RELEASES_TOKEN, so the job's own token needs only to read.
@@ -246,7 +256,7 @@ jobs:
   # ---------------------------------------------------------------------------
   macos:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.include_macos
     runs-on: macos-latest
 
     steps:
@@ -310,6 +320,11 @@ jobs:
       # Slash released before this reads only those, and moving them would
       # strand each of those installs silently on the version it is running.
       - name: Add the macOS packages to the feed
+        # Tags only, whatever triggered the job. This step downloads and rewrites
+        # the release named by the ref; on a branch that name is `main`, which is
+        # not a release and must never accidentally become one. Building the disk
+        # images above is safe to do anywhere, publishing them is not.
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           RELEASES_REPO: ${{ vars.RELEASES_REPO }}
