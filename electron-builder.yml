@@ -191,11 +191,20 @@ mac:
     - target: dmg
       arch: [arm64, x64]
   category: public.app-category.productivity
-  # The 1024x1024 PNG, not an .icns: electron-builder converts it on the macOS
-  # runner, and keeping one source image means the Windows and macOS icons
-  # cannot drift apart. An .icns committed here would be a second copy to
-  # forget to update.
-  icon: build/icon.png
+  # An .icns, and it has to be one. The comment here used to say the 1024x1024
+  # PNG was enough because electron-builder converts it on the macOS runner —
+  # that was a reasonable belief and it was wrong. The first time this job ever
+  # ran it failed with `cannot find specified resource "build/icon.icns"`, on a
+  # repository where `build/icon.png` was present and exactly the right size:
+  # electron-builder resolves a macOS icon to an .icns and, when the configured
+  # source is not one, looks for a sibling with that extension rather than
+  # generating it.
+  #
+  # The objection that answer raises — a committed .icns is a second copy of the
+  # icon to forget to update — is real, so it is *derived*: `icon.png` remains
+  # the single source image and `python scripts/make-icns.py` rebuilds this from
+  # it, ten sizes, no Apple tooling required.
+  icon: build/icon.icns
   # Ad-hoc signing. Without it an arm64 build is killed on launch rather than
   # merely warned about, so this is the difference between "needs a right-click"
   # and "does not run at all".
