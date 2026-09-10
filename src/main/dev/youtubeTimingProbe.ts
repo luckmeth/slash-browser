@@ -208,6 +208,61 @@ export async function runYouTubeTimingProbe(
   history('restored')
   const restoredFields = await adFields('restored')
 
+  // The path the advert actually appeared on.
+  //
+  // Both navigations above are *document* loads, where the player data arrives
+  // in fresh HTML and `ytInitialPlayerResponse` is the thing to strip. Clicking
+  // a related video is not that: it is an in-page navigation, no new document is
+  // parsed, and the player data comes back from innertube nested under
+  // `playerResponse`. That shape matched nothing in the old top-level strip and
+  // was served untouched — which is what an advert playing on a perfectly
+  // "verified" page looked like.
+  log.info('clicking a related video: the in-page navigation path')
+  const clicked = await (async (): Promise<boolean> => {
+    const contents = window.tabs.findById(tabId)?.view?.webContents
+    if (!contents || contents.isDestroyed()) return false
+    try {
+      return (await contents.executeJavaScript(
+        `(() => {
+           // Any link to a different watch page. Naming YouTube's components
+           // dates badly - the markup was already different from the one this
+           // probe first guessed at, which is why it silently tested nothing.
+           const here = new URLSearchParams(location.search).get('v');
+           const links = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
+           const next = links.find(function (a) {
+             const id = new URLSearchParams(a.search || '').get('v');
+             return id && id !== here;
+           });
+           if (!next) return false;
+           next.click();
+           return true;
+         })()`,
+        true
+      )) as boolean
+    } catch {
+      return false
+    }
+  })()
+
+  if (!clicked) {
+    log.info('  could not find a related video to click — this path was not tested')
+  } else {
+    await settle(20_000)
+    const inPage = report('fourth navigation (in-page, related video)')
+    describe('in-page')
+    history('in-page')
+    const inPageFields = await adFields('in-page')
+    log.info(
+      `  responses stripped on the in-page navigation: ${inPage.filter((r) => r.event === 'player-stripped').length}`
+    )
+    for (const row of inPage.filter((r) => r.event === 'player-stripped')) {
+      log.info(`    removed: ${row.detail ?? ''}`)
+    }
+    if (inPageFields !== null && inPageFields.length > 0) {
+      log.info(`  IN-PAGE FAIL: ${inPageFields.join(', ')} survived a related-video click.`)
+    }
+  }
+
   const installedAt = (rows: TraceEntry[]): number | null =>
     rows.find((r) => r.event === 'script-installed')?.at ?? null
 

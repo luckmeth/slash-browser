@@ -37,32 +37,73 @@ export function buildYouTubeAdScript(): string {
     // cannot be filtered out of the video it is inside.
     var FIELDS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
 
-    // Only objects that are actually a player response. A blanket strip would
-    // reach into unrelated data the page parses for its own reasons.
-    var isPlayerResponse = function (value) {
-      return (
+    // Which objects are worth walking at all.
+    //
+    // This hook sits on JSON.parse, so it sees every object the page parses for
+    // its own reasons. Walking all of them would be a cost paid constantly, and
+    // principle 1 does not allow that — so the walk only starts on something
+    // shaped like player data. \`playerResponse\` is in the list because that is
+    // the nested shape, and missing it is what let adverts through.
+    var looksRelevant = function (value) {
+      return !!(
         value &&
         typeof value === 'object' &&
-        (value.streamingData || value.videoDetails || value.adPlacements)
+        (value.streamingData ||
+          value.videoDetails ||
+          value.playerResponse ||
+          value.adPlacements ||
+          value.playerAds ||
+          value.adSlots ||
+          value.reelWatchSequenceResponse)
       );
     };
 
-    var strip = function (value) {
-      if (!isPlayerResponse(value)) return value;
-      for (var i = 0; i < FIELDS.length; i++) {
-        try {
-          delete value[FIELDS[i]];
-        } catch (error) {
-          // A frozen response is left as it is rather than throwing into the
-          // page's own script and breaking playback entirely.
+    // Removes the ad fields wherever they sit, not only at the top level.
+    //
+    // Top-level-only was the bug: a watch page reached by clicking a related
+    // video is an in-page navigation, and its player data arrives nested under
+    // \`playerResponse\`. The old check matched nothing at the root, returned the
+    // object untouched, and the advert played. uBlock Origin prunes
+    // \`playerResponse.adPlacements\` beside the bare one for the same reason;
+    // walking means the next shape YouTube nests it under needs no new rule.
+    var prune = function (value, depth) {
+      if (!value || typeof value !== 'object' || depth > 8) return;
+
+      if (Object.prototype.toString.call(value) === '[object Array]') {
+        for (var i = 0; i < value.length; i++) prune(value[i], depth + 1);
+        return;
+      }
+
+      for (var f = 0; f < FIELDS.length; f++) {
+        if (FIELDS[f] in value) {
+          try {
+            delete value[FIELDS[f]];
+          } catch (error) {
+            // A frozen response is left as it is rather than throwing into the
+            // page's own script and breaking playback entirely.
+          }
         }
       }
+
       // The server-stitched configuration hangs off playerConfig rather than
-      // sitting at the top level, so the loop above cannot reach it.
+      // being a named field at any level, so the loop above cannot reach it.
       try {
         if (value.playerConfig && value.playerConfig.ssap) delete value.playerConfig.ssap;
       } catch (error) {
         // As above: a failure here must not break playback.
+      }
+
+      for (var key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) prune(value[key], depth + 1);
+      }
+    };
+
+    var strip = function (value) {
+      if (!looksRelevant(value)) return value;
+      try {
+        prune(value, 0);
+      } catch (error) {
+        // Never throw into the page's own parse.
       }
       return value;
     };
@@ -148,6 +189,89 @@ export function buildYouTubeAdScript(): string {
         // Cosmetic only - never worth breaking the page for.
       }
     };
+
+    // 5. The last resort: an advert that reached the player anyway.
+    //
+    // Everything above stops adverts being *scheduled*. This is what happens
+    // when one is scheduled regardless — a response shape nothing here matched,
+    // or a break stitched in on the server. The player marks an advert with
+    // \`ad-showing\` on its own container, which is YouTube telling us plainly
+    // that what is on screen is not the video.
+    //
+    // Two actions, in the order a person would take them: press Skip if it is
+    // there, and otherwise seek to the end of the advert, which the player
+    // treats as the advert having finished. Neither reaches the video's own
+    // stream, and neither runs unless \`ad-showing\` is present — so a false
+    // positive cannot skip somebody's content.
+    //
+    // Honest about what it is: an intervention *after* an advert has started,
+    // so a fraction of a second of one can appear before it goes. It is a net,
+    // not a filter, and the filters above are what should catch things.
+    var skipAd = function () {
+      try {
+        var player = document.getElementById('movie_player');
+        if (!player || !player.classList || !player.classList.contains('ad-showing')) return;
+
+        var button = document.querySelector(
+          '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-survey-answer-button'
+        );
+        if (button) {
+          button.click();
+          return;
+        }
+
+        var video = player.querySelector('video');
+        if (video && isFinite(video.duration) && video.duration > 0) {
+          // Seeking to the end is what the player itself does when an advert
+          // completes. Not \`duration\` exactly: some builds ignore a seek that
+          // lands past the last frame.
+          video.currentTime = Math.max(0, video.duration - 0.1);
+        }
+      } catch (error) {
+        // A player that will not be read is left alone.
+      }
+    };
+
+    // Watched rather than polled. The class changes exactly when an advert
+    // starts or ends, so a MutationObserver scoped to one element's attributes
+    // costs nothing between breaks — unlike an interval, which would run for
+    // the whole of every video.
+    var watchPlayer = function () {
+      var player = document.getElementById('movie_player');
+      if (!player) return false;
+      try {
+        new MutationObserver(skipAd).observe(player, {
+          attributes: true,
+          attributeFilter: ['class']
+        });
+        skipAd();
+        return true;
+      } catch (error) {
+        return false;
+      }
+    };
+
+    // The player element does not exist at document-start, and on an in-page
+    // navigation it is replaced. Bounded attempts rather than an open-ended
+    // timer: if it has not appeared in fifteen seconds this is not a page with a
+    // player on it.
+    // Its own try/catch, and that is not decoration. Every section of this
+    // script shares one outer catch, so anything thrown here would abort the
+    // rest of the file — including the stylesheet below, which is the marker
+    // ShieldVerifier reads to decide whether the strip ran. A missing timer
+    // would then be reported to the user as a broken ad blocker.
+    try {
+      if (!watchPlayer()) {
+        var attempts = 0;
+        var finder = setInterval(function () {
+          attempts += 1;
+          if (watchPlayer() || attempts > 30) clearInterval(finder);
+        }, 500);
+      }
+    } catch (error) {
+      // No player to watch, or no timers to watch it with. The filters above
+      // are the defence; this was only the net.
+    }
 
     // At document-start there may be no element to attach to yet, so try now
     // and again once the document has a head.

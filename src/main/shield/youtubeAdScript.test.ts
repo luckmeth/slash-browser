@@ -31,9 +31,12 @@ function runOn(hostname: string, response: Record<string, unknown> | undefined):
       querySelectorAll: () => []
     },
     MutationObserver: class {
+      constructor(readonly handler: () => void) {}
       observe(): void {}
       disconnect(): void {}
     },
+    setInterval: () => 1,
+    clearInterval: () => undefined,
     JSON,
     Object,
     Response: class {},
@@ -140,4 +143,74 @@ describe('buildYouTubeAdScript', () => {
       for (const field of AD_FIELDS) expect(response[field]).toBeDefined()
     }
   )
+})
+
+
+describe('nested responses — the shape that let adverts through', () => {
+  it('strips ad fields nested under playerResponse', () => {
+    const { window } = runOn('www.youtube.com', undefined)
+    const parse = window['JSON'] as typeof JSON
+
+    // Exactly what an in-page navigation parses.
+    const result = parse.parse(
+      JSON.stringify({
+        playerResponse: {
+          videoDetails: { videoId: 'x' },
+          adPlacements: [{ a: 1 }],
+          playerAds: [{ b: 2 }],
+          playerConfig: { ssap: { on: true }, audio: {} }
+        }
+      })
+    ) as { playerResponse: Record<string, unknown> }
+
+    expect(result.playerResponse['adPlacements']).toBeUndefined()
+    expect(result.playerResponse['playerAds']).toBeUndefined()
+    expect(
+      (result.playerResponse['playerConfig'] as Record<string, unknown>)['ssap']
+    ).toBeUndefined()
+    // Playback data survives.
+    expect(result.playerResponse['videoDetails']).toBeDefined()
+  })
+
+  it('does not walk objects that are nothing to do with a player', () => {
+    // The JSON.parse hook sees every object the page parses for its own
+    // reasons. Walking all of them would be a cost paid constantly.
+    const { window } = runOn('www.youtube.com', undefined)
+    const parse = window['JSON'] as typeof JSON
+    const unrelated = parse.parse(
+      JSON.stringify({ comments: [{ text: 'nice' }], adPlacementsLookalike: 1 })
+    ) as Record<string, unknown>
+    expect(unrelated['comments']).toBeDefined()
+    expect(unrelated['adPlacementsLookalike']).toBe(1)
+  })
+})
+
+describe('the marker the verifier reads', () => {
+  it('is still added when there is no player and no timers', () => {
+    // Every section shares one outer catch, so a throw in the skip fallback
+    // would abort the stylesheet below it — and `ShieldVerifier` reads that
+    // stylesheet to decide whether the strip ran. The user would then be told
+    // their ad blocker was broken because a timer was missing.
+    let added: string | null = null
+    const sandbox: Record<string, unknown> = {
+      location: { hostname: 'www.youtube.com' },
+      document: {
+        addEventListener: () => undefined,
+        getElementById: () => null,
+        createElement: () => ({ set textContent(value: string) { added = value }, id: '' }),
+        head: { appendChild: () => undefined },
+        documentElement: { appendChild: () => undefined },
+        querySelectorAll: () => [],
+        querySelector: () => null
+      },
+      JSON,
+      Object
+      // Deliberately no setInterval, no MutationObserver.
+    }
+    sandbox['window'] = sandbox
+    sandbox['globalThis'] = sandbox
+
+    vm.runInContext(buildYouTubeAdScript(), vm.createContext(sandbox))
+    expect(added).not.toBeNull()
+  })
 })

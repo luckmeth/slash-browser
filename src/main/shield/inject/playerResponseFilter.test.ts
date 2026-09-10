@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stripPlayerResponse, AD_FIELDS } from './playerResponseFilter'
+import { stripPlayerResponse, AD_FIELDS, pruneAdFields, PLAYER_URL_PATTERNS } from './playerResponseFilter'
 
 const encode = (value: unknown): string =>
   Buffer.from(JSON.stringify(value), 'utf8').toString('base64')
@@ -84,5 +84,114 @@ describe('when it must not interfere', () => {
     // without being parsed at all, which is what keeps this off the hot path.
     const big = encode({ streamingData: { x: 'y'.repeat(50_000) } })
     expect(stripPlayerResponse(big, true).body).toBeNull()
+  })
+})
+
+
+describe('nested ad fields — the shape that let adverts through', () => {
+  const encode = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value), 'utf8').toString('base64')
+  const decode = (body: string): Record<string, unknown> =>
+    JSON.parse(Buffer.from(body, 'base64').toString('utf8')) as Record<string, unknown>
+
+  it('strips adPlacements nested under playerResponse', () => {
+    // The exact body that played an advert: reaching a watch page by clicking a
+    // related video is an in-page navigation, and its player data arrives
+    // nested. The old top-level-only strip matched nothing here and served it.
+    const out = stripPlayerResponse(
+      encode({
+        responseContext: {},
+        playerResponse: {
+          videoDetails: { videoId: 'x' },
+          adPlacements: [{ a: 1 }],
+          playerAds: [{ b: 2 }]
+        }
+      }),
+      true
+    )
+
+    expect(out.body).not.toBeNull()
+    const player = decode(out.body!)['playerResponse'] as Record<string, unknown>
+    expect(player['adPlacements']).toBeUndefined()
+    expect(player['playerAds']).toBeUndefined()
+    // The response itself must survive: swallowing it breaks playback.
+    expect(player['videoDetails']).toBeDefined()
+  })
+
+  it('names the path it removed, not just the field', () => {
+    const out = stripPlayerResponse(
+      encode({ playerResponse: { adPlacements: [{ a: 1 }] } }),
+      true
+    )
+    expect(out.removed).toContain('playerResponse.adPlacements')
+  })
+
+  it('reaches ad fields inside arrays', () => {
+    const out = stripPlayerResponse(
+      encode({ contents: [{ slot: { adSlots: [{ a: 1 }] } }, { slot: {} }] }),
+      true
+    )
+    expect(out.body).not.toBeNull()
+    const contents = decode(out.body!)['contents'] as Record<string, unknown>[]
+    const slot = contents[0]!['slot'] as Record<string, unknown>
+    expect(slot['adSlots']).toBeUndefined()
+  })
+
+  it('removes a nested server-stitched configuration', () => {
+    const out = stripPlayerResponse(
+      encode({ playerResponse: { playerConfig: { ssap: { on: true }, audio: {} } } }),
+      true
+    )
+    expect(out.body).not.toBeNull()
+    const config = (decode(out.body!)['playerResponse'] as Record<string, unknown>)[
+      'playerConfig'
+    ] as Record<string, unknown>
+    expect(config['ssap']).toBeUndefined()
+    expect(config['audio']).toBeDefined()
+  })
+
+  it('leaves a response with nothing to remove completely alone', () => {
+    // `body: null` means "continue the request untouched" — re-serving an
+    // identical body it decoded and re-encoded for no reason is pure cost.
+    const out = stripPlayerResponse(encode({ playerResponse: { videoDetails: {} } }), true)
+    expect(out.body).toBeNull()
+    expect(out.removed).toEqual([])
+  })
+
+  it('watches more than the player endpoint', () => {
+    // `player` alone was not enough: an in-page navigation asks `next`, and
+    // Shorts adverts ride on `reel_watch_sequence`.
+    expect(PLAYER_URL_PATTERNS).toContain('*youtubei/v1/player*')
+    expect(PLAYER_URL_PATTERNS.some((p) => p.includes('next'))).toBe(true)
+    expect(PLAYER_URL_PATTERNS.some((p) => p.includes('reel_watch_sequence'))).toBe(true)
+  })
+})
+
+describe('pruneAdFields', () => {
+  it('stops descending rather than following a pathological body for ever', () => {
+    // Bounded because this runs on the browsing path. Twelve levels is well past
+    // anything a player response nests to.
+    let deep: Record<string, unknown> = { adPlacements: [{ a: 1 }] }
+    for (let level = 0; level < 40; level += 1) deep = { child: deep }
+
+    const removed = pruneAdFields(deep)
+    expect(removed).toEqual([])
+  })
+
+  it('removes every occurrence, not merely the first', () => {
+    const body = {
+      one: { adPlacements: [{ a: 1 }] },
+      two: { nested: { adSlots: [{ b: 2 }] } }
+    }
+    const removed = pruneAdFields(body)
+    expect(removed).toHaveLength(2)
+    expect(body.one.adPlacements).toBeUndefined()
+    expect(body.two.nested.adSlots).toBeUndefined()
+  })
+
+  it('leaves unrelated data untouched', () => {
+    const body = { title: 'a video', counts: [1, 2, 3], nested: { keep: true } }
+    expect(pruneAdFields(body)).toEqual([])
+    expect(body).toEqual({ title: 'a video', counts: [1, 2, 3], nested: { keep: true } })
   })
 })

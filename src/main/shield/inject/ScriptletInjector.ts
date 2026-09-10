@@ -1,6 +1,6 @@
 import type { WebContents } from 'electron'
 import { createLogger } from '../../logger'
-import { stripPlayerResponse, PLAYER_URL_PATTERN } from './playerResponseFilter'
+import { stripPlayerResponse, PLAYER_URL_PATTERNS } from './playerResponseFilter'
 
 const log = createLogger('inject')
 
@@ -341,14 +341,16 @@ export class ScriptletInjector {
         // which the protocol reports as `Fetch` rather than `XHR` — filtering
         // on XHR matched nothing at all, which looked exactly like the feature
         // working. The URL pattern is specific enough on its own.
-        patterns: [
-          {
-            urlPattern: PLAYER_URL_PATTERN,
-            // Paused after the response arrives, which is the only stage where
-            // there is a body to read.
-            requestStage: 'Response'
-          }
-        ]
+        // Every innertube endpoint that can carry ad breaks, not just
+        // `player`. An advert played on a watch page reached by clicking a
+        // related video: that is an in-page navigation, so no new HTML arrives
+        // and the player data comes from innertube instead.
+        patterns: PLAYER_URL_PATTERNS.map((urlPattern) => ({
+          urlPattern,
+          // Paused after the response arrives, which is the only stage where
+          // there is a body to read.
+          requestStage: 'Response' as const
+        }))
       })
       .then(() => {
         this.trace('fetch-enabled')
