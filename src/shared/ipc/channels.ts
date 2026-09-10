@@ -146,6 +146,7 @@ export const INVOKE_CHANNELS = [
   'shield:setMode',
   'shield:clearActivity',
   'shield:verification',
+  'shield:reportLeak',
   'shield:verification',
 
   // --- reading list ---

@@ -1,6 +1,6 @@
 import { copyFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, dialog, shell } from 'electron'
+import { app, dialog, shell, clipboard } from 'electron'
 import { mediaFilename } from '../downloads/engine/mediaFilename'
 import { expandBatch } from '../downloads/engine/batchUrls'
 import { ok, err } from '@shared/result'
@@ -2244,6 +2244,43 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('blocking:sessionTotals', () => ok(ctx.blocker.activity.sessionCounts()))
 
   ipc.handle('shield:verification', () => ok(ctx.shieldVerifier.current()))
+
+  ipc.handle('shield:reportLeak', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.findById(request.tabId)
+    if (!tab) return err('NOT_FOUND', 'No such tab')
+
+    const verification = ctx.shieldVerifier.current()
+    const settings = ctx.settings.getAll()
+    const contents = tab.contents
+    const counts = contents ? ctx.blocker.activity.countsFor(contents.id) : null
+
+    // Written as something a person can read and paste, not as JSON. It is
+    // going into a message to a human.
+    const lines = [
+      'Slash — an advert got through',
+      `version: ${app.getVersion()}`,
+      `page: ${tab.snapshot.url}`,
+      `shield self-check: ${verification.verdict}${
+        verification.host ? ` (on ${verification.host})` : ''
+      }`,
+      `blockAds: ${settings.blockAds}  blockYouTubeVideoAds: ${settings.blockYouTubeVideoAds}  allowPageScripts: ${settings.allowPageScripts}`,
+      `site exempted: ${settings.blockingAllowedSites.includes(hostOf(tab.snapshot.url))}`,
+      counts
+        ? `blocked on this page: ads ${counts.ads}, trackers ${counts.trackers}, popups ${counts.popups}, redirects ${counts.redirects}`
+        : 'blocked on this page: unknown (no view)',
+      '',
+      'What kind of advert was it?',
+      '  [ ] a video advert before or during the video',
+      '  [ ] a panel or banner beside the content',
+      '  [ ] something else:'
+    ]
+
+    const report = lines.join('\n')
+    clipboard.writeText(report)
+    return ok({ report })
+  })
 
   ipc.handle('blocking:setSiteAllowed', (request, context) => {
     const window = windowOf(context.sender)

@@ -458,6 +458,22 @@ export const SettingsSchema = z.object({
   ytDlpAutoUpdate: z.boolean().default(true),
   /** When the update check last ran. A record, not a preference. */
   ytDlpLastUpdateCheck: z.number().int().min(0).default(0),
+  /**
+   * Keep the filter lists current.
+   *
+   * The single biggest difference between this blocker and Brave's was never
+   * technique — it was that Brave's rules are refreshed continuously and these
+   * were compiled into the installer and never fetched again. A list bundled in
+   * March is wrong by May, silently, because a stale rule fails per-site rather
+   * than loudly.
+   *
+   * Fetched from the publishers' own addresses, checked for being a filter list
+   * before anything is replaced, and degrading to the bundled copies on any
+   * failure.
+   */
+  filterListsAutoUpdate: z.boolean().default(true),
+  /** When the list check last ran. A record, not a preference. */
+  filterListsLastCheck: z.number().int().min(0).default(0),
   /** Ceiling in bytes per second across all downloads. 0 = unlimited. */
   downloadBandwidthLimit: z.number().int().min(0).default(0),
   /**

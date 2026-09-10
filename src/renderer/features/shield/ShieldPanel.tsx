@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { BlockingStatus } from '@shared/types/blocking'
+import type { InvokeResponse } from '@shared/ipc/contracts'
+
+type ShieldVerification = InvokeResponse<'shield:verification'>
 import { CHROME_HEIGHT } from '@shared/constants'
 
 /**
@@ -24,6 +27,8 @@ import { CHROME_HEIGHT } from '@shared/constants'
 export function ShieldPanel(): React.JSX.Element {
   const [tabId, setTabId] = useState<string | null>(null)
   const [status, setStatus] = useState<BlockingStatus | null>(null)
+  const [verdict, setVerdict] = useState<ShieldVerification | null>(null)
+  const [reported, setReported] = useState(false)
 
   const close = useCallback((): void => {
     void window.browser.invoke('overlay:setState', { visible: false, surface: 'none' })
@@ -37,6 +42,15 @@ export function ShieldPanel(): React.JSX.Element {
       else close()
     })
   }, [close])
+
+  // The self-check, read once. It changes at most once a session, so unlike the
+  // counts below there is nothing to poll for.
+  useEffect(() => {
+    void window.browser.invoke('shield:verification', undefined).then((result) => {
+      if (result.ok) setVerdict(result.value)
+    })
+    return window.browser.on('shield:verificationChanged', (next) => setVerdict(next))
+  }, [])
 
   useEffect(() => {
     if (!tabId) return
@@ -114,6 +128,61 @@ export function ShieldPanel(): React.JSX.Element {
               <Stat label="Redirects" value={status.counts.redirects} />
             </div>
           )}
+
+          {/*
+            The self-check, put where somebody actually looks.
+            It was built into Settings first, which is the wrong place: nobody
+            opens Settings when they see an advert, they click the shield. The
+            switch above states an intention; this states an observation, and
+            those came apart badly once — the strip stopped running entirely
+            while every signal said it was on.
+          */}
+          {verdict && verdict.verdict !== 'unknown' && verdict.verdict !== 'off' && (
+            <div className="mt-3 border-t border-[var(--glass-edge)] pt-3">
+              {verdict.verdict === 'verified' ? (
+                <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  <span className="text-[var(--color-good)]">Checked</span> — the YouTube ad strip
+                  was running on {verdict.host ?? 'the last video page'}.
+                </p>
+              ) : (
+                <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  <span className="text-[var(--color-bad)]">The YouTube ad strip did not run</span>{' '}
+                  on {verdict.host ?? 'the last video page'}. Adverts will play. Reloading the tab is
+                  worth trying first.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/*
+            The report loop.
+            Brave's rules stay current because a community notices a site
+            changing shape and a filter update follows within hours. There is no
+            such community here, so the next best thing is letting the one person
+            who saw the advert say so with the facts a rule actually needs.
+            Clipboard rather than an upload: the page address is the point of the
+            report, and principle 2 says that does not leave the machine unasked.
+          */}
+          <div className="mt-3 border-t border-[var(--glass-edge)] pt-3">
+            <button
+              type="button"
+              className="w-full rounded-lg border border-[var(--glass-edge)] px-3 py-2 text-left text-[11.5px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)]/40 hover:text-[var(--color-text-primary)]"
+              onClick={() => {
+                if (!tabId) return
+                void window.browser
+                  .invoke('shield:reportLeak', { tabId })
+                  .then((result) => setReported(result.ok))
+              }}
+            >
+              {reported ? 'Copied — paste it into a bug report' : 'An advert got through…'}
+            </button>
+            {reported && (
+              <p className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-text-muted)]">
+                The page address, the self-check result and what was blocked here are on your
+                clipboard. Nothing was sent anywhere.
+              </p>
+            )}
+          </div>
 
           <div className="mt-3 space-y-2 border-t border-[var(--glass-edge)] pt-3">
             <Toggle

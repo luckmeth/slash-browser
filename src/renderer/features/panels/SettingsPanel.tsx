@@ -308,6 +308,13 @@ export function SettingsPanel(): React.JSX.Element {
           on. It stays silent until there is something to report.
         */}
         <ShieldVerificationNotice />
+
+        <Toggle
+          label="Keep the filter lists up to date"
+          hint="Fetches EasyList, EasyPrivacy and uBlock's lists from their publishers every few days. This is the difference between a blocker that keeps working and one that quietly stops: sites change, and a list bundled with the installer is wrong within weeks. Slash checks that what arrives is actually a filter list before replacing anything, and falls back to the bundled copies if a download fails."
+          checked={settings.filterListsAutoUpdate}
+          onChange={(filterListsAutoUpdate) => update({ filterListsAutoUpdate })}
+        />
         {/*
           Said plainly, because a shield icon invites the assumption that this is
           antivirus. It is not, and a browser cannot be.

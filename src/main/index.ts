@@ -1,4 +1,5 @@
 import type { ServerResponse } from 'node:http'
+import { FilterListUpdater } from './shield/adblock/FilterListUpdater'
 import { app, BrowserWindow } from 'electron'
 import { AppContext } from './AppContext'
 import { parseQuery as parseQueryForDev } from './memory/parseQuery'
@@ -410,6 +411,19 @@ if (!app.requestSingleInstanceLock()) {
           () => context.settings.update({ ytDlpLastUpdateCheck: Date.now() })
         )
       )
+
+    // Refreshed before the engine is asked to load, so a fresh set is compiled
+    // on this launch rather than the next one. Never awaited by anything on the
+    // browsing path: the bundled lists are already blocking while this runs.
+    void new FilterListUpdater()
+      .refreshIfStale(
+        () => context.settings.getAll().filterListsAutoUpdate,
+        () => context.settings.getAll().filterListsLastCheck,
+        () => context.settings.update({ filterListsLastCheck: Date.now() })
+      )
+      .then((changed) => {
+        if (changed) void context.blocker.adblock.reload()
+      })
 
     if (process.env['SLASH_SHIELD_WARMUP_PROBE']) {
       void import('./dev/shieldWarmupProbe').then(({ runShieldWarmupProbe }) =>

@@ -821,6 +821,24 @@ export const invokeContracts = {
    * that separates "installed" from "running".
    */
   'shield:verification': { request: z.void(), response: ShieldVerificationSchema },
+  /**
+   * Assembles a report about an advert that got through, and copies it.
+   *
+   * This is the loop, not a nicety. Brave's rules stay current because a
+   * community notices a site changing shape and a filter update follows within
+   * hours; a solo-maintained blocker has no such community, so the next best
+   * thing is making the one person who *did* see the advert able to say so in
+   * one click, with the facts that are actually needed to write a rule.
+   *
+   * Deliberately a **clipboard report, not an upload**. Principle 2: nothing
+   * leaves the machine unless the user sent it. The page address is the whole
+   * point of the report and is exactly the sort of thing this browser does not
+   * transmit on its own, so it goes to the clipboard and the person decides.
+   */
+  'shield:reportLeak': {
+    request: z.object({ tabId: z.string() }),
+    response: z.object({ report: z.string() })
+  },
   'blocking:setSiteAllowed': {
     request: z.object({ host: z.string(), allowed: z.boolean(), tabId: z.string() }),
     response: BlockingStatusSchema

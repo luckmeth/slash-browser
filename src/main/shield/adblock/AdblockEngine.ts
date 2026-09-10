@@ -5,14 +5,32 @@ import { FiltersEngine, Request as AdRequest } from '@ghostery/adblocker'
 import { mapResourceType } from './resourceTypes'
 import { createLogger } from '../../logger'
 import { fingerprintLists } from './compiler'
+import { hasCompleteListSet, updatedListsDir } from './FilterListUpdater'
 
 const log = createLogger('adblock')
 
-/** Where the bundled lists live — beside app.asar, never inside it. */
-function listsDir(): string {
+/** Where the lists that ship with the installer live — beside app.asar. */
+function bundledListsDir(): string {
   return app.isPackaged
     ? join(process.resourcesPath, 'filters')
     : join(app.getAppPath(), 'resources', 'filters')
+}
+
+/**
+ * Which directory to compile from.
+ *
+ * Refreshed lists win, but only as a **complete set**. A directory holding three
+ * fresh lists and two missing ones is not "mostly updated" — it is a blocker
+ * with two lists switched off, which is worse than five that are a month old.
+ *
+ * Nothing else changes: the refreshed files keep the bundled filenames, and
+ * `fingerprintLists` keys the compiled cache on name and byte length, so newer
+ * lists simply look like changed inputs and are recompiled on the next load.
+ */
+function listsDir(): string {
+  const updated = updatedListsDir()
+  if (hasCompleteListSet(updated)) return updated
+  return bundledListsDir()
 }
 
 /**
@@ -50,6 +68,23 @@ export class AdblockEngine {
     return this.loading
   }
 
+  /**
+   * Loads again after the lists on disk have changed.
+   *
+   * `load()` is deliberately once-only — it caches its own promise so the many
+   * callers at startup share one compile. That is right for startup and wrong
+   * after a refresh, which is why this exists rather than a flag on `load`.
+   *
+   * The engine already in memory is **kept** until the new one is ready. A
+   * browser that stops blocking for the ten seconds it takes to recompile would
+   * be trading a stale list for no list at all, and the stale one is better.
+   */
+  async reload(): Promise<void> {
+    log.info('reloading the filter engine after a list update')
+    this.loading = null
+    await this.load()
+  }
+
   private async doLoad(): Promise<void> {
     const dir = listsDir()
     if (!existsSync(dir)) {
@@ -75,7 +110,8 @@ export class AdblockEngine {
 
     const started = Date.now()
     this.engine = FiltersEngine.deserialize(readFileSync(cachePath))
-    log.info(`filter engine ready in ${Date.now() - started}ms`)
+    const source = dir === bundledListsDir() ? 'bundled' : 'refreshed'
+    log.info(`filter engine ready in ${Date.now() - started}ms (${source} lists)`)
   }
 
   /** Runs the parser in a utility process and waits for it to finish. */
