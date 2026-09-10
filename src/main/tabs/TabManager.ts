@@ -13,6 +13,7 @@ import { installNavigationGuards } from '../navigation/NavigationGuards'
 import { Tab } from './Tab'
 import { attachTabEvents } from './TabEvents'
 import { createPageView } from './ViewFactory'
+import { shouldWarmUp } from './warmUpRule'
 import {
   splitRects,
   canSplit,
@@ -1033,6 +1034,23 @@ export class TabManager {
     // listeners already attached, the blank navigation patched the tab's URL,
     // put `about:blank` in the omnibox, and **recorded it as a visit in the
     // user's history**.
+    // **Never warm up a tab that is being restored.**
+    //
+    // `navigationHistory.restore()` replaces the entry list on a *pristine*
+    // WebContents. Give it one that has already committed a document — which is
+    // exactly what the blank warm-up does — and it replaces the entries without
+    // navigating: the tab keeps the restored address in the omnibox and renders
+    // nothing at all. Reopening the browser showed a black window with the right
+    // URL above it, on every restored tab.
+    //
+    // This is the one path where the blank document is not free, and it is also
+    // the path that needs it least: a restore is a navigation like any other, so
+    // the shield installs during it as it did before any of this existed.
+    if (saved && saved.entries.length > 0) {
+      start()
+      return
+    }
+
     if (!this.needsWarmUp(contents, initialUrl)) {
       start()
       return
@@ -1060,8 +1078,15 @@ export class TabManager {
     // measure the fix against the unfixed code — a fix that has never been
     // shown capable of failing has not been tested.
     if (process.env['SLASH_NO_SHIELD_WARMUP'] === '1') return false
-    if (!this.hooks.shieldNeededFor?.(url)) return false
-    return !hasRenderer(contents)
+
+    return shouldWarmUp({
+      url,
+      // Callers check this themselves before building; passed as false here
+      // because `buildView` returns early for a restore and never reaches this.
+      hasSavedNavigation: false,
+      hasRenderer: hasRenderer(contents),
+      hasScripts: this.hooks.shieldNeededFor?.(url) ?? false
+    })
   }
 
   /** Everything that listens to a page. Split out so the warm-up can precede it. */
