@@ -89,6 +89,7 @@ import { PopupGuard } from './shield/PopupGuard'
 import { RedirectGuard } from './shield/RedirectGuard'
 import { GestureTracker } from './shield/GestureTracker'
 import { ScriptletInjector } from './shield/inject/ScriptletInjector'
+import { setServedAdFields } from './shield/inject/playerResponseFilter'
 import { ShieldVerifier } from './shield/ShieldVerifier'
 import { DownloadPresenter } from './downloads/DownloadPresenter'
 import { CosmeticFilter } from './shield/adblock/CosmeticFilter'
@@ -503,9 +504,16 @@ export class AppContext {
     )
     this.translation = new TranslationService(this.providers, this.settings)
     this.addresses = new AddressBook(this.db)
-    this.remoteConfig = new RemoteConfigService(this.settings, (config) =>
+    this.remoteConfig = new RemoteConfigService(this.settings, (config) => {
+      // The cadence fix. A field YouTube renames used to mean cutting a release
+      // and hoping people reinstalled — on a build with no auto-update, because
+      // it is unsigned. Served, it means the next config check.
+      //
+      // Additive only: a served list can add a field, never remove one, so a
+      // config that is wrong or hostile cannot switch the strip off.
+      setServedAdFields(config.shield.adFields)
       this.broadcastAll('config:changed', config)
-    )
+    })
     this.sync = new SyncService(this.db, this.settings, () =>
       this.broadcastAll('sync:changed', this.sync.status())
     )

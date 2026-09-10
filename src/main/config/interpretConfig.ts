@@ -23,7 +23,27 @@ export function interpretConfig(settings: Record<string, unknown>): RemoteConfig
   const level = noticeRecord.level
   const url = typeof noticeRecord.url === 'string' ? noticeRecord.url : ''
 
+  // Additive only, and bounded. A served list can add a field YouTube has
+  // renamed; it cannot remove one, so a config that is wrong — or hostile —
+  // cannot switch the ad strip off. Anything that is not a string is dropped
+  // rather than coerced.
+  const shieldRecord =
+    typeof settings.shield === 'object' && settings.shield !== null
+      ? (settings.shield as Record<string, unknown>)
+      : {}
+  const strings = (value: unknown, cap: number): string[] =>
+    Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0).slice(0, cap)
+      : []
+
   return {
+    shield: {
+      adFields: strings(shieldRecord['ad_fields'] ?? shieldRecord['adFields'], 32),
+      playerUrlPatterns: strings(
+        shieldRecord['player_url_patterns'] ?? shieldRecord['playerUrlPatterns'],
+        8
+      )
+    },
     showAdvertiseCta:
       typeof settings.show_advertise_cta === 'boolean'
         ? settings.show_advertise_cta

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { stripPlayerResponse, AD_FIELDS, pruneAdFields, PLAYER_URL_PATTERNS } from './playerResponseFilter'
+import { afterEach, describe, expect, it } from 'vitest'
+import { stripPlayerResponse, AD_FIELDS, pruneAdFields, PLAYER_URL_PATTERNS, setServedAdFields, activeAdFields } from './playerResponseFilter'
 
 const encode = (value: unknown): string =>
   Buffer.from(JSON.stringify(value), 'utf8').toString('base64')
@@ -193,5 +193,54 @@ describe('pruneAdFields', () => {
     const body = { title: 'a video', counts: [1, 2, 3], nested: { keep: true } }
     expect(pruneAdFields(body)).toEqual([])
     expect(body).toEqual({ title: 'a video', counts: [1, 2, 3], nested: { keep: true } })
+  })
+})
+
+describe('served ad fields — closing the cadence gap', () => {
+  const encode = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value), 'utf8').toString('base64')
+  const decode = (body: string): Record<string, unknown> =>
+    JSON.parse(Buffer.from(body, 'base64').toString('utf8')) as Record<string, unknown>
+
+  afterEach(() => setServedAdFields([]))
+
+  it('prunes a field the config added, without a new build', () => {
+    // The whole point. YouTube renames a field; the operator edits a served
+    // document; every browser has it on its next check. Before this, that was a
+    // release — on a build with no auto-update, because it is unsigned.
+    const body = encode({ videoDetails: {}, adThingamy: [{ a: 1 }] })
+    expect(stripPlayerResponse(body, true).body).toBeNull()
+
+    setServedAdFields(['adThingamy'])
+    const out = stripPlayerResponse(body, true)
+    expect(out.body).not.toBeNull()
+    expect(decode(out.body!)['adThingamy']).toBeUndefined()
+    expect(decode(out.body!)['videoDetails']).toBeDefined()
+  })
+
+  it('finds a served field nested, like the built-in ones', () => {
+    setServedAdFields(['adThingamy'])
+    const out = stripPlayerResponse(encode({ playerResponse: { adThingamy: [1] } }), true)
+    expect(out.removed).toContain('playerResponse.adThingamy')
+  })
+
+  it('is additive only — a served list cannot switch the strip off', () => {
+    // The asymmetry that matters. A config that is wrong, or hostile, must not
+    // be able to disable blocking; it can only ever add to it.
+    setServedAdFields(['somethingElse'])
+    const out = stripPlayerResponse(encode({ videoDetails: {}, adPlacements: [{ a: 1 }] }), true)
+    expect(out.body).not.toBeNull()
+    expect(decode(out.body!)['adPlacements']).toBeUndefined()
+  })
+
+  it('an empty served list leaves the built-ins exactly as they were', () => {
+    setServedAdFields([])
+    expect(activeAdFields()).toEqual(AD_FIELDS)
+  })
+
+  it('does not report a built-in twice when the config repeats it', () => {
+    setServedAdFields(['adPlacements'])
+    const out = stripPlayerResponse(encode({ videoDetails: {}, adPlacements: [{ a: 1 }] }), true)
+    expect(out.removed.filter((entry) => entry === 'adPlacements')).toHaveLength(1)
   })
 })

@@ -330,7 +330,12 @@ export function showTabContextMenu(tabId: string, deps: ContextMenuDeps): void {
         : [
             {
               label: 'Split view with this tab',
-              enabled: deps.tabs.snapshot().canSplit,
+              // Also refused for an internal page. A tab showing the new tab
+              // page has no page view to composite — the chrome document shows
+              // through the content hole — so this used to be offered, clicked,
+              // and silently do nothing. Greyed out says the same thing without
+              // the click.
+              enabled: deps.tabs.snapshot().canSplit && !isInternalUrl(snap.url),
               click: () => deps.tabs.setSplit(tabId)
             }
           ]),

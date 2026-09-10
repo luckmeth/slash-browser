@@ -477,6 +477,16 @@ export const invokeContracts = {
     request: z.object({ tabId: z.string().nullable() }),
     response: TabsSnapshotSchema
   },
+  /**
+   * Opens or closes split view, choosing the partner itself.
+   *
+   * In main rather than in the palette, because the interesting half is what
+   * happens when it **cannot**: a tab showing the new tab page has no page view
+   * to composite, so asking for one laid out a split and immediately dropped it
+   * while the caller discarded the result. Pressing the shortcut did visibly
+   * nothing. Refusals are explained here, where `showNotice` lives.
+   */
+  'tabs:toggleSplit': { request: z.void(), response: TabsSnapshotSchema },
   'tabs:setSplitFraction': {
     request: z.object({ fraction: z.number() }),
     response: TabsSnapshotSchema

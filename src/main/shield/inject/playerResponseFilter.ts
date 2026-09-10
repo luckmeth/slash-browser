@@ -38,6 +38,31 @@
  *    "what does Slash remove" rather than two that can drift.
  */
 
+/**
+ * Extra field names from the served config.
+ *
+ * Module-level rather than threaded through every caller because
+ * `stripPlayerResponse` is called from a CDP message handler with no route back
+ * to `AppContext`, and giving it one would put a settings lookup on a path that
+ * runs per response. Set once when the config changes.
+ *
+ * Additive only. A served list can *add* a field YouTube has renamed; it cannot
+ * remove one, so a config that is wrong — or hostile — cannot switch the strip
+ * off. That asymmetry is deliberate.
+ */
+let servedAdFields: readonly string[] = []
+
+export function setServedAdFields(fields: readonly string[]): void {
+  // De-duplicated against the built-ins so the removal log does not report the
+  // same field twice.
+  servedAdFields = fields.filter((field) => !AD_FIELDS.includes(field as never))
+}
+
+/** Everything to prune: what shipped, plus whatever the config added. */
+export function activeAdFields(): readonly string[] {
+  return servedAdFields.length === 0 ? AD_FIELDS : [...AD_FIELDS, ...servedAdFields]
+}
+
 /** The fields that carry ad breaks. Shared with the page-world script. */
 export const AD_FIELDS = [
   'adPlacements',
@@ -100,7 +125,7 @@ export function stripPlayerResponse(base64Body: string, isBase64: boolean): Stri
 
   // Cheap reject before parsing megabytes of JSON: a response carrying ad
   // breaks always names at least one of these somewhere in its text.
-  if (!MARKERS.some((marker) => text.includes(`"${marker}"`))) {
+  if (!MARKERS().some((marker) => text.includes(`"${marker}"`))) {
     return { body: null, removed: [] }
   }
 
@@ -127,7 +152,7 @@ export function stripPlayerResponse(base64Body: string, isBase64: boolean): Stri
  * `playerConfig.ssap` or an `isAd` flag without naming any of the top-level
  * fields — and rejecting it on the text test would mean never looking.
  */
-const MARKERS = [...AD_FIELDS, 'ssap', 'isAd'] as const
+const MARKERS = (): readonly string[] => [...activeAdFields(), 'ssap', 'isAd']
 
 /**
  * How deep to walk. Innertube responses nest heavily and this is not a search
@@ -173,7 +198,7 @@ export function pruneAdFields(root: unknown): string[] {
 
     const record = value as Record<string, unknown>
 
-    for (const field of AD_FIELDS) {
+    for (const field of activeAdFields()) {
       if (field in record) {
         delete record[field]
         removed.push(path === '' ? field : `${path}.${field}`)

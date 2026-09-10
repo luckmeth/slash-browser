@@ -1,4 +1,5 @@
 import { copyFileSync, readFileSync } from 'node:fs'
+import { chooseSplitPartner } from '@shared/types/splitPartner'
 import { join } from 'node:path'
 import { app, dialog, shell, clipboard } from 'electron'
 import { mediaFilename } from '../downloads/engine/mediaFilename'
@@ -432,6 +433,36 @@ export function registerHandlers(ctx: AppContext): void {
   ipc.handle('sponsor:currentNotice', (_req, context) =>
     ok(windowOf(context.sender)?.currentSponsorNotice() ?? null)
   )
+
+  ipc.handle('tabs:toggleSplit', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    if (window.tabs.splitId !== null) {
+      window.tabs.setSplit(null)
+      return ok(window.tabs.snapshot())
+    }
+
+    const snapshot = window.tabs.snapshot()
+    const partner = chooseSplitPartner(snapshot.tabs, snapshot.activeTabId)
+
+    if (!partner) {
+      window.showNotice(
+        'Split view needs a second tab with a page open in it.',
+        'info'
+      )
+      return ok(snapshot)
+    }
+
+    if (!window.tabs.setSplit(partner.id)) {
+      // The remaining refusal is geometric: the content area cannot hold two
+      // panes wide enough to render a page rather than a site's mobile layout.
+      window.showNotice('The window is too narrow to split.', 'info')
+      return ok(window.tabs.snapshot())
+    }
+
+    return ok(window.tabs.snapshot())
+  })
 
   ipc.handle('notice:current', (_req, context) => {
     const window = windowOf(context.sender)

@@ -22,6 +22,35 @@ export const RemoteConfigSchema = z.object({
     /** https only, or empty. A link put in front of every user is not an http link. */
     url: z.string()
   }),
+  /**
+   * The YouTube ad strip's rules, served rather than compiled in.
+   *
+   * This is the cadence gap, and it is the whole of what separates this blocker
+   * from Brave's. The technique is identical — both prune the same fields out of
+   * the same player responses — but Brave's rules are refreshed continuously by
+   * a community that notices within hours when a site changes shape, and these
+   * were compiled into a binary that has no auto-update because it is unsigned.
+   * A field YouTube renames therefore meant: cut a release, and hope everybody
+   * reinstalls.
+   *
+   * Served, it means: edit a document, and every browser has it on its next
+   * check. Empty arrays mean "use what shipped", so a config that cannot be
+   * reached, or one that says nothing about the shield, changes nothing.
+   */
+  shield: z
+    .object({
+      /** Extra field names to prune, on top of the built-in list. */
+      adFields: z.array(z.string().min(1).max(64)).max(32).default([]),
+      /**
+       * Extra innertube endpoints to intercept.
+       *
+       * Patterns, not URLs — they are handed to CDP's `Fetch.enable`. Bounded
+       * in count and length because each one is a response the browser pauses
+       * and buffers, which is a cost paid on real navigations.
+       */
+      playerUrlPatterns: z.array(z.string().min(4).max(200)).max(8).default([])
+    })
+    .default({ adFields: [], playerUrlPatterns: [] }),
   /** Rollout flags. An unknown or missing flag is off. */
   flags: z.record(z.string(), z.boolean()),
   /**
@@ -63,6 +92,7 @@ export const RemoteConfigSchema = z.object({
 export type RemoteConfig = z.infer<typeof RemoteConfigSchema>
 
 export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
+  shield: { adFields: [], playerUrlPatterns: [] },
   showAdvertiseCta: true,
   notice: { message: '', level: 'info', url: '' },
   flags: {},

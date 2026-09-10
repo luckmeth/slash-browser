@@ -238,14 +238,10 @@ function panel(
  * which tab to pair with.
  */
 async function toggleSplit(): Promise<void> {
-  const snapshot = await window.browser.invoke('tabs:list', undefined)
-  if (!snapshot.ok) return
-  const { tabs, activeTabId, splitTabId } = snapshot.value
-  if (splitTabId) {
-    await window.browser.invoke('tabs:setSplit', { tabId: null })
-    return
-  }
-  const index = tabs.findIndex((tab) => tab.id === activeTabId)
-  const partner = tabs[index + 1] ?? tabs[index - 1]
-  if (partner) await window.browser.invoke('tabs:setSplit', { tabId: partner.id })
+  // One call. Choosing the partner used to happen here — take the next tab,
+  // whatever it is — and a tab showing the new tab page has no page view to
+  // composite, so the split laid out and dropped itself while this function
+  // threw the result away. Main picks a tab that can actually be shown, and
+  // says so when there is none.
+  await window.browser.invoke('tabs:toggleSplit', undefined)
 }
