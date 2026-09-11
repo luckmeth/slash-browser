@@ -8,6 +8,7 @@ import {
 } from '@shared/types/advertising'
 import { Icon } from '../../components/Icon'
 import { CreativePicker } from './CreativePicker'
+import { BookingPreview } from './BookingPreview'
 import { LegalLinks } from '../legal/LegalLinks'
 
 /**
@@ -246,6 +247,16 @@ function CompanyCard({
   )
 }
 
+/** One line of the cost breakdown. */
+function CostRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-[var(--color-text-muted)]">{label}</dt>
+      <dd className="truncate text-right tabular-nums">{value}</dd>
+    </div>
+  )
+}
+
 function BookingCard({
   state,
   busy,
@@ -358,23 +369,56 @@ function BookingCard({
         onClear={() => setForm({ ...form, imageBase64: '', imageType: '' })}
       />
 
-      {/* The estimate, beside the thing that changes it. */}
-      <div className="mt-4 flex items-center justify-between rounded-xl border border-[var(--glass-edge)] bg-white/[0.03] px-4 py-3">
-        <div>
-          <p className="text-[11px] tracking-[0.14em] text-[var(--color-text-muted)] uppercase">
-            Estimated cost
-          </p>
+      {/* What they are buying, drawn as readers will see it. */}
+      <BookingPreview
+        title={form.title}
+        description={form.description}
+        imageBase64={form.imageBase64}
+        imageType={form.imageType}
+        sponsor={state.company?.companyName ?? ''}
+        placementTier={form.placementTier}
+      />
+
+      {/*
+        The costs, itemised rather than totalled.
+
+        A single number invites the question "how did you get that", and the
+        answer — rate, hours, minimum block — is exactly what somebody needs to
+        decide whether to buy more hours or fewer. Every figure comes from
+        `estimateCost` and the selected rate, so this cannot disagree with what
+        the server charges.
+      */}
+      <div className="mt-4 rounded-xl border border-[var(--glass-edge)] bg-white/[0.03] p-4">
+        <p className="text-[11px] tracking-[0.14em] text-[var(--color-text-muted)] uppercase">
+          What it costs
+        </p>
+
+        {cost.hours > 0 ? (
+          <dl className="mt-2.5 flex flex-col gap-1.5 text-[12px]">
+            <CostRow label="Placement" value={rate?.displayName ?? form.placementTier} />
+            <CostRow label="Rate" value={`$${cost.hourlyRate.toFixed(2)} an hour`} />
+            <CostRow
+              label="Hours"
+              value={`${cost.hours}${
+                rate ? ` · ${rate.minHours} hour minimum${cost.hours >= rate.minHours ? ' met' : ''}` : ''
+              }`}
+            />
+            <div className="mt-1 flex items-baseline justify-between border-t border-[var(--glass-edge)] pt-2">
+              <dt className="text-[12px] font-medium">Total</dt>
+              <dd className="text-[24px] leading-none font-semibold tabular-nums">
+                ${cost.total.toFixed(2)}
+              </dd>
+            </div>
+          </dl>
+        ) : (
           <p className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-            {cost.hours > 0
-              ? `${cost.hours} hours at $${cost.hourlyRate.toFixed(2)}`
-              : 'Choose a window to see the price'}
+            Choose a placement and a window to see the price.
           </p>
-        </div>
-        <p className="text-[24px] font-semibold tabular-nums">${cost.total.toFixed(2)}</p>
+        )}
       </div>
-      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+      <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
         The charged price is set by the server from its own rate card, not by this window. They
-        agree; this is the figure you will be asked to pay.
+        agree; this is the figure you will be asked to pay. Tax, if any, is shown at checkout.
       </p>
 
       {problem !== '' && <p className="mt-3 text-[12px] text-[var(--color-bad)]">{problem}</p>}

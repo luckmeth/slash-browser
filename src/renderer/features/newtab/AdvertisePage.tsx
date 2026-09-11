@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RemoteConfig } from '@shared/types/remoteConfig'
 import { DEFAULT_REMOTE_CONFIG } from '@shared/types/remoteConfig'
 import { PlacementPreview } from './PlacementPreview'
@@ -37,6 +37,10 @@ export function AdvertisePage(): React.JSX.Element {
     void window.browser.invoke('config:remote', undefined).then((result) => {
       if (result.ok) setConfig(result.value.advertising)
     })
+    // Subscribed, not fetched once. An operator changing the rate card while
+    // somebody has this page open was previously invisible until they reopened
+    // it — and this is the page that quotes prices.
+    return window.browser.on('config:changed', (next) => setConfig(next.advertising))
   }, [])
 
   // The compiled defaults until the served card arrives, so the page is never
@@ -49,6 +53,30 @@ export function AdvertisePage(): React.JSX.Element {
   const portal =
     configured !== '' ? configured : sponsorEndpoint !== '' ? originOf(sponsorEndpoint) : ''
   const [copied, setCopied] = useState(false)
+  const bookingRef = useRef<HTMLElement | null>(null)
+  const placementsRef = useRef<HTMLElement | null>(null)
+  const [highlight, setHighlight] = useState(false)
+
+  /**
+   * Takes somebody to the form and makes it obvious they arrived.
+   *
+   * Scroll, not a modal, and that is a correctness argument rather than a
+   * stylistic one: the composer's signed-out branch opens the Google sign-in in
+   * a **new tab**. A modal over this page would be orphaned behind that tab and
+   * gone by the time they came back. Scrolling also keeps `CampaignList`
+   * reachable, which is where an existing advertiser pays.
+   */
+  const startBooking = (): void => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    bookingRef.current?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
+    setHighlight(true)
+  }
+
+  useEffect(() => {
+    if (!highlight) return
+    const timer = setTimeout(() => setHighlight(false), 1400)
+    return () => clearTimeout(timer)
+  }, [highlight])
 
   useEffect(() => {
     if (!copied) return
@@ -96,25 +124,31 @@ export function AdvertisePage(): React.JSX.Element {
             and no auction to lose.
           </p>
 
+          {/*
+            One front door.
+
+            This used to be a Gmail compose window, while the real booking form
+            sat four hundred pixels below and never received the click. Two
+            competing paths on one page, and the more prominent one was the one
+            that could not take a booking. The label matches the heading it
+            lands on, so somebody who clicks "Book a run" arrives at a section
+            called "Book a run".
+          */}
           <div className="animate-rise mt-7 flex flex-wrap items-center justify-center gap-2.5">
-            {advertising.contactEmail !== '' && (
-              <button
-                type="button"
-                onClick={mailto}
-                className="cursor-default rounded-xl bg-[var(--color-accent)] px-6 py-3 text-[14px] font-semibold text-black shadow-[0_10px_30px_-10px_var(--color-accent)] transition hover:brightness-110"
-              >
-                Book a placement
-              </button>
-            )}
-            {portal !== '' && (
-              <button
-                type="button"
-                onClick={() => open(portal)}
-                className="cursor-default rounded-xl border border-[var(--color-border-subtle)] px-5 py-3 text-[14px] transition hover:border-[var(--color-accent)]"
-              >
-                Open the advertiser portal
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={startBooking}
+              className="cursor-default rounded-xl bg-[var(--color-accent)] px-6 py-3 text-[14px] font-semibold text-black shadow-[0_10px_30px_-10px_var(--color-accent)] transition hover:brightness-110"
+            >
+              Book a run
+            </button>
+            <button
+              type="button"
+              onClick={() => placementsRef.current?.scrollIntoView({ block: 'start' })}
+              className="cursor-default rounded-xl border border-[var(--color-border-subtle)] px-5 py-3 text-[14px] transition hover:border-[var(--color-accent)]"
+            >
+              See placements and rates
+            </button>
           </div>
 
           <p className="animate-rise mt-3 text-[11.5px] text-[var(--color-text-muted)]">
@@ -132,7 +166,13 @@ export function AdvertisePage(): React.JSX.Element {
           Anybody who has should not have to scroll past it, or leave for a
           portal, to do the thing the page is about.
         */}
-        <section className="slash-reveal mb-14">
+        <section
+          ref={bookingRef}
+          id="book"
+          className={`slash-reveal mb-14 scroll-mt-8 rounded-2xl transition ${
+            highlight ? 'ring-1 ring-[var(--color-accent)]' : 'ring-0'
+          }`}
+        >
           <CampaignComposer />
         </section>
 
@@ -202,7 +242,7 @@ export function AdvertisePage(): React.JSX.Element {
         </section>
 
         {/* Placements ---------------------------------------------------- */}
-        <section className="slash-reveal mt-14">
+        <section ref={placementsRef} className="slash-reveal mt-14 scroll-mt-8">
           <SectionHeading
             eyebrow="Placements"
             title="Pick where you appear"
@@ -365,21 +405,42 @@ export function AdvertisePage(): React.JSX.Element {
         <section className="slash-reveal relative mt-14 overflow-hidden rounded-2xl border border-[var(--glass-edge)] bg-white/[0.04] p-7 text-center">
           <div className="slash-aurora opacity-60" aria-hidden="true" />
           <div className="relative">
-            <h2 className="text-[20px] font-semibold">Request a placement</h2>
+            <h2 className="text-[20px] font-semibold">Ready when you are</h2>
             <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[var(--color-text-muted)]">
-              Send your creative and the hours you want. We review every advert by hand before it
-              runs, and we will tell you honestly if it is not a fit.
+              Book it here in a few minutes. Somebody reads every advert before it runs, and you are
+              not charged until it is approved.
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={startBooking}
+                className="cursor-default rounded-xl bg-[var(--color-accent)] px-6 py-2.5 text-[13.5px] font-semibold text-black transition hover:brightness-110"
+              >
+                Book a run
+              </button>
+            </div>
+
+            {/*
+              The email and the portal, demoted to what they are.
+
+              Neither is deleted: email is a genuine lead channel and the fallback
+              when the advertising service cannot be reached, and the portal is
+              where Stripe lives, which is the one thing that cannot happen in
+              the browser. They are no longer *buttons competing with the form*,
+              which is what made somebody click "Book a placement" and get a mail
+              client.
+            */}
+            <p className="mt-4 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
               {advertising.contactEmail !== '' && (
                 <>
+                  Prefer to talk to a person?{' '}
                   <button
                     type="button"
                     onClick={mailto}
-                    className="cursor-default rounded-xl bg-[var(--color-accent)] px-6 py-2.5 text-[13.5px] font-semibold text-black transition hover:brightness-110"
+                    className="cursor-default underline decoration-dotted underline-offset-2 transition hover:text-[var(--color-text-primary)]"
                   >
-                    Email us in Gmail
-                  </button>
+                    Email us
+                  </button>{' '}
                   <button
                     type="button"
                     onClick={() => {
@@ -387,27 +448,29 @@ export function AdvertisePage(): React.JSX.Element {
                         ?.writeText(advertising.contactEmail)
                         .then(() => setCopied(true))
                     }}
-                    className="cursor-default rounded-xl border border-[var(--color-border-subtle)] px-5 py-2.5 text-[13.5px] transition hover:border-[var(--color-accent)]"
+                    className="cursor-default underline decoration-dotted underline-offset-2 transition hover:text-[var(--color-text-primary)]"
                   >
-                    {copied ? 'Copied' : advertising.contactEmail}
+                    {copied ? 'Copied' : `(${advertising.contactEmail})`}
                   </button>
+                  .{' '}
                 </>
               )}
-              {portal !== '' && (
-                <button
-                  type="button"
-                  onClick={() => open(portal)}
-                  className="cursor-default rounded-xl border border-[var(--color-border-subtle)] px-5 py-2.5 text-[13.5px] transition hover:border-[var(--color-accent)]"
-                >
-                  Advertiser portal
-                </button>
+              {portal !== '' ? (
+                <>
+                  Already running a campaign?{' '}
+                  <button
+                    type="button"
+                    onClick={() => open(portal)}
+                    className="cursor-default underline decoration-dotted underline-offset-2 transition hover:text-[var(--color-text-primary)]"
+                  >
+                    Pay or manage it in the portal
+                  </button>
+                  .
+                </>
+              ) : (
+                'This copy of Slash has no advertiser portal configured, so payment is arranged by email.'
               )}
-            </div>
-            {portal === '' && (
-              <p className="mt-3 text-[11.5px] text-[var(--color-text-muted)]">
-                This copy of Slash has no advertiser portal configured, so requests come by email.
-              </p>
-            )}
+            </p>
           </div>
         </section>
 

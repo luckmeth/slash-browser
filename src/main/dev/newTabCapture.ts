@@ -35,6 +35,17 @@ export async function runNewTabCapture(
     return
   }
 
+  // Optionally somewhere other than the start page, so the advertise and
+  // rewards pages can be looked at the same way.
+  const targetUrl = process.env['SLASH_CAPTURE_URL']
+  if (targetUrl) {
+    // `create`, not `navigate`. An internal URL through `navigate` destroys the
+    // view and patches the snapshot, and the chrome did not re-render it in
+    // time to be photographed; creating the tab is the path every other probe
+    // uses and it activates as well.
+    window.tabs.create({ url: targetUrl, background: false })
+  }
+
   // Long enough for `animate-rise`, the sponsored batch and the rewards status
   // to have landed. A capture taken before those arrive photographs a page
   // missing exactly the sections worth looking at.
