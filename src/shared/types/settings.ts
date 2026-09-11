@@ -474,6 +474,24 @@ export const SettingsSchema = z.object({
   filterListsAutoUpdate: z.boolean().default(true),
   /** When the list check last ran. A record, not a preference. */
   filterListsLastCheck: z.number().int().min(0).default(0),
+  /**
+   * Draw the browser's own interface on an opaque surface.
+   *
+   * The chrome is created transparent so the window's acrylic shows the desktop
+   * through it, and that is the whole look. It has a cost that is easy to feel
+   * and hard to name: **Chromium cannot do subpixel text antialiasing onto a
+   * transparent backing.** There is nothing behind the glyphs to blend against,
+   * so every label in the browser falls back to grayscale, which is why Slash
+   * reads as softer than Chrome or Edge on the same screen.
+   *
+   * On, the interface becomes solid and text renders with full subpixel
+   * antialiasing. Off, the glass stays.
+   *
+   * It cannot change while the window is open — `transparent` is fixed when a
+   * view is constructed — so the copy says so rather than appearing to do
+   * nothing.
+   */
+  sharpText: z.boolean().default(false),
   /** Ceiling in bytes per second across all downloads. 0 = unlimited. */
   downloadBandwidthLimit: z.number().int().min(0).default(0),
   /**

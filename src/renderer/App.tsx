@@ -299,6 +299,20 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
+  /*
+   * The CSS half of `sharpText`.
+   *
+   * The main-process half decides whether the chrome view is transparent, which
+   * is what actually enables subpixel antialiasing and only changes on a new
+   * window. This attribute is what lets the stylesheet stop asking for
+   * grayscale on the surfaces that now have an opaque backing, and it can
+   * follow the setting immediately.
+   */
+  const sharpText = useBrowserStore((s) => s.settings?.sharpText ?? false)
+  useEffect(() => {
+    document.documentElement.dataset.sharpText = sharpText ? 'on' : 'off'
+  }, [sharpText])
+
   const showTerms = activeTab?.url === TERMS_URL
   const showPrivacy = activeTab?.url === PRIVACY_URL
   // Main insets the native page view to match; the two read the same constant.

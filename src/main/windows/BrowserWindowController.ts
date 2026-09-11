@@ -190,6 +190,17 @@ export class BrowserWindowController {
 
   constructor(private readonly deps: WindowDeps) {
     this.depsIsPrivate = deps.isPrivate === true
+
+    /*
+     * Whether this window trades the glass for sharp text.
+     *
+     * Read once, here, because `transparent` is fixed when a view is
+     * constructed — there is no way to change it on a live window, which is why
+     * the setting's copy asks for a new window rather than appearing to do
+     * nothing.
+     */
+    const sharpText = deps.settings.getAll().sharpText
+
     this.window = new BaseWindow({
       width: 1440,
       height: 900,
@@ -197,8 +208,9 @@ export class BrowserWindowController {
       minHeight: 400,
       show: false,
       // Fully transparent so Windows' own acrylic shows through. A solid colour
-      // here would sit on top of the material and defeat it entirely.
-      backgroundColor: '#00000000',
+      // here would sit on top of the material and defeat it entirely — which is
+      // exactly what `sharpText` wants, so it paints one.
+      backgroundColor: sharpText ? '#0d0f14' : '#00000000',
       /**
        * Real blur, composited by the OS.
        *
@@ -210,7 +222,10 @@ export class BrowserWindowController {
        * Windows 11 only. On 10 it is ignored and the painted background shows,
        * which is why every surface still defines its own colour.
        */
-      backgroundMaterial: 'acrylic',
+      // Acrylic needs something translucent in front of it to be seen through.
+      // With a solid chrome there is nothing to see, so asking for it would buy
+      // a composited layer and no visible effect.
+      ...(sharpText ? {} : { backgroundMaterial: 'acrylic' as const }),
       title: this.depsIsPrivate ? 'Slash — Private' : 'Slash',
       icon: appIconPath(),
 
@@ -239,12 +254,19 @@ export class BrowserWindowController {
         sandbox: true,
         nodeIntegration: false,
         webSecurity: true,
-        // Required for the window's acrylic to be visible through the chrome.
-        // Without it Chromium paints an opaque base layer over the material.
-        transparent: true
+        /*
+         * Transparent so the window's acrylic is visible through the chrome —
+         * and **this is what makes the app's own text look soft**. Chromium has
+         * no opaque backing to blend subpixels against, so every label in the
+         * browser falls back to grayscale antialiasing, which is the difference
+         * people see against Chrome on the same monitor.
+         *
+         * `sharpText` trades the glass for that.
+         */
+        transparent: !sharpText
       }
     })
-    this.chromeView.setBackgroundColor('#00000000')
+    this.chromeView.setBackgroundColor(sharpText ? '#0d0f14' : '#00000000')
 
     // Surface renderer errors in the main log. A React exception in the chrome
     // document blanks the entire UI while the window frame stays up, which looks

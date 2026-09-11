@@ -116,6 +116,12 @@ export function SettingsPanel(): React.JSX.Element {
           </h2>
           <div className="space-y-6">
       <Group title="Appearance">
+        <Toggle
+          label="Sharp text"
+          hint="Slash draws its own interface on a see-through layer so the frosted glass can show your desktop through it. Chromium cannot render subpixel-antialiased text onto a see-through layer, which is why labels here look softer than in Chrome or Edge. Turning this on makes the interface solid and the text as sharp as any other app, and the frosted look goes. It applies to the next window you open, because whether a layer is see-through is fixed when the window is built. Floating panels keep the glass either way: their dialogs dim the page behind them, which a solid layer cannot do."
+          checked={settings.sharpText}
+          onChange={(sharpText) => update({ sharpText })}
+        />
         <Field label="Accent colour">
           {/* Swatches rather than a dropdown: the thing being chosen is a
               colour, so showing the colours is the whole point. */}

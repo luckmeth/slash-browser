@@ -178,6 +178,16 @@ body {
   text-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
+/*
+ * With a solid chrome there is nothing translucent for a halo to rescue, and a
+ * halo over an opaque surface is pure blur. The overlay keeps its own, because
+ * it stays transparent whatever this is set to — its dialogs draw a
+ * semi-transparent scrim over the page, which an opaque view cannot do.
+ */
+:root[data-sharp-text='on'] .glass-float {
+  text-shadow: none;
+}
+
 .glass-raised {
   background: var(--glass-raised);
   backdrop-filter: blur(var(--blur-md)) saturate(150%);
