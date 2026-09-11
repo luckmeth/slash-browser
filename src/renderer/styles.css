@@ -114,7 +114,18 @@ body {
     -apple-system,
     sans-serif;
   color: var(--color-text-primary);
-  -webkit-font-smoothing: antialiased;
+  /*
+   * No `-webkit-font-smoothing: antialiased`.
+   *
+   * It forces grayscale antialiasing everywhere. While the chrome view is
+   * created with `transparent: true` that changes nothing — Chromium has no
+   * opaque backing to blend subpixels against, so grayscale is all it can do
+   * anyway — but it *does* throw away subpixel rendering on the surfaces that
+   * are effectively opaque: `--glass-panel` at 0.99 alpha, the settings
+   * screens, the start page over a photograph, and the whole of
+   * `prefers-contrast: more`. Removing it cannot make anything worse and is a
+   * precondition for the sharp-text setting being worth anything.
+   */
   /* Transparent so the window's acrylic is what you see. */
   background: transparent;
 }
@@ -149,9 +160,22 @@ body {
  * is the compromise that lets the chrome be genuinely transparent instead of
  * only slightly tinted.
  */
-.glass,
+/*
+ * A **zero-offset** halo, and only on floating panels.
+ *
+ * This was `0 1px 2px rgba(0,0,0,0.55)` on `.glass` as well, which is to say
+ * under every label in the browser chrome. A 1px vertical offset with a 2px
+ * blur is a drop shadow, and at 11px type a drop shadow reads as the text
+ * itself being out of focus — it was the single largest cause of Slash looking
+ * softer than other browsers.
+ *
+ * The legibility problem it solved is real: a floating panel can sit over any
+ * wallpaper. A zero-offset 1px halo solves the same problem without displacing
+ * anything, and the chrome bars do not need it at all — they sit on
+ * `--glass-base`, which is dark enough on its own.
+ */
 .glass-float {
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
 .glass-raised {

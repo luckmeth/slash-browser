@@ -425,6 +425,13 @@ if (!app.requestSingleInstanceLock()) {
         if (changed) void context.blocker.adblock.reload()
       })
 
+    const newTabShot = process.env['SLASH_NEWTAB_CAPTURE']
+    if (newTabShot) {
+      void import('./dev/newTabCapture').then(({ runNewTabCapture }) =>
+        runNewTabCapture(window, newTabShot)
+      )
+    }
+
     if (process.env['SLASH_SHIELD_WARMUP_PROBE']) {
       void import('./dev/shieldWarmupProbe').then(({ runShieldWarmupProbe }) =>
         runShieldWarmupProbe(context)

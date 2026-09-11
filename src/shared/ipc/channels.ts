@@ -55,7 +55,6 @@ export const INVOKE_CHANNELS = [
   'tabs:setSplitFraction',
   'tabs:setSplitOrientation',
   'tabs:swapSplit',
-  'tabs:recentlyClosed',
   'tabs:createGroup',
   'tabs:updateGroup',
   'tabs:deleteGroup',

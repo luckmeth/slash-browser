@@ -528,23 +528,6 @@ export const invokeContracts = {
     request: z.object({ tabId: z.string(), groupId: z.string().nullable() }),
     response: TabsSnapshotSchema
   },
-  /**
-   * Recently closed tabs, most recent first.
-   *
-   * Reads the persisted stack rather than the in-memory one, so it survives a
-   * restart — which is when "I closed something I needed" most often bites.
-   */
-  'tabs:recentlyClosed': {
-    request: z.void(),
-    response: z.array(
-      z.object({
-        url: z.string(),
-        title: z.string(),
-        faviconUrl: z.string().nullable(),
-        closedAt: z.number()
-      })
-    )
-  },
   'tabs:activate': { request: TabIdSchema, response: TabsSnapshotSchema },
   'tabs:reorder': {
     request: z.object({ tabId: z.string(), toIndex: z.number().int().min(0) }),

@@ -585,24 +585,6 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(window.tabs.emitNow())
   })
 
-  // Split view. Each returns the snapshot, so a refusal (a window too narrow for
-  // two usable panes) is visible to the caller as an unchanged `splitTabId`
-  // rather than being reported as a success.
-  ipc.handle('tabs:recentlyClosed', () =>
-    ok(
-      ctx.closedTabs
-        .list()
-        .slice()
-        .reverse()
-        .map((entry) => ({
-          url: entry.url,
-          title: entry.title,
-          faviconUrl: entry.faviconUrl,
-          closedAt: entry.closedAt
-        }))
-    )
-  )
-
   ipc.handle('tabs:createGroup', (request, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
@@ -644,6 +626,9 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(window.tabs.emitNow())
   })
 
+  // Split view. Each returns the snapshot, so a refusal (a window too narrow for
+  // two usable panes) is visible to the caller as an unchanged `splitTabId`
+  // rather than being reported as a success.
   ipc.handle('tabs:setSplit', (request, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')

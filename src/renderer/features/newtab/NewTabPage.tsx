@@ -5,11 +5,9 @@ import { hostOf } from '@shared/url'
 import { useBrowserStore } from '../../stores/browserStore'
 import { BrandMark } from '../../components/BrandMark'
 import { Icon } from '../../components/Icon'
-import { RecentlyClosed } from './RecentlyClosed'
 import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
-import { AdvertiseCard } from './AdvertiseCard'
-import { RewardsCard } from './RewardsCard'
+import { PitchCards } from './PitchCards'
 import { DefaultBrowserCard } from './DefaultBrowserCard'
 import { SponsoredBackground } from './SponsoredBackground'
 import { SponsoredBanner } from './SponsoredBanner'
@@ -264,15 +262,17 @@ export function NewTabPage(): React.JSX.Element {
           </section>
         )}
 
-        <RecentlyClosed />
-
         <PublisherNotice />
         {sponsoredBanner && <SponsoredBanner creative={sponsoredBanner} />}
         <SponsoredTile />
         <DefaultBrowserCard />
-        <RewardsCard />
-        <AdvertiseCard />
 
+        {/*
+          Slash's own two pitches, strictly after every paid placement. See
+          `PitchCards` for why they are a quieter tier than the sponsored
+          surfaces above rather than a match for them.
+        */}
+        <PitchCards />
 
 
         <div className="flex-1" />
