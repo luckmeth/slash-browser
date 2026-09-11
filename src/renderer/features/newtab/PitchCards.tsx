@@ -3,6 +3,7 @@ import type { RewardsStatus } from '@shared/types/rewards'
 import type { RemoteConfig } from '@shared/types/remoteConfig'
 import { ADVERTISE_URL, REWARDS_URL } from '@shared/types/tab'
 import { Icon } from '../../components/Icon'
+import { SlashCoin } from '../../components/SlashCoin'
 import { lowestRate } from './rateCard'
 
 /**
@@ -85,11 +86,12 @@ export function PitchCards(): React.JSX.Element | null {
  */
 function PitchCard({
   onClick,
-  icon,
+  mark,
   children
 }: {
   onClick: () => void
-  icon: 'star' | 'sparkle'
+  /** The badge in the corner. A node, so the Coin card can show a real coin. */
+  mark: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element {
   return (
@@ -106,7 +108,7 @@ function PitchCard({
       />
       <span className="flex w-full items-center gap-2">
         <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent)]/12 text-[var(--color-accent)]">
-          <Icon name={icon} size={14} />
+          {mark}
         </span>
         <Icon
           name="forward"
@@ -136,7 +138,7 @@ function CoinPitch({ status }: { status: RewardsStatus }): React.JSX.Element {
 
   if (!status.enabled || !status.signedIn) {
     return (
-      <PitchCard onClick={open} icon="star">
+      <PitchCard onClick={open} mark={<SlashCoin size={18} />}>
         <span className="block text-[13px] font-semibold">
           {status.enabled ? 'Sign in to collect Slash Coin' : 'Earn Slash Coin while you browse'}
         </span>
@@ -156,7 +158,7 @@ function CoinPitch({ status }: { status: RewardsStatus }): React.JSX.Element {
   const progress = cap > 0 ? Math.min(1, status.secondsToday / cap) : null
 
   return (
-    <PitchCard onClick={open} icon="star">
+    <PitchCard onClick={open} mark={<SlashCoin size={18} />}>
       <span className="block text-[10px] tracking-[0.12em] text-[var(--color-text-muted)] uppercase">
         Slash Coin
       </span>
@@ -213,7 +215,7 @@ function AdvertisePitch({ config }: { config: RemoteConfig | null }): React.JSX.
       onClick={() =>
         void window.browser.invoke('tabs:create', { url: ADVERTISE_URL, background: false })
       }
-      icon="sparkle"
+      mark={<Icon name="sparkle" size={14} />}
     >
       <span className="block text-[13px] font-semibold">Advertise on Slash</span>
       <span className="block text-[11.5px] leading-snug text-[var(--color-text-muted)]">

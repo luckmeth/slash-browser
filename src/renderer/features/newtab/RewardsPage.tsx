@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SlashCoin } from '../../components/SlashCoin'
 import type { RewardsStatus } from '@shared/types/rewards'
 import { COIN_DISCLAIMER } from '@shared/types/rewards'
 import { Icon } from '../../components/Icon'
@@ -106,12 +107,7 @@ export function RewardsPage(): React.JSX.Element {
         <div className="slash-dotgrid" aria-hidden="true" />
 
         <div className="relative mx-auto flex w-full max-w-3xl flex-col items-center px-8 pt-[9vh] text-center">
-          <div
-            aria-hidden="true"
-            className="slash-coin grid size-[68px] place-items-center text-[26px] font-bold text-black/70"
-          >
-            S
-          </div>
+          <SlashCoin size={104} />
 
           {/*
             The badge states the scheme's own state, not an aspiration. While
@@ -214,6 +210,44 @@ export function RewardsPage(): React.JSX.Element {
               start it. Coins you have already collected are unaffected. Earning resumes the moment
               it is switched back on.
             </p>
+          </section>
+        )}
+
+        {/*
+          The ledger strip.
+
+          An exchange-looking row of figures, and every one of them is real: the
+          earning rate the server published, today's counted time against the
+          daily cap, and how many closed intervals are still waiting to be sent.
+          Nothing here is a price, a change percentage or a chart, because none
+          of those exist — `coinToUsd` is nullable and null means *unpublished*,
+          not zero. A row of invented numbers is the one thing this page must
+          never show, whatever it is styled like.
+
+          Rendered only once somebody has opted in, so the no-number-before-
+          opt-in rule holds.
+        */}
+        {enabled && status && (
+          <section className="slash-reveal glass-raised mt-2 grid grid-cols-3 divide-x divide-[var(--glass-edge)] overflow-hidden rounded-2xl">
+            <Ledger
+              label="Rate"
+              value={status.coinsPerHour > 0 ? `${status.coinsPerHour}` : '—'}
+              unit="coins an hour"
+            />
+            <Ledger
+              label="Today"
+              value={Math.floor(status.secondsToday / 60).toLocaleString()}
+              unit={
+                status.dailyCapSeconds > 0
+                  ? `of ${Math.floor(status.dailyCapSeconds / 60).toLocaleString()} min`
+                  : 'minutes'
+              }
+            />
+            <Ledger
+              label="Unsent"
+              value={String(status.pending)}
+              unit={status.pending === 1 ? 'interval' : 'intervals'}
+            />
           </section>
         )}
 
@@ -696,6 +730,32 @@ export function RewardsPage(): React.JSX.Element {
         </p>
             <LegalLinks context="coin" />
       </div>
+    </div>
+  )
+}
+
+/**
+ * One figure in the ledger strip.
+ *
+ * `tabular-nums` throughout: these update while the page is open, and digits
+ * that change width make a row of numbers twitch.
+ */
+function Ledger({
+  label,
+  value,
+  unit
+}: {
+  label: string
+  value: string
+  unit: string
+}): React.JSX.Element {
+  return (
+    <div className="px-4 py-3.5 text-center">
+      <p className="text-[10px] tracking-[0.14em] text-[var(--color-text-muted)] uppercase">
+        {label}
+      </p>
+      <p className="mt-1 text-[20px] leading-none font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">{unit}</p>
     </div>
   )
 }

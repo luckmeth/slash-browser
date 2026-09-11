@@ -877,9 +877,39 @@ textarea,
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .slash-coin {
+  /* Shared by the CSS disc and the coin image, so the motion guard is written
+     once rather than once per rendering path. */
+  .slash-coin-bob {
     animation: slash-coin-bob 4.5s ease-in-out infinite;
   }
+}
+
+/*
+ * The coin image.
+ *
+ * `drop-shadow` rather than `box-shadow` so the glow follows the render's alpha
+ * instead of haloing a square around a round object.
+ */
+.slash-coin-img {
+  object-fit: contain;
+  filter: drop-shadow(0 18px 34px color-mix(in srgb, var(--color-accent) 50%, transparent));
+}
+
+/*
+ * And the de-escalation the reduced-effects switch would otherwise miss.
+ *
+ * That block catches `.glass*` and Tailwind's `backdrop-blur*` and nothing
+ * else, so a bespoke filter like the one above survives it — which is exactly
+ * the trap CLAUDE.md records. A per-frame drop-shadow on a bobbing element is a
+ * real cost on integrated graphics, and this is the machine that switch exists
+ * for.
+ */
+:root[data-effects='reduced'] .slash-coin-img {
+  filter: none;
+}
+
+:root[data-effects='reduced'] .slash-coin-bob {
+  animation: none;
 }
 
 /* A progress/'"live" hairline that sweeps once when revealed. */
