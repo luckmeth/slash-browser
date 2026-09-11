@@ -397,6 +397,8 @@ function TabIcon({ tab, internal }: { tab: Tab; internal: boolean }): React.JSX.
     return (
       <img
         src={tab.faviconUrl}
+        width={32}
+        height={32}
         alt=""
         className={`size-4 shrink-0 rounded-sm ${dimmed}`}
         onError={(event) => {

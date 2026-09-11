@@ -135,7 +135,13 @@ export function TabSearch(): React.JSX.Element {
                   }`}
                 >
                   {tab.faviconUrl ? (
-                    <img src={tab.faviconUrl} alt="" className="size-4 shrink-0 rounded-sm" />
+                    <img
+                      src={tab.faviconUrl}
+                      alt=""
+                      width={32}
+                      height={32}
+                      className="size-4 shrink-0 rounded-sm"
+                    />
                   ) : (
                     <Icon
                       name="globe"

@@ -64,6 +64,8 @@ export function SuggestionList(): React.JSX.Element | null {
               {suggestion.faviconUrl ? (
                 <img
                   src={suggestion.faviconUrl}
+                  width={32}
+                  height={32}
                   alt=""
                   className="size-4 shrink-0 rounded-sm"
                   onError={(event) => {

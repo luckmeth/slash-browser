@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import { pickFavicon } from '@shared/favicon'
 import type { Tab } from './Tab'
 
 export interface TabEventHooks {
@@ -95,9 +96,14 @@ export function attachTabEvents(contents: WebContents, tab: Tab, hooks: TabEvent
   })
 
   contents.on('page-favicon-updated', (_event, favicons) => {
-    const [first] = favicons
-    if (!first) return
-    tab.patch({ faviconUrl: first })
+    // Not `favicons[0]`. Sites list `/favicon.ico` first for historical
+    // reasons, so taking the first entry took a 16x16 bitmap almost every time
+    // — and every surface draws it in a 16 CSS-pixel box, which at 150% display
+    // scaling is a 16px image stretched over 24 device pixels. `pickFavicon`
+    // ranks what the page declared and makes no request of its own.
+    const best = pickFavicon(favicons)
+    if (!best) return
+    tab.patch({ faviconUrl: best })
     hooks.onMetadata(tab)
     hooks.onChanged()
   })

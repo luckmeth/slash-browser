@@ -238,6 +238,8 @@ export function NewTabPage(): React.JSX.Element {
                     {site.faviconUrl ? (
                       <img
                         src={site.faviconUrl}
+                        width={32}
+                        height={32}
                         alt=""
                         className="size-4 rounded-sm"
                         onError={(event) => {
