@@ -14,7 +14,7 @@ import {
 } from '../types/rewards'
 import { PrintChoicesSchema, PrintPreviewSchema } from '../types/print'
 import { SettingsPatchSchema, SettingsSchema } from '../types/settings'
-import { TabsSnapshotSchema, TabSchema } from '../types/tab'
+import { TabsSnapshotSchema, TabSchema, ClosedTabSchema } from '../types/tab'
 import { TabGroupSchema } from '../types/tabGroup'
 import {
   WorkspacesSnapshotSchema,
@@ -543,6 +543,11 @@ export const invokeContracts = {
   },
   'tabs:duplicate': { request: TabIdSchema, response: TabsSnapshotSchema },
   'tabs:reopenClosed': { request: z.void(), response: TabsSnapshotSchema },
+  'tabs:recentlyClosed': { request: z.void(), response: z.array(ClosedTabSchema) },
+  'tabs:reopenClosedAt': {
+    request: z.object({ id: z.number().int() }),
+    response: TabsSnapshotSchema
+  },
   /** Duplicate-tab detection: returns an already-open tab for this URL, if any. */
   'tabs:findByUrl': {
     request: z.object({ url: z.string() }),

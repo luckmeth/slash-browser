@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab } from '@shared/types/tab'
+import type { Tab, ClosedTab } from '@shared/types/tab'
 import type { Bookmark, HistoryEntry, DownloadItem } from '@shared/types/browsing'
 import type { ReadingItem } from '@shared/types/readingList'
 import type { Workspace } from '@shared/types/workspace'
@@ -23,17 +23,18 @@ import { Icon, type IconName } from '../../components/Icon'
  * One place to reach anything, on Ctrl+K.
  *
  * Distinct from tab search, which finds *tabs*. This searches everything the
- * browser holds — open tabs, commands, bookmarks, the reading list, workspaces,
- * history and downloads — so it is the answer to "I know it is in here
- * somewhere", which is the discoverability problem a browser with this many
- * features has by construction.
+ * browser holds — open tabs, recently closed ones, commands, bookmarks, the
+ * reading list, workspaces, snapshots, history, downloads and indexed page text
+ * — so it is the answer to "I know it is in here somewhere", which is the
+ * discoverability problem a browser with this many features has by
+ * construction.
  *
  * Everything here already existed behind a menu item or a panel; nothing new is
  * reachable through it. That is deliberate — a palette that is the only route to
  * something has made the product harder to use, not easier.
  *
  * The ranking is not in this file. `shared/commandSearch.ts` is pure and tested,
- * because the ordering across seven sources is a decision somebody made rather
+ * because the ordering across ten sources is a decision somebody made rather
  * than whatever order they happened to load in, and a decision like that is
  * worth being able to assert.
  */
@@ -65,6 +66,7 @@ export function CommandPalette(): React.JSX.Element {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('')
   const [downloads, setDownloads] = useState<DownloadItem[]>([])
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [closed, setClosed] = useState<ClosedTab[]>([])
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [pages, setPages] = useState<MemoryResult[]>([])
   /**
@@ -105,6 +107,9 @@ export function CommandPalette(): React.JSX.Element {
     })
     void window.browser.invoke('snapshots:list', undefined).then((result) => {
       if (result.ok) setSnapshots(result.value)
+    })
+    void window.browser.invoke('tabs:recentlyClosed', undefined).then((result) => {
+      if (result.ok) setClosed(result.value)
     })
     void window.browser.invoke('settings:getAll', undefined).then((result) => {
       if (result.ok) setMemoryEnabled(result.value.indexHistory || result.value.indexPageContent)
@@ -175,6 +180,9 @@ export function CommandPalette(): React.JSX.Element {
         window.browser.invoke('tabs:create', { url: undefined, background: false })
       ),
       cmd('split', 'wsFolder', 'Toggle split view', 'Ctrl+Shift+S', toggleSplit),
+      cmd('reopen-closed', 'reload', 'Reopen the last closed tab', 'Ctrl+Shift+T', () =>
+        window.browser.invoke('tabs:reopenClosed', undefined)
+      ),
       panel('open-settings', 'settings', 'Open settings', 'Ctrl+,'),
       panel('open-history', 'clock', 'Open history', 'Ctrl+H'),
       panel('open-bookmarks', 'bookmarks', 'Open bookmarks', 'Ctrl+Shift+O'),
@@ -265,6 +273,20 @@ export function CommandPalette(): React.JSX.Element {
           : window.browser.invoke('ui:run', { command: 'open-downloads' }))
     }))
 
+    const closedEntries: Entry[] = closed.map((entry) => ({
+      id: `closed-${entry.id}`,
+      kind: 'closed',
+      icon: 'reload',
+      label: entry.title || hostOf(entry.url),
+      detail: hostOf(entry.url),
+      hint: 'Reopen',
+      // By the stored row's id, not by address. Reopening rebuilds the tab with
+      // its back/forward history, which the closed-tab record holds and this
+      // renderer deliberately never sees — creating a new tab at the same URL
+      // would look identical and lose everywhere that tab had been.
+      run: () => void window.browser.invoke('tabs:reopenClosedAt', { id: entry.id })
+    }))
+
     const snapshotEntries: Entry[] = snapshots.map((snapshot) => ({
       id: `snap-${snapshot.id}`,
       kind: 'snapshot',
@@ -308,6 +330,7 @@ export function CommandPalette(): React.JSX.Element {
       ...bookmarkEntries,
       ...readingEntries,
       ...workspaceEntries,
+      ...closedEntries,
       ...snapshotEntries,
       ...downloadEntries,
       ...historyEntries,
@@ -319,6 +342,7 @@ export function CommandPalette(): React.JSX.Element {
     reading,
     workspaces,
     activeWorkspaceId,
+    closed,
     snapshots,
     downloads,
     history,

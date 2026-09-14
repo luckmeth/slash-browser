@@ -692,6 +692,34 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(window.tabs.emitNow())
   })
 
+  ipc.handle('tabs:recentlyClosed', (_req, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    // Deliberately narrower than what is stored: the serialised back/forward
+    // history and the tab's old position are needed to *rebuild* a tab and are
+    // nobody's business in a renderer, so they stay in main.
+    return ok(
+      window.tabs.listClosedTabs().map((entry) => ({
+        id: entry.id,
+        url: entry.url,
+        title: entry.title,
+        faviconUrl: entry.faviconUrl,
+        workspaceId: entry.workspaceId,
+        closedAt: entry.closedAt
+      }))
+    )
+  })
+
+  ipc.handle('tabs:reopenClosedAt', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    // An id that is no longer there is an ordinary outcome, not an error: the
+    // caller's list can be a moment out of date. Nothing happens and the
+    // snapshot comes back unchanged.
+    window.tabs.reopenClosedAt(request.id)
+    return ok(window.tabs.emitNow())
+  })
+
   ipc.handle('tabs:findByUrl', (request, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')

@@ -24,6 +24,15 @@ export interface ClosedTabRecord {
 }
 
 /**
+ * A stored entry, carrying the row id that identifies it.
+ *
+ * The id and not `closedAt`: closing a window shuts every tab in the same
+ * millisecond, so a timestamp is not a name for one of them. Anything that
+ * reopens a *particular* closed tab has to be able to say which.
+ */
+export type StoredClosedTab = ClosedTabRecord & { readonly id: number }
+
+/**
  * How many to keep.
  *
  * Matches the in-memory stack this replaced. Deep enough to undo a run of
@@ -47,24 +56,15 @@ export class ClosedTabRepository {
   constructor(private readonly db: Database) {}
 
   /** Oldest first, matching the stack order the tab manager pops from. */
-  list(): ClosedTabRecord[] {
+  list(): StoredClosedTab[] {
     const rows = this.db.connection
-      .prepare<[number], Row>(
-        `SELECT url, title, favicon_url, tab_index, is_pinned, workspace_id, navigation, closed_at
+      .prepare<[number], Row & { id: number }>(
+        `SELECT id, url, title, favicon_url, tab_index, is_pinned, workspace_id, navigation, closed_at
            FROM closed_tabs ORDER BY closed_at DESC, id DESC LIMIT ?`
       )
       .all(CLOSED_TAB_LIMIT)
 
-    return rows.reverse().map((row) => ({
-      url: row.url,
-      title: row.title,
-      faviconUrl: row.favicon_url,
-      index: row.tab_index,
-      isPinned: row.is_pinned === 1,
-      workspaceId: row.workspace_id,
-      navigation: row.navigation,
-      closedAt: row.closed_at
-    }))
+    return rows.reverse().map(toRecord)
   }
 
   add(record: ClosedTabRecord): void {
@@ -88,7 +88,7 @@ export class ClosedTabRepository {
   }
 
   /** Removes the most recent entry — what "reopen" consumes. */
-  takeLatest(): ClosedTabRecord | null {
+  takeLatest(): StoredClosedTab | null {
     const row = this.db.connection
       .prepare<[], Row & { id: number }>(
         `SELECT id, url, title, favicon_url, tab_index, is_pinned, workspace_id, navigation, closed_at
@@ -98,16 +98,27 @@ export class ClosedTabRepository {
     if (!row) return null
 
     this.db.connection.prepare('DELETE FROM closed_tabs WHERE id = ?').run(row.id)
-    return {
-      url: row.url,
-      title: row.title,
-      faviconUrl: row.favicon_url,
-      index: row.tab_index,
-      isPinned: row.is_pinned === 1,
-      workspaceId: row.workspace_id,
-      navigation: row.navigation,
-      closedAt: row.closed_at
-    }
+    return toRecord(row)
+  }
+
+  /**
+   * Removes one particular entry — what reopening from a *list* consumes.
+   *
+   * Returns null when the id is not there, which is an ordinary outcome rather
+   * than an error: the list a caller is holding can be a moment out of date, and
+   * an entry may already have been reopened, pruned, or cleared.
+   */
+  take(id: number): StoredClosedTab | null {
+    const row = this.db.connection
+      .prepare<[number], Row & { id: number }>(
+        `SELECT id, url, title, favicon_url, tab_index, is_pinned, workspace_id, navigation, closed_at
+           FROM closed_tabs WHERE id = ?`
+      )
+      .get(id)
+    if (!row) return null
+
+    this.db.connection.prepare('DELETE FROM closed_tabs WHERE id = ?').run(row.id)
+    return toRecord(row)
   }
 
   clear(): void {
@@ -122,5 +133,20 @@ export class ClosedTabRepository {
          )`
       )
       .run(CLOSED_TAB_LIMIT)
+  }
+}
+
+/** One place that turns a row into a record, so the three readers cannot drift. */
+function toRecord(row: Row & { id: number }): StoredClosedTab {
+  return {
+    id: row.id,
+    url: row.url,
+    title: row.title,
+    faviconUrl: row.favicon_url,
+    index: row.tab_index,
+    isPinned: row.is_pinned === 1,
+    workspaceId: row.workspace_id,
+    navigation: row.navigation,
+    closedAt: row.closed_at
   }
 }

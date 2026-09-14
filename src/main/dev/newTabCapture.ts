@@ -98,6 +98,22 @@ export async function runNewTabCapture(
   }
 
   /*
+   * Optionally close the tab first.
+   *
+   * The only way to put something in the recently-closed list is to close
+   * something, and a probe that cannot reach that state cannot check the rows
+   * that depend on it.
+   */
+  if (process.env['SLASH_CAPTURE_CLOSE_TAB'] === '1') {
+    const active = window.tabs.snapshot().activeTabId
+    if (active) {
+      window.tabs.close(active)
+      log.info(`closed the active tab (${active}) to fill the recently-closed list`)
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+  }
+
+  /*
    * Or photograph the overlay instead.
    *
    * The command palette is not in the chrome document — it is a separate
@@ -160,6 +176,31 @@ export async function runNewTabCapture(
             : 'RESULT: palette FAIL — nothing matched'
         )
       }
+      /*
+       * And optionally accept the top row.
+       *
+       * The rows run IPC this probe cannot reach any other way, and a row whose
+       * handler is wrong does not fail — it does nothing, which is
+       * indistinguishable from a control that is broken. Pressing Enter and then
+       * reading the tab list is the only check that tells those apart.
+       */
+      if (process.env['SLASH_CAPTURE_ENTER'] === '1') {
+        const before = window.tabs.allTabs().length
+        overlay.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+        overlay.sendInputEvent({ type: 'char', keyCode: 'Return' })
+        overlay.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+
+        const after = window.tabs.allTabs()
+        const urls = after.map((tab) => tab.snapshot.url).join(' ')
+        log.info(`enter: tabs ${before} -> ${after.length} [${urls}]`)
+        log.info(
+          after.length > before
+            ? 'RESULT: palette-enter PASS — the row opened a tab'
+            : 'RESULT: palette-enter FAIL — the row did nothing'
+        )
+      }
+
       shotContents = overlay
     }
   } else if (overlaySurface) {

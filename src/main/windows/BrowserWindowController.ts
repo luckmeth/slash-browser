@@ -93,6 +93,10 @@ export interface WindowDeps {
   onTabClosed: (entry: ClosedTabEntry & { closedAt: number }) => void
   /** The most recent persisted closed tab, consumed by reopen. */
   takeClosedTab: () => ClosedTabEntry | null
+  /** Every persisted closed tab, for a caller that offers a choice of them. */
+  listClosedTabs: () => (ClosedTabEntry & { id: number; closedAt: number })[]
+  /** One particular persisted closed tab, consumed by reopening from a list. */
+  takeClosedTabAt: (id: number) => ClosedTabEntry | null
   /** Tab groups changed — persisted so an arrangement survives a restart. */
   onGroupsChanged?: (groups: readonly TabGroup[]) => void
   /** Remembered zoom for a URL's host, or null at the default. */
@@ -371,6 +375,8 @@ export class BrowserWindowController {
         onTabDiscarded: (tabId) => this.deps.onTabDiscarded(tabId),
         onTabClosed: (entry) => this.deps.onTabClosed(entry),
         takeClosedTab: () => this.deps.takeClosedTab(),
+        listClosedTabs: () => this.deps.listClosedTabs(),
+        takeClosedTabAt: (id) => this.deps.takeClosedTabAt(id),
         onGroupsChanged: (groups) => this.deps.onGroupsChanged?.(groups),
         siteZoomFor: (url) => this.deps.siteZoomFor?.(url) ?? null,
         onSiteZoomChanged: (url, level) => this.deps.onSiteZoomChanged?.(url, level),

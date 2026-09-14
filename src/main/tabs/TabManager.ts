@@ -115,6 +115,10 @@ export interface TabManagerHooks {
   onTabClosed?: (entry: ClosedTab & { closedAt: number }) => void
   /** The most recent persisted closed tab, consumed by reopen. */
   takeClosedTab?: () => ClosedTab | null
+  /** Every persisted closed tab, for a caller that offers a choice of them. */
+  listClosedTabs?: () => (ClosedTab & { id: number; closedAt: number })[]
+  /** One particular persisted closed tab, consumed by reopening from a list. */
+  takeClosedTabAt?: (id: number) => ClosedTab | null
   /** Groups changed — written through so an arrangement survives a crash. */
   onGroupsChanged?: (groups: readonly TabGroup[]) => void
   /** The remembered zoom for a URL's host, or null at the default. */
@@ -460,7 +464,41 @@ export class TabManager {
   reopenClosed(): void {
     const entry = this.closed.pop() ?? this.hooks.takeClosedTab?.() ?? null
     if (!entry) return
+    this.restoreClosed(entry)
+  }
 
+  /**
+   * Every closed tab a caller could offer, newest first.
+   *
+   * Read from the persisted list rather than this window's stack, because every
+   * close is written through immediately — so the stored list is the complete
+   * one, and the in-memory stack is a subset of it held for the shortcut's sake.
+   */
+  listClosedTabs(): (ClosedTab & { id: number; closedAt: number })[] {
+    return (this.hooks.listClosedTabs?.() ?? []).slice().reverse()
+  }
+
+  /**
+   * Brings back one particular closed tab.
+   *
+   * Separate from `reopenClosed`, which is the Ctrl+Shift+T stack. Taking it out
+   * of *both* stores matters: the same tab sits in the persisted list and, until
+   * the browser restarts, in this window's stack — and reopening one from a list
+   * should not leave a copy behind for the shortcut to produce a second time.
+   */
+  reopenClosedAt(id: number): void {
+    const entry = this.hooks.takeClosedTabAt?.(id) ?? null
+    if (!entry) return
+
+    const stacked = this.closed.findIndex(
+      (candidate) => candidate.url === entry.url && candidate.workspaceId === entry.workspaceId
+    )
+    if (stacked !== -1) this.closed.splice(stacked, 1)
+
+    this.restoreClosed(entry)
+  }
+
+  private restoreClosed(entry: ClosedTab): void {
     const tab = new Tab({ workspaceId: entry.workspaceId, url: entry.url })
     tab.patch({ title: entry.title, faviconUrl: entry.faviconUrl, isPinned: entry.isPinned })
 

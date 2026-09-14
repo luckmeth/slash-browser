@@ -115,6 +115,27 @@ export const TabsSnapshotSchema = z.object({
 export type TabsSnapshot = z.infer<typeof TabsSnapshotSchema>
 
 /**
+ * A tab that was closed and can be brought back.
+ *
+ * Carries what a tab *is* and never what it was showing: address, title,
+ * favicon and when it went. No page content, no form state — the same restraint
+ * the stored record keeps, restated here because this is the shape that crosses
+ * into a renderer.
+ *
+ * The `id` is the stored row's, not a tab id: the tab is gone, and reopening a
+ * particular one needs a name for the record rather than for the tab it was.
+ */
+export const ClosedTabSchema = z.object({
+  id: z.number().int(),
+  url: z.string(),
+  title: z.string(),
+  faviconUrl: z.string().nullable(),
+  workspaceId: z.string(),
+  closedAt: z.number()
+})
+export type ClosedTab = z.infer<typeof ClosedTabSchema>
+
+/**
  * Internal page the chrome renders itself, in the hole normally covered by a
  * page view. Using a sentinel rather than a real `app://` protocol keeps the new
  * tab page inside the privileged chrome document, so it can read bookmarks and

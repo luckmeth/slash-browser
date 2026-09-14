@@ -1019,6 +1019,15 @@ export class AppContext {
         const record = this.closedTabs.takeLatest()
         return record ? { ...record } : null
       },
+      // A private window neither records nor offers closed tabs. It writes
+      // none of its own above, and listing another window's here would put
+      // addresses from an ordinary session in front of a private one.
+      listClosedTabs: () => (isPrivate ? [] : this.closedTabs.list()),
+      takeClosedTabAt: (id) => {
+        if (isPrivate) return null
+        const record = this.closedTabs.take(id)
+        return record ? { ...record } : null
+      },
       // Written through on every change. A group is the product of someone
       // naming and sorting things, and losing that to a crash teaches them not
       // to bother doing it again.

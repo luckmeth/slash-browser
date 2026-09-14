@@ -66,6 +66,8 @@ export const INVOKE_CHANNELS = [
   'tabs:setMuted',
   'tabs:duplicate',
   'tabs:reopenClosed',
+  'tabs:recentlyClosed',
+  'tabs:reopenClosedAt',
   'tabs:findByUrl',
   'tabs:moveToWorkspace',
 

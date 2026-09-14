@@ -24,10 +24,17 @@ function fakeDb() {
             }
             return []
           },
-          get() {
+          get(id?: number) {
+            // The keyed read and the newest-first read are different queries,
+            // and a stand-in that answered both the same way would pass a take()
+            // that ignored its argument entirely.
+            if (sql.includes('WHERE id = ?')) {
+              const found = rows.find((r) => r.id === id)
+              return found ? toRow(found) : undefined
+            }
             const sorted = [...rows].sort((a, b) => b.closedAt - a.closedAt || b.id - a.id)
             const first = sorted[0]
-            return first ? { ...toRow(first), id: first.id } : undefined
+            return first ? toRow(first) : undefined
           },
           run(...args: unknown[]) {
             if (sql.startsWith('INSERT')) {
@@ -64,6 +71,7 @@ function fakeDb() {
 
 function toRow(r: ClosedTabRecord & { id: number }) {
   return {
+    id: r.id,
     url: r.url,
     title: r.title,
     favicon_url: r.faviconUrl,
@@ -152,5 +160,43 @@ describe('ClosedTabRepository', () => {
     repo.add(record())
     repo.clear()
     expect(repo.list()).toEqual([])
+  })
+
+  it('takes one particular entry, leaving the rest', () => {
+    repo.add(record({ url: 'https://first.example/', closedAt: 1000 }))
+    repo.add(record({ url: 'https://second.example/', closedAt: 2000 }))
+    repo.add(record({ url: 'https://third.example/', closedAt: 3000 }))
+
+    const wanted = repo.list().find((entry) => entry.url === 'https://second.example/')!
+    expect(repo.take(wanted.id)?.url).toBe('https://second.example/')
+    expect(repo.list().map((entry) => entry.url)).toEqual([
+      'https://first.example/',
+      'https://third.example/'
+    ])
+  })
+
+  it('consumes the entry it takes', () => {
+    repo.add(record({ url: 'https://only.example/' }))
+    const id = repo.list()[0]!.id
+    expect(repo.take(id)).not.toBeNull()
+    expect(repo.take(id)).toBeNull()
+  })
+
+  it('returns null for an id that is no longer there', () => {
+    // An ordinary outcome, not an error: a caller's list can be a moment out of
+    // date, and the entry may already have been reopened, pruned or cleared.
+    expect(repo.take(999)).toBeNull()
+  })
+
+  it('names entries by row id, not by when they closed', () => {
+    // Closing a window shuts every tab in the same millisecond, so a timestamp
+    // is not a name for one of them.
+    repo.add(record({ url: 'https://a.example/', closedAt: 5000 }))
+    repo.add(record({ url: 'https://b.example/', closedAt: 5000 }))
+
+    const ids = repo.list().map((entry) => entry.id)
+    expect(new Set(ids).size).toBe(2)
+    repo.take(ids[0]!)
+    expect(repo.list()).toHaveLength(1)
   })
 })

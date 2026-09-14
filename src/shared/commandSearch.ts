@@ -1,11 +1,11 @@
 /**
  * Ranking for the command centre.
  *
- * One box that searches the browser: open tabs, history, bookmarks, the reading
- * list, workspaces, downloads and the commands themselves. The hard part is not
- * finding matches — it is ordering them, because a query like `github` matches
- * an open tab, forty history rows and a bookmark, and only one of those answers
- * "take me there".
+ * One box that searches the browser: open tabs, recently closed ones, history,
+ * bookmarks, the reading list, workspaces, snapshots, downloads, indexed page
+ * text and the commands themselves. The hard part is not finding matches — it is
+ * ordering them, because a query like `github` matches an open tab, forty
+ * history rows and a bookmark, and only one of those answers "take me there".
  *
  * Pure and tested, so the ordering is a rule somebody decided rather than
  * whatever order the sources happened to load in.
@@ -20,6 +20,8 @@ export type SourceKind =
   | 'workspace'
   | 'snapshot'
   | 'download'
+  /** A tab that was closed and can be brought back. */
+  | 'closed'
   /** A page matched on its indexed *text*, not its title. Opt-in, and off by default. */
   | 'memory'
 
@@ -74,6 +76,8 @@ const FILTERS: Record<string, SourceKind> = {
   snapshot: 'snapshot',
   snapshots: 'snapshot',
   snap: 'snapshot',
+  closed: 'closed',
+  reopen: 'closed',
   download: 'download',
   downloads: 'download',
   command: 'command',
@@ -139,6 +143,7 @@ const KIND_BONUS: Record<SourceKind, number> = {
   workspace: 15,
   snapshot: 12,
   reading: 10,
+  closed: 8,
   history: 5,
   download: 2,
   // Last, and deliberately. A memory row matched somewhere in a page's *body*,
@@ -302,6 +307,7 @@ export const SOURCE_FILTERS: readonly { prefix: string; kind: SourceKind }[] = [
   { prefix: 'reading:', kind: 'reading' },
   { prefix: 'ws:', kind: 'workspace' },
   { prefix: 'snapshots:', kind: 'snapshot' },
+  { prefix: 'closed:', kind: 'closed' },
   { prefix: 'history:', kind: 'history' },
   { prefix: 'downloads:', kind: 'download' },
   { prefix: 'page:', kind: 'memory' }
@@ -315,6 +321,7 @@ export const GROUP_LABEL: Record<SourceKind, string> = {
   reading: 'Reading list',
   workspace: 'Workspaces',
   snapshot: 'Snapshots',
+  closed: 'Recently closed',
   history: 'History',
   download: 'Downloads',
   memory: 'Page text'
