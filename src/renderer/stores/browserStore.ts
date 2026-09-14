@@ -90,7 +90,17 @@ interface BrowserState {
    * sponsored tile's "turn off" — and each opening its own tab would litter the
    * strip.
    */
-  openSettings: () => void
+  openSettings: (filter?: string) => void
+  /**
+   * What the settings screen should open filtered to, consumed once.
+   *
+   * Set when somebody reaches Settings by searching for a setting rather than
+   * by opening the screen. Cleared by the screen on mount, so returning to an
+   * already-open Settings tab later does not silently re-apply a filter the
+   * user has since cleared.
+   */
+  settingsFilter: string | null
+  takeSettingsFilter: () => string | null
   setWorkspaceEditor: (id: string | 'new' | null) => void
   openFind: () => void
   closeFind: () => void
@@ -145,7 +155,15 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   setPanel: (panel) => set({ panel, workspaceEditorId: null }),
   setDetectedMedia: (detectedMedia) => set({ detectedMedia }),
 
-  openSettings: () => {
+  settingsFilter: null,
+  takeSettingsFilter: () => {
+    const filter = get().settingsFilter
+    if (filter !== null) set({ settingsFilter: null })
+    return filter
+  },
+
+  openSettings: (filter?: string) => {
+    if (filter !== undefined) set({ settingsFilter: filter })
     const existing = get().tabs.find((tab) => tab.url === SETTINGS_URL)
     if (existing) {
       void window.browser.invoke('tabs:activate', { tabId: existing.id })

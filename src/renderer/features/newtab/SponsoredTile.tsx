@@ -102,7 +102,7 @@ export function SponsoredTile(): React.JSX.Element | null {
         Chosen on this device — no browsing data was sent to show it.{' '}
         <button
           type="button"
-          onClick={openSettings}
+          onClick={() => openSettings('Sponsored placements')}
           className="cursor-default underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-primary)]"
         >
           Turn off

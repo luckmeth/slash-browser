@@ -215,7 +215,7 @@ export function App(): React.JSX.Element {
   // Menu accelerators arrive here because a native view — usually the page —
   // holds keyboard focus, so the chrome document never sees the keystroke.
   useEffect(() => {
-    return window.browser.on('ui:command', ({ command }) => {
+    return window.browser.on('ui:command', ({ command, arg }) => {
       switch (command) {
         case 'reveal-chrome':
           setChromeShown(true)
@@ -237,7 +237,7 @@ export function App(): React.JSX.Element {
           togglePanel('downloads')
           break
         case 'open-settings':
-          openSettings()
+          openSettings(arg)
           break
         case 'open-performance':
           togglePanel('performance')

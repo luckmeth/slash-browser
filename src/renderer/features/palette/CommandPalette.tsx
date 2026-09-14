@@ -17,6 +17,7 @@ import {
   SOURCE_FILTERS,
   type SearchableEntry
 } from '@shared/commandSearch'
+import { SETTINGS_TOPICS } from '@shared/settingsTopics'
 import { Icon, type IconName } from '../../components/Icon'
 
 /**
@@ -273,6 +274,20 @@ export function CommandPalette(): React.JSX.Element {
           : window.browser.invoke('ui:run', { command: 'open-downloads' }))
     }))
 
+    const settingEntries: Entry[] = SETTINGS_TOPICS.map((topic) => ({
+      id: `set-${topic.title}`,
+      kind: 'setting',
+      icon: 'settings',
+      label: topic.title,
+      // The words people actually reach for. Searchable because `scoreEntry`
+      // reads the detail line, and shown because a row matching on a word that
+      // is nowhere on it looks like a mistake.
+      detail: topic.keywords,
+      hint: 'Open in settings',
+      run: () =>
+        void window.browser.invoke('ui:run', { command: 'open-settings', arg: topic.title })
+    }))
+
     const closedEntries: Entry[] = closed.map((entry) => ({
       id: `closed-${entry.id}`,
       kind: 'closed',
@@ -330,6 +345,7 @@ export function CommandPalette(): React.JSX.Element {
       ...bookmarkEntries,
       ...readingEntries,
       ...workspaceEntries,
+      ...settingEntries,
       ...closedEntries,
       ...snapshotEntries,
       ...downloadEntries,

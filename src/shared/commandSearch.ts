@@ -22,6 +22,8 @@ export type SourceKind =
   | 'download'
   /** A tab that was closed and can be brought back. */
   | 'closed'
+  /** A group on the settings screen. */
+  | 'setting'
   /** A page matched on its indexed *text*, not its title. Opt-in, and off by default. */
   | 'memory'
 
@@ -78,6 +80,9 @@ const FILTERS: Record<string, SourceKind> = {
   snap: 'snapshot',
   closed: 'closed',
   reopen: 'closed',
+  setting: 'setting',
+  settings: 'setting',
+  set: 'setting',
   download: 'download',
   downloads: 'download',
   command: 'command',
@@ -141,6 +146,7 @@ const KIND_BONUS: Record<SourceKind, number> = {
   command: 30,
   bookmark: 20,
   workspace: 15,
+  setting: 14,
   snapshot: 12,
   reading: 10,
   closed: 8,
@@ -306,6 +312,7 @@ export const SOURCE_FILTERS: readonly { prefix: string; kind: SourceKind }[] = [
   { prefix: 'bm:', kind: 'bookmark' },
   { prefix: 'reading:', kind: 'reading' },
   { prefix: 'ws:', kind: 'workspace' },
+  { prefix: 'settings:', kind: 'setting' },
   { prefix: 'snapshots:', kind: 'snapshot' },
   { prefix: 'closed:', kind: 'closed' },
   { prefix: 'history:', kind: 'history' },
@@ -320,6 +327,7 @@ export const GROUP_LABEL: Record<SourceKind, string> = {
   bookmark: 'Bookmarks',
   reading: 'Reading list',
   workspace: 'Workspaces',
+  setting: 'Settings',
   snapshot: 'Snapshots',
   closed: 'Recently closed',
   history: 'History',

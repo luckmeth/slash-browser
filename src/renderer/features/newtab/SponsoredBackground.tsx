@@ -119,7 +119,7 @@ export function SponsoredBackground({
           </button>
           <button
             type="button"
-            onClick={openSettings}
+            onClick={() => openSettings('Sponsored placements')}
             title="Turn sponsored backgrounds off"
             className="shrink-0 cursor-default rounded-md border border-[var(--glass-edge)] px-2 py-1 text-[10px] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >

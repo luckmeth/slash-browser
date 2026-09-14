@@ -47,7 +47,10 @@ const CATEGORY_ICONS: Record<string, IconName> = {
 export function SettingsPanel(): React.JSX.Element {
   const settings = useBrowserStore((s) => s.settings)
   const { status: semantic, setEnabled: setSemanticEnabled } = useSemanticStatus()
-  const [filter, setFilter] = useState('')
+  // Lazily, and taken rather than read: arriving from the command centre lands
+  // on the group that was searched for, and reopening the tab later does not
+  // silently re-apply a filter the user has since cleared.
+  const [filter, setFilter] = useState(() => useBrowserStore.getState().takeSettingsFilter() ?? '')
   const [category, setCategory] = useState<Category>('Appearance')
 
   if (!settings) return <p className="p-4 text-sm text-[var(--color-text-muted)]">Loading…</p>

@@ -233,7 +233,17 @@ export const UiCommandSchema = z.object({
      * `BrowserWindowController.setChromeAutoHidden`.
      */
     'reveal-chrome'
-  ])
+  ]),
+  /**
+   * What the command is about, where it needs one.
+   *
+   * Only `open-settings` reads it today, as the group to filter that screen to,
+   * so the command centre can land somebody on the setting they searched for
+   * rather than at the top of thirty groups. Optional and bounded: a command
+   * with no argument behaves exactly as it always did, and a renderer cannot
+   * push an unbounded string through a broadcast every privileged view receives.
+   */
+  arg: z.string().max(120).optional()
 })
 export type UiCommand = z.infer<typeof UiCommandSchema>
 

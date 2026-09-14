@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 // project, which has no Node types, and Vite's raw import is the portable way
 // to read a source file as text from either project.
 import SOURCE from './SettingsPanel.tsx?raw'
+import { SETTINGS_TOPICS } from '@shared/settingsTopics'
 
 /**
  * Every settings group must be registered in `GROUP_META`.
@@ -60,6 +61,24 @@ describe('settings groups', () => {
     const registered = new Set(registeredTitles(SOURCE))
     const missing = groupTitles(SOURCE).filter((title) => !registered.has(title))
     expect(missing, `these groups would render as nothing: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('points every command-centre topic at a group that exists', () => {
+    // SETTINGS_TOPICS is what the command centre offers when somebody searches
+    // for a setting, and running one opens Settings filtered to that title. A
+    // topic naming a group that has since been renamed would open the screen
+    // filtered to nothing, which reads as the search being broken rather than
+    // as one stale line in a list.
+    const titles = new Set(groupTitles(SOURCE))
+    const missing = SETTINGS_TOPICS.map((topic) => topic.title).filter((t) => !titles.has(t))
+    expect(missing, `these topics would find nothing: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('offers a topic for most of the screen', () => {
+    // Not all of it — "Not built yet" is a list of absences, not a setting —
+    // but a screen half of which cannot be found from the command centre is
+    // worth failing over rather than discovering.
+    expect(SETTINGS_TOPICS.length).toBeGreaterThan(groupTitles(SOURCE).length - 4)
   })
 
   it('puts Slash Coin in a category the rail actually lists', () => {
