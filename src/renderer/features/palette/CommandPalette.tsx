@@ -265,6 +265,15 @@ export function CommandPalette(): React.JSX.Element {
       panel('open-memory', 'sparkle', 'Open browsing memory'),
       panel('open-permissions', 'lock', 'Open permissions'),
       panel('open-timemachine', 'clock', 'Open restore points'),
+      // The rest of the panels. Every tool the browser has is reachable from
+      // here, which is what makes this the one place to look rather than a
+      // shortcut to some of them — five were missing and were only findable if
+      // you already knew which toolbar button opened them.
+      panel('open-tabbrain', 'sparkle', 'Open Tab Brain', 'Projects, duplicates, idle tabs'),
+      panel('open-insight', 'eye', 'Open Page Insight', 'What this page is doing'),
+      panel('open-redirects', 'external', 'Open Redirect X-Ray', 'Where a link took you'),
+      panel('open-mission', 'activity', 'Open Mission Mode'),
+      panel('open-ai', 'sparkle', 'Open the assistant', 'Providers and the pane'),
       cmd('bookmark', 'star', 'Bookmark this tab', 'Ctrl+D', () =>
         window.browser.invoke('ui:run', { command: 'bookmark-current-tab' })
       ),

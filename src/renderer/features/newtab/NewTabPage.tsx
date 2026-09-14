@@ -9,6 +9,7 @@ import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
 import { PitchCards } from './PitchCards'
 import { ResumeWork } from './ResumeWork'
+import { BrowserStatusLine } from './BrowserStatusLine'
 import { DefaultBrowserCard } from './DefaultBrowserCard'
 import { SponsoredBackground } from './SponsoredBackground'
 import { SponsoredBanner } from './SponsoredBanner'
@@ -271,6 +272,14 @@ export function NewTabPage(): React.JSX.Element {
               {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
             </p>
           )}
+          {/*
+            One line, not a block. A counter panel used to sit lower down this
+            page and was removed on purpose — "15 blocked, 3 restore points" is
+            a dashboard, and a new tab is a place you pass through. What is
+            worth saying is only what needs acting on, so this renders nothing
+            at all on a quiet day.
+          */}
+          <BrowserStatusLine />
         </div>
 
         {/*
