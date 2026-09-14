@@ -669,6 +669,48 @@ export const invokeContracts = {
     request: z.object({ id: z.string() }),
     response: WorkspacesSnapshotSchema
   },
+  /**
+   * Archives a workspace: keeps the work, closes the tabs.
+   *
+   * A project ends and its twenty tabs are still open, holding renderers and
+   * cluttering the strip, and closing them by hand loses where you got to.
+   * Archiving writes them into a restore point — the snapshot system that
+   * already exists, not a second store — then closes them. The workspace keeps
+   * its name and its notes.
+   *
+   * Never the active workspace and never the default one: there must always be
+   * somewhere for a tab to live, and archiving the room you are standing in is
+   * not a thing to do quietly.
+   */
+  'workspaces:archive': {
+    request: z.object({ id: z.string() }),
+    response: z.object({
+      workspaces: WorkspacesSnapshotSchema,
+      /** How many tabs were closed, so the UI can say rather than imply. */
+      archived: z.number().int(),
+      /** Set when it could not be archived, with the reason to show. */
+      refused: z.string().nullable()
+    })
+  },
+  /** Brings an archived workspace's tabs back and marks it in use again. */
+  'workspaces:unarchive': {
+    request: z.object({ id: z.string() }),
+    response: z.object({
+      workspaces: WorkspacesSnapshotSchema,
+      restored: z.number().int()
+    })
+  },
+  /**
+   * Writes a workspace's name, notes and page addresses to a JSON file.
+   *
+   * What the architecture actually holds — there is no page content here and no
+   * cookies, because neither is the workspace's to export. The user picks the
+   * destination; nothing is uploaded.
+   */
+  'workspaces:export': {
+    request: z.object({ id: z.string() }),
+    response: z.object({ savedTo: z.string().nullable(), tabs: z.number().int() })
+  },
   /** Copies a workspace's settings and its open tab URLs into a new workspace. */
   'workspaces:duplicate': {
     request: z.object({ id: z.string(), isolated: z.boolean().default(false) }),

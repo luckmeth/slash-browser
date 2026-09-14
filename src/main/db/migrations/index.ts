@@ -945,6 +945,26 @@ const m027_protection: Migration = {
   `
 }
 
+const m028_workspace_archive: Migration = {
+  version: 28,
+  name: 'workspace_archive',
+  sql: /* sql */ `
+    -- Archiving a workspace: keep the work, close the tabs.
+    --
+    -- A research project ends and its twenty tabs are still open, holding
+    -- renderers, cluttering the strip and impossible to close without losing
+    -- where you got to. Archiving writes those tabs into a restore point — the
+    -- snapshot system that already exists, rather than a second store — closes
+    -- them, and keeps the workspace with its name and notes intact.
+    --
+    -- \`archived_at\` is when, and \`archive_snapshot\` is which restore point
+    -- holds the tabs. Both null for an ordinary workspace, which is every
+    -- workspace that exists before this migration runs.
+    ALTER TABLE workspaces ADD COLUMN archived_at INTEGER;
+    ALTER TABLE workspaces ADD COLUMN archive_snapshot INTEGER;
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -972,7 +992,8 @@ export const migrations: readonly Migration[] = [
   m024_engine_downloads,
   m025_download_queues,
   m026_rewards,
-  m027_protection
+  m027_protection,
+  m028_workspace_archive
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

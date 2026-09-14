@@ -17,6 +17,8 @@ interface WorkspaceRow {
   notes: string
   sort_order: number
   created_at: number
+  archived_at: number | null
+  archive_snapshot: number | null
 }
 
 /**
@@ -41,7 +43,12 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     isolated: row.isolated === 1,
     notes: row.notes,
     sortOrder: row.sort_order,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    // Null on every row written before the archive columns existed, which SQLite
+    // supplies for an added column — so an existing workspace is simply not
+    // archived rather than needing a backfill.
+    archivedAt: row.archived_at,
+    archiveSnapshotId: row.archive_snapshot
   }
 }
 
@@ -116,6 +123,20 @@ export class WorkspaceRepository {
         notes: patch.notes ?? existing.notes,
         sortOrder: patch.sortOrder ?? existing.sortOrder
       })
+    return this.requireById(id)
+  }
+
+  /**
+   * Marks a workspace archived, pointing at the restore point holding its tabs.
+   *
+   * The tabs themselves are closed by the caller: this records *that* it
+   * happened and *where the pages went*, so restoring is a lookup rather than a
+   * guess. Passing null for both un-archives it.
+   */
+  setArchived(id: string, archivedAt: number | null, snapshotId: number | null): Workspace {
+    this.db.connection
+      .prepare('UPDATE workspaces SET archived_at = ?, archive_snapshot = ? WHERE id = ?')
+      .run(archivedAt, snapshotId, id)
     return this.requireById(id)
   }
 

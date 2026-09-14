@@ -79,6 +79,9 @@ export const INVOKE_CHANNELS = [
   'workspaces:delete',
   'workspaces:activate',
   'workspaces:duplicate',
+  'workspaces:archive',
+  'workspaces:unarchive',
+  'workspaces:export',
 
   // --- navigation ---
   'nav:navigate',

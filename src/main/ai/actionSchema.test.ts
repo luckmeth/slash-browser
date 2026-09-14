@@ -33,6 +33,8 @@ const workspace: Workspace = {
   name: 'Personal',
   icon: 'wsHome',
   color: 'slate',
+  archivedAt: null,
+  archiveSnapshotId: null,
   isolated: false,
   notes: '',
   sortOrder: 0,

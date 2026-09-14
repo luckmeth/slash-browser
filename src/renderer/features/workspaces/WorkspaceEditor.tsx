@@ -47,6 +47,8 @@ export function WorkspaceEditor(): React.JSX.Element | null {
   const [color, setColor] = useState<WorkspaceColor>('slate')
   const [isolated, setIsolated] = useState(false)
   const [notes, setNotes] = useState('')
+  /** What just happened, or why it did not. */
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     setName(existing?.name ?? '')
@@ -234,6 +236,63 @@ export function WorkspaceEditor(): React.JSX.Element | null {
           >
             <Icon name="lock" size={12} /> Duplicate as isolated
           </button>
+          {/*
+            Archiving: keep the work, close the tabs.
+
+            A research project ends and its tabs are still open, holding
+            renderers and cluttering the strip, and closing them by hand loses
+            where you got to. Its pages go into a restore point — the snapshot
+            system that already exists, not a second store — so they come back
+            whole, with scroll position and back-history.
+          */}
+          {existing.archivedAt === null ? (
+            <button
+              type="button"
+              onClick={() => {
+                void window.browser
+                  .invoke('workspaces:archive', { id: existing.id })
+                  .then((result) => {
+                    if (!result.ok) return
+                    // The refusals are sentences rather than a control that
+                    // silently does nothing: you cannot archive the workspace
+                    // you are standing in, or one with nothing in it.
+                    if (result.value.refused) setNotice(result.value.refused)
+                    else close()
+                  })
+              }}
+              className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+            >
+              <Icon name="folder" size={12} /> Archive workspace
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                void window.browser.invoke('workspaces:unarchive', { id: existing.id }).then(close)
+              }}
+              className="flex items-center gap-2 text-xs text-[var(--color-accent)] transition hover:opacity-80"
+            >
+              <Icon name="reload" size={12} /> Reopen this workspace
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              void window.browser.invoke('workspaces:export', { id: existing.id }).then((result) => {
+                if (!result.ok) return
+                setNotice(
+                  result.value.savedTo
+                    ? `Exported ${result.value.tabs} ${
+                        result.value.tabs === 1 ? 'address' : 'addresses'
+                      }. No page content or signed-in state was included.`
+                    : null
+                )
+              })
+            }}
+            className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+          >
+            <Icon name="download" size={12} /> Export addresses and notes
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -249,6 +308,13 @@ export function WorkspaceEditor(): React.JSX.Element | null {
           >
             <Icon name="trash" size={12} /> Delete workspace
           </button>
+
+          {existing.archivedAt !== null && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Archived. Its pages are kept in a restore point and its notes are untouched.
+            </p>
+          )}
+          {notice && <p className="text-xs text-[var(--color-text-muted)]">{notice}</p>}
         </div>
       )}
 

@@ -58,7 +58,18 @@ export const WorkspaceSchema = z.object({
   isolated: z.boolean(),
   notes: z.string(),
   sortOrder: z.number().int(),
-  createdAt: z.number()
+  createdAt: z.number(),
+  /**
+   * When this workspace was archived, or null while it is in use.
+   *
+   * An archived workspace keeps its name and notes and has no tabs open. Its
+   * pages live in the restore point named below, which is the existing snapshot
+   * system rather than a second store — so "restore this workspace" and
+   * "restore this session" are the same mechanism.
+   */
+  archivedAt: z.number().nullable().default(null),
+  /** The restore point holding what was open when it was archived. */
+  archiveSnapshotId: z.number().int().nullable().default(null)
 })
 export type Workspace = z.infer<typeof WorkspaceSchema>
 

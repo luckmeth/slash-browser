@@ -1,14 +1,16 @@
-import { copyFileSync, readFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, promises as fsp } from 'node:fs'
 import { chooseSplitPartner } from '@shared/types/splitPartner'
 import { join } from 'node:path'
 import { app, dialog, shell, clipboard } from 'electron'
 import { mediaFilename } from '../downloads/engine/mediaFilename'
+import { sanitiseFilename } from '../downloads/engine/paths'
 import { expandBatch } from '../downloads/engine/batchUrls'
 import { ok, err } from '@shared/result'
 import { isInternalUrl } from '@shared/types/tab'
 import { originOf, hostOf } from '@shared/url'
+import { archiveRefusal } from '@shared/workspaceArchive'
 import type { BlockingStatus } from '@shared/types/blocking'
-import type { UiCommand } from '@shared/ipc/contracts'
+import type { UiCommand, InvokeResponse } from '@shared/ipc/contracts'
 import type { AddressFieldKind } from '@shared/addressFields'
 import { DEFAULT_WORKSPACE_ID } from '@shared/types/workspace'
 import type { AppContext } from '../AppContext'
@@ -801,6 +803,149 @@ export function registerHandlers(ctx: AppContext): void {
     window.tabs.setActiveWorkspace(request.id)
     window.tabs.emitNow()
     return ok(emitWorkspaces(window))
+  })
+
+  ipc.handle('workspaces:archive', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const workspace = ctx.workspaces.findById(request.id)
+    if (!workspace) return err('NOT_FOUND', 'That workspace is gone')
+
+    const snapshot = (): InvokeResponse<'workspaces:archive'> => ({
+      workspaces: {
+        workspaces: ctx.workspaces.list(),
+        activeWorkspaceId: window.tabs.currentWorkspaceId
+      },
+      archived: 0,
+      refused: null
+    })
+
+    /*
+     * Every refusal is a sentence, and they live in a pure tested module.
+     *
+     * A control that silently does nothing is indistinguishable from one that
+     * is broken, and the two dangerous cases here — archiving the workspace you
+     * are standing in, and archiving the one that must always exist — look like
+     * ordinary clicks right up until the tabs vanish.
+     */
+    const tabCount = window.tabs
+      .allTabs()
+      .filter((tab) => tab.snapshot.workspaceId === workspace.id && !isInternalUrl(tab.snapshot.url))
+      .length
+
+    const refusal = archiveRefusal({
+      workspace,
+      activeWorkspaceId: window.tabs.currentWorkspaceId,
+      defaultWorkspaceId: DEFAULT_WORKSPACE_ID,
+      tabCount
+    })
+    if (refusal) return ok({ ...snapshot(), refused: refusal })
+
+    const snapshotId = await ctx.snapshots.captureWorkspace(
+      workspace.id,
+      `${workspace.name} (archived)`
+    )
+    if (snapshotId === null) {
+      return ok({ ...snapshot(), refused: 'Nothing is open in it, so there is nothing to archive.' })
+    }
+
+    // Closed only after the restore point is safely written. The other order
+    // would lose the tabs if the capture failed.
+    let archived = 0
+    for (const tab of window.tabs.allTabs()) {
+      if (tab.snapshot.workspaceId !== workspace.id) continue
+      if (window.tabs.close(tab.id)) archived += 1
+    }
+
+    ctx.workspaces.setArchived(workspace.id, Date.now(), snapshotId)
+    const next = {
+      workspaces: ctx.workspaces.list(),
+      activeWorkspaceId: window.tabs.currentWorkspaceId
+    }
+    ipc.broadcast('workspaces:snapshot', next, window.privilegedContents())
+    return ok({ workspaces: next, archived, refused: null })
+  })
+
+  ipc.handle('workspaces:unarchive', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const workspace = ctx.workspaces.findById(request.id)
+    if (!workspace) return err('NOT_FOUND', 'That workspace is gone')
+
+    let restored = 0
+    if (workspace.archiveSnapshotId !== null) {
+      const detail = ctx.snapshotRepository.detail(workspace.archiveSnapshotId)
+      // The restore point may have been deleted from the Time Machine panel in
+      // the meantime. The workspace still comes back — with its name and its
+      // notes — rather than staying archived for ever behind a missing row.
+      if (detail) {
+        restored = window.tabs.restoreFromSnapshot(
+          detail.tabs.map((tab) => ({ ...tab, workspaceId: workspace.id })),
+          { activateFirst: false }
+        ).length
+      }
+    }
+
+    ctx.workspaces.setArchived(workspace.id, null, null)
+    window.tabs.setActiveWorkspace(workspace.id)
+    const next = {
+      workspaces: ctx.workspaces.list(),
+      activeWorkspaceId: workspace.id
+    }
+    ipc.broadcast('workspaces:snapshot', next, window.privilegedContents())
+    return ok({ workspaces: next, restored })
+  })
+
+  ipc.handle('workspaces:export', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const workspace = ctx.workspaces.findById(request.id)
+    if (!workspace) return err('NOT_FOUND', 'That workspace is gone')
+
+    /*
+     * What the architecture actually holds about a workspace.
+     *
+     * Addresses, titles, the name and the notes. No page content and no
+     * cookies: neither is the workspace's to export, and a file that quietly
+     * carried a session would be a credential leaving the machine in a
+     * download nobody read.
+     */
+    const open = window.tabs
+      .allTabs()
+      .filter((tab) => tab.snapshot.workspaceId === workspace.id && !isInternalUrl(tab.snapshot.url))
+      .map((tab) => ({ url: tab.snapshot.url, title: tab.snapshot.title }))
+
+    const archived =
+      workspace.archiveSnapshotId !== null
+        ? (ctx.snapshotRepository.detail(workspace.archiveSnapshotId)?.tabs ?? []).map((tab) => ({
+            url: tab.url,
+            title: tab.title
+          }))
+        : []
+
+    const tabs = open.length > 0 ? open : archived
+    const document = {
+      exportedAt: new Date().toISOString(),
+      workspace: {
+        name: workspace.name,
+        notes: workspace.notes,
+        isolated: workspace.isolated,
+        createdAt: new Date(workspace.createdAt).toISOString(),
+        archivedAt: workspace.archivedAt ? new Date(workspace.archivedAt).toISOString() : null
+      },
+      tabs,
+      note: 'Addresses and titles only. No page content, no cookies and no signed-in state.'
+    }
+
+    const chosen = await dialog.showSaveDialog(window.browserWindow, {
+      title: 'Export workspace',
+      defaultPath: `${sanitiseFilename(workspace.name)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (chosen.canceled || !chosen.filePath) return ok({ savedTo: null, tabs: tabs.length })
+
+    await fsp.writeFile(chosen.filePath, JSON.stringify(document, null, 2), 'utf-8')
+    return ok({ savedTo: chosen.filePath, tabs: tabs.length })
   })
 
   ipc.handle('workspaces:duplicate', (request, context) => {

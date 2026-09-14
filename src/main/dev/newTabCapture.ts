@@ -203,7 +203,32 @@ export async function runNewTabCapture(
       log.warn(`click script failed — ${String(error)}`)
     }
     // Long enough for whatever it started to have come back.
-    await new Promise((resolve) => setTimeout(resolve, 3000))
+    await new Promise((resolve) => setTimeout(resolve, Number(process.env['SLASH_CAPTURE_CLICK_WAIT'] ?? '3000')))
+
+    /*
+     * A script that reports asynchronously leaves its answer on a global.
+     *
+     * Not `document.title`: the chrome document's title is synced from the tab
+     * snapshot, so the app overwrites anything written there within a frame —
+     * which is exactly what happened on the first attempt, and reported nothing
+     * rather than reporting wrongly.
+     */
+    try {
+      const asyncResult = await chrome.executeJavaScript(
+        // Storage first: a renderer that reloaded has lost its globals, and a
+        // probe that reports nothing is indistinguishable from one whose script
+        // never ran.
+        `JSON.stringify(window.__slashProbeResult ?? JSON.parse(localStorage.getItem('slashProbeLog') || 'null'))`
+      )
+      if (typeof asyncResult === 'string' && asyncResult !== 'null') {
+        log.info(`RESULT: click script — ${asyncResult}`)
+      }
+    } catch (error) {
+      // Said out loud rather than swallowed: a probe that reports nothing when
+      // its own read failed is indistinguishable from one whose script never
+      // ran, and that cost several rounds here.
+      log.warn(`could not read the click script's result — ${String(error)}`)
+    }
   }
 
   let shotContents = chrome

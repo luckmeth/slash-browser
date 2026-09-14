@@ -224,6 +224,52 @@ export class SessionSnapshotManager {
     return id
   }
 
+  /**
+   * A restore point holding one workspace's tabs, for archiving it.
+   *
+   * The same conversion the session capture uses and the same table — archiving
+   * a workspace and restoring a session are one mechanism, so a workspace's
+   * pages come back with their scroll position and back-history exactly as a
+   * session's do. Written as `manual` so `pruneAutomatic` never deletes it: an
+   * archive the browser quietly threw away a fortnight later would be the worst
+   * possible behaviour for a feature whose whole promise is keeping the work.
+   *
+   * Returns null when the workspace has nothing worth keeping, so the caller
+   * can refuse rather than archiving a workspace into an empty restore point.
+   */
+  async captureWorkspace(workspaceId: string, label: string): Promise<number | null> {
+    const includePageState = this.settings.getAll().restoreFormState
+    const tabs: SnapshotTab[] = []
+
+    for (const window of this.windows()) {
+      if (window.isPrivate) continue
+      for (const [index, tab] of window.tabs.allTabs().entries()) {
+        const snap = tab.snapshot
+        if (snap.workspaceId !== workspaceId) continue
+        if (isInternalUrl(snap.url)) continue
+
+        tabs.push({
+          url: snap.url,
+          title: snap.title,
+          faviconUrl: snap.faviconUrl,
+          workspaceId: snap.workspaceId,
+          order: index,
+          windowIndex: 0,
+          isPinned: snap.isPinned,
+          groupId: snap.groupId,
+          scrollY: await readScrollY(tab),
+          entries: readEntries(tab, includePageState),
+          activeEntryIndex: readActiveIndex(tab)
+        })
+      }
+    }
+
+    if (tabs.length === 0) return null
+    const id = this.repository.create(label, 'manual', tabs)
+    log.info(`archived workspace ${workspaceId} as snapshot #${id} (${tabs.length} tab(s))`)
+    return id
+  }
+
   /** Snapshot written at quit, offered on the next launch. */
   latestSessionEnd(): ReturnType<SnapshotRepository['latestOfKind']> {
     return this.repository.latestOfKind('session-end')
