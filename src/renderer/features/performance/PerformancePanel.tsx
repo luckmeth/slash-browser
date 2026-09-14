@@ -9,6 +9,7 @@ import { hostOf } from '@shared/url'
 import { isInternalUrl } from '@shared/types/tab'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
+import { TabHealth } from './TabHealth'
 
 const STATE_STYLES: Record<PerformanceState, string> = {
   ACTIVE: 'text-[var(--color-good)]',
@@ -70,6 +71,13 @@ export function PerformancePanel(): React.JSX.Element {
 
   return (
     <div className="space-y-5 p-4">
+      {/*
+        First, because the summary is what somebody opens this panel to read.
+        The machine switch and the mode selector below are settings *for* it,
+        and having them above put two controls in front of the answer.
+      */}
+      <TabHealth snapshot={snapshot} tabs={tabs} onNotice={setNotice} />
+
       <section>
         <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
           This machine

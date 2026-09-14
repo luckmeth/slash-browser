@@ -1,4 +1,5 @@
 import type { Recommendation, TabMetrics } from '@shared/types/performance'
+import { findDuplicateGroups, duplicateCloseIds } from '@shared/tabDuplicates'
 import type { Tab } from '../tabs/Tab'
 
 /** Below this, a suggestion is not worth the interruption. */
@@ -45,23 +46,26 @@ export function buildRecommendations(
     })
   }
 
-  // 2. Duplicate URLs. Grouped by normalised URL so a page open twice is one
-  //    suggestion, and the *older* copies are the ones offered for closing.
-  const byUrl = new Map<string, Tab[]>()
-  for (const tab of tabs) {
-    const key = normalise(tab.snapshot.url)
-    const bucket = byUrl.get(key)
-    if (bucket) bucket.push(tab)
-    else byUrl.set(key, [tab])
-  }
-
-  const duplicates: string[] = []
-  for (const group of byUrl.values()) {
-    if (group.length < 2) continue
-    const sorted = [...group].sort((a, b) => b.snapshot.lastActiveAt - a.snapshot.lastActiveAt)
-    // Keep the most recently used; offer the rest.
-    duplicates.push(...sorted.slice(1).map((t) => t.id))
-  }
+  /*
+   * 2. Duplicates.
+   *
+   * `findDuplicateGroups` is the one implementation, shared with the Tab Health
+   * view, so the panel and this engine cannot disagree about what counts. It
+   * reaches further than the exact-address match this used to do — campaign
+   * parameters, `www`, http against https, and a shared title on one host — and
+   * it refuses to offer a pinned or protected copy, which this did not.
+   */
+  const groups = findDuplicateGroups(
+    tabs.map((tab) => ({
+      id: tab.id,
+      url: tab.snapshot.url,
+      title: tab.snapshot.title,
+      lastActiveAt: tab.snapshot.lastActiveAt,
+      isPinned: tab.snapshot.isPinned,
+      isProtected: tab.snapshot.isProtected
+    }))
+  )
+  const duplicates = duplicateCloseIds(groups)
 
   if (duplicates.length > 0) {
     const savings = duplicates.reduce((sum, id) => {
@@ -118,17 +122,6 @@ export function buildRecommendations(
   }
 
   return recommendations
-}
-
-function normalise(url: string): string {
-  try {
-    const parsed = new URL(url)
-    parsed.hash = ''
-    const text = parsed.toString()
-    return text.endsWith('/') ? text.slice(0, -1) : text
-  } catch {
-    return url
-  }
 }
 
 function formatDuration(ms: number): string {

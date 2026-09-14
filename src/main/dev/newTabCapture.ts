@@ -56,6 +56,17 @@ export async function runNewTabCapture(
      * appears once there are real tabs to resume, so the probe has to both open
      * one and then look away from it.
      */
+    /*
+     * Optionally more than once, so duplicate detection has something to find.
+     * Two tabs at the same address is exactly the state Tab Health and the
+     * palette's close-duplicates command exist for, and a probe that cannot
+     * reach it cannot check either of them.
+     */
+    const copies = Number(process.env['SLASH_CAPTURE_COPIES'] ?? '0')
+    for (let i = 0; i < copies; i += 1) {
+      window.tabs.create({ url: targetUrl, background: true })
+    }
+
     if (background) {
       const internal = window.tabs.allTabs().find((tab) => isInternalUrl(tab.snapshot.url))
       if (internal) window.tabs.activate(internal.id)
@@ -144,6 +155,23 @@ export async function runNewTabCapture(
    * layout, and the honest alternative — compositing two captures — would be a
    * picture the browser never actually drew.
    */
+  /*
+   * Optionally open a side panel.
+   *
+   * Panels are React in the *chrome* document — they inset the page rather than
+   * floating over it — so the ordinary chrome capture photographs them. Routed
+   * through `ui:run` because that is the path a menu accelerator takes, which
+   * means the probe exercises the real command rather than a shortcut into the
+   * store that no user has.
+   */
+  const panel = process.env['SLASH_CAPTURE_PANEL']
+  if (panel) {
+    chrome.send('ui:command', { command: panel })
+    // Long enough for the panel's own fetches — a performance snapshot is
+    // sampled rather than held, so capturing early photographs "Measuring…".
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+  }
+
   let shotContents = chrome
   const overlaySurface = process.env['SLASH_CAPTURE_OVERLAY']
   if (overlaySurface === 'command-palette') {

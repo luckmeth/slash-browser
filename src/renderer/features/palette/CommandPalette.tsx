@@ -18,6 +18,7 @@ import {
   type SearchableEntry
 } from '@shared/commandSearch'
 import { SETTINGS_TOPICS } from '@shared/settingsTopics'
+import { findDuplicateGroups, duplicateCloseIds } from '@shared/tabDuplicates'
 import { Icon, type IconName } from '../../components/Icon'
 
 /**
@@ -175,6 +176,30 @@ export function CommandPalette(): React.JSX.Element {
     return () => clearTimeout(timer)
   }, [query, memoryEnabled])
 
+  /*
+   * Duplicates, from the tab list already fetched.
+   *
+   * The same `findDuplicateGroups` the Tab Health view uses, so a count offered
+   * here cannot disagree with the one offered there — and pinned and protected
+   * copies are excluded by that rule rather than by a second one written here.
+   */
+  const duplicates = useMemo(
+    () =>
+      duplicateCloseIds(
+        findDuplicateGroups(
+          tabs.map((tab) => ({
+            id: tab.id,
+            url: tab.url,
+            title: tab.title,
+            lastActiveAt: tab.lastActiveAt,
+            isPinned: tab.isPinned,
+            isProtected: tab.isProtected
+          }))
+        )
+      ),
+    [tabs]
+  )
+
   const entries = useMemo<Entry[]>(() => {
     const commands: Entry[] = [
       cmd('new-tab', 'plus', 'New tab', 'Ctrl+T', () =>
@@ -184,6 +209,25 @@ export function CommandPalette(): React.JSX.Element {
       cmd('reopen-closed', 'reload', 'Reopen the last closed tab', 'Ctrl+Shift+T', () =>
         window.browser.invoke('tabs:reopenClosed', undefined)
       ),
+      ...(duplicates.length > 0
+        ? [
+            // A live command: it only exists when there is something to close,
+            // and it names the count rather than offering a tidy-up that would
+            // turn out to do nothing. The same shared rule the Tab Health view
+            // uses, so the two cannot disagree about what a duplicate is.
+            cmd(
+              'close-duplicates',
+              'trash',
+              `Close ${duplicates.length} duplicate ${duplicates.length === 1 ? 'tab' : 'tabs'}`,
+              'Keeps one of each · Ctrl+Shift+T undoes it',
+              () => {
+                for (const tabId of duplicates) {
+                  void window.browser.invoke('tabs:close', { tabId })
+                }
+              }
+            )
+          ]
+        : []),
       panel('open-settings', 'settings', 'Open settings', 'Ctrl+,'),
       panel('open-history', 'clock', 'Open history', 'Ctrl+H'),
       panel('open-bookmarks', 'bookmarks', 'Open bookmarks', 'Ctrl+Shift+O'),
@@ -353,6 +397,7 @@ export function CommandPalette(): React.JSX.Element {
       ...pageEntries
     ]
   }, [
+    duplicates,
     tabs,
     bookmarks,
     reading,
