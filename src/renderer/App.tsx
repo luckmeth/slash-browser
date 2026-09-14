@@ -245,6 +245,9 @@ export function App(): React.JSX.Element {
         case 'open-protection':
           togglePanel('protection')
           break
+        case 'open-trust':
+          togglePanel('trust')
+          break
         case 'open-find':
           openFind()
           break

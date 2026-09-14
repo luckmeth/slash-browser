@@ -6,10 +6,20 @@ import {
   type PermissionRequest
 } from '@shared/types/permission'
 
-/** Offered in order of increasing commitment. */
+/**
+ * Offered in order of increasing commitment.
+ *
+ * `allow-for-session` was implemented end to end — the schema knows it, the
+ * store honours it, `POLICY_COPY` has its sentence — and was missing from this
+ * list, so no user could ever choose it. CLAUDE.md's rule applies: a capability
+ * with no way to reach it is an unfinished feature, not spare capacity. It sits
+ * between "this tab" and "one hour" because that is where it falls on the scale
+ * this list is ordered by.
+ */
 const ALLOW_POLICIES: PermissionPolicy[] = [
   'allow-once',
   'allow-for-tab',
+  'allow-for-session',
   'allow-until',
   'always-allow'
 ]

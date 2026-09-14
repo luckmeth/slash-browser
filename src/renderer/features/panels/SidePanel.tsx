@@ -16,6 +16,7 @@ import { DownloadsPanel } from './DownloadsPanel'
 import { WorkspaceEditor } from '../workspaces/WorkspaceEditor'
 import { PerformancePanel } from '../performance/PerformancePanel'
 import { ProtectionPanel } from '../protection/ProtectionPanel'
+import { SiteTrustPanel } from '../trust/SiteTrustPanel'
 import { PermissionsPanel } from '../permissions/PermissionsPanel'
 import { TimeMachinePanel } from '../timemachine/TimeMachinePanel'
 import { MemoryPanel } from '../memory/MemoryPanel'
@@ -30,6 +31,7 @@ const TITLES = {
   downloads: 'Downloads',
   performance: 'Performance',
   protection: 'Protection report',
+  trust: 'Site trust',
   permissions: 'Permissions',
   timemachine: 'Restore points',
   memory: 'Browsing memory',
@@ -120,6 +122,7 @@ export function SidePanel(): React.JSX.Element | null {
             )}
             {panel === 'performance' && <PerformancePanel />}
             {panel === 'protection' && <ProtectionPanel />}
+            {panel === 'trust' && <SiteTrustPanel />}
             {panel === 'permissions' && <PermissionsPanel />}
             {panel === 'timemachine' && (
               <>

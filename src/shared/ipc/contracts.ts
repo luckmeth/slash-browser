@@ -189,6 +189,30 @@ export type OverlayState = z.infer<typeof OverlayStateSchema>
 
 const TabIdSchema = z.object({ tabId: z.string() })
 
+/** The raw signals behind the Site Trust view. `buildTrustReport` reads these. */
+export const TrustSignalsSchema = z.object({
+  url: z.string(),
+  blocked: z.object({
+    ads: z.number().int(),
+    trackers: z.number().int(),
+    popups: z.number().int(),
+    redirects: z.number().int()
+  }),
+  siteAllowed: z.boolean(),
+  blockingEnabled: z.boolean(),
+  redirectHops: z.number().int(),
+  redirectThroughTracker: z.boolean(),
+  grants: z.array(
+    z.object({
+      kind: z.string(),
+      policy: z.string(),
+      expiresAt: z.number().nullable()
+    })
+  ),
+  denied: z.array(z.string()),
+  flaggedDownloads: z.number().int()
+})
+
 /** One day of protection counters, exactly as the ledger holds them. */
 export const ProtectionDaySchema = z.object({
   day: z.string(),
@@ -225,6 +249,7 @@ export const UiCommandSchema = z.object({
     'open-settings',
     'open-performance',
     'open-protection',
+    'open-trust',
     'open-find',
     'open-permissions',
     'open-timemachine',
@@ -874,6 +899,18 @@ export const invokeContracts = {
    * for, and the figure it wants is the window's rather than one page's.
    */
   'blocking:sessionTotals': { request: z.void(), response: ShieldCountsSchema },
+  /**
+   * Every security signal the browser already holds about one tab's site.
+   *
+   * Assembled from the engines that own each fact — the shield, Redirect X-Ray,
+   * the permission store, the download list — rather than recomputed here. This
+   * channel unifies; it decides nothing, and a signal missing from it means the
+   * engine behind it had nothing to say rather than that it was not asked.
+   */
+  'trust:report': {
+    request: z.object({ tabId: z.string() }),
+    response: TrustSignalsSchema
+  },
   /**
    * A week of what the browser actually did, for the protection report.
    *

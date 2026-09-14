@@ -144,6 +144,7 @@ export const INVOKE_CHANNELS = [
   'blocking:status',
   'blocking:setSiteAllowed',
   'blocking:sessionTotals',
+  'trust:report',
   'protection:week',
   'protection:clear',
   'shield:releasePopup',

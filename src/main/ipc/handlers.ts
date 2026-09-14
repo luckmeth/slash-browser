@@ -2319,6 +2319,73 @@ export function registerHandlers(ctx: AppContext): void {
 
   ipc.handle('blocking:sessionTotals', () => ok(ctx.blocker.activity.sessionCounts()))
 
+  /*
+   * Site Trust: the signals, gathered from whoever already knows them.
+   *
+   * Nothing is computed here. The shield counts its own blocks, Redirect X-Ray
+   * owns the chain, the permission store owns the grants and the download list
+   * owns what it flagged — this asks each of them about one site and hands the
+   * answers to a pure function that writes the sentences. Recomputing any of it
+   * would be a second implementation that could disagree with the panel the
+   * user opens next.
+   */
+  ipc.handle('trust:report', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    const tab = window.tabs.findById(request.tabId)
+    if (!tab) return err('NOT_FOUND', 'No such tab')
+
+    const url = tab.snapshot.url
+    const host = hostOf(url)
+    const status = blockingStatus(ctx, window, request.tabId)
+    const settings = ctx.settings.getAll()
+
+    // The most recent chain that ended at this tab. A tab that navigated
+    // straight here has none, which is the honest zero rather than a guess.
+    const chain = window.redirectRecorder
+      .list()
+      .filter((candidate) => candidate.tabId === request.tabId)
+      .sort((a, b) => b.startedAt - a.startedAt)[0]
+
+    const origin = originOf(url)
+    const grants = ctx.permissions
+      .listGrants()
+      .filter((grant) => grant.origin === origin && grant.policy.startsWith('allow'))
+
+    // Refusals for this origin, from the permission log rather than a tally of
+    // our own — the same reasoning as the weekly report.
+    const denied = ctx.permissions
+      .listEvents(500)
+      .filter((event) => event.origin === origin && event.action === 'denied')
+      .map((event) => event.kind)
+
+    const flaggedDownloads =
+      host === ''
+        ? 0
+        : ctx.downloads.list().filter((item) => item.isDangerous && hostOf(item.url) === host)
+            .length
+
+    return ok({
+      url,
+      blocked: status.counts,
+      siteAllowed: status.siteAllowed,
+      blockingEnabled: settings.blockAds || settings.blockMaliciousSites,
+      // The hops *before* the destination, which is what "you were passed
+      // through N sites" means. A chain always contains where it ended.
+      redirectHops: chain ? Math.max(0, chain.hops.length - 1) : 0,
+      redirectThroughTracker: chain
+        ? chain.hops.some((hop) => ctx.blocker.engine.isKnownAdHost(hop.host))
+        : false,
+      grants: grants.map((grant) => ({
+        kind: grant.kind,
+        policy: grant.policy,
+        expiresAt: grant.expiresAt
+      })),
+      denied,
+      flaggedDownloads
+    })
+  })
+
   ipc.handle('protection:week', () => ok(ctx.protection.week()))
   ipc.handle('protection:clear', () => {
     ctx.protection.clear()
