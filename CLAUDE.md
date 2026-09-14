@@ -335,6 +335,28 @@ These are not aspirations; they constrain the code.
   a CDN answering 200 with an error page produces a download that completes and a file that will
   not play. Four separate faults were found this way, three of them ours, none visible to
   typecheck, lint or 865 unit tests.
+- **A service constructed in `AppContext`'s constructor must not read the database there.** The
+  constructor runs long before `AppContext.start()`, and `start()` is where `db.open()` — and
+  therefore every migration — happens. Constructing a repository is free; querying through one is
+  not. `ProtectionLedger.start()` pruned old rows, which is a `DELETE`, and calling it beside the
+  construction threw `no such table: protection_days` and took the whole launch down with it. The
+  comment in `start()` records the same trap biting the rewards service once already, and it was not
+  enough to prevent it: what caught this one was a probe, since typecheck, lint and 1,911 unit tests
+  all passed on a build that did not open.
+- **A weekly figure needs a week of storage, and the shield's counters are per session.** `ActivityLog`
+  holds its totals in memory and they reset at every launch, so the honest answer to "what did Slash
+  save you this week" without somewhere to keep them is "this session, if you have not restarted".
+  `protection_days` is one row per **local** calendar day — local, because the report says "this
+  week" to a person and their week is the one their clock is on — and it holds **counts only**: no
+  host, no URL, no tab id. A table recording which sites blocked what would be a second history of
+  everywhere somebody has been, which is the thing the blocker exists to prevent. Permissions are not
+  counted there either: `permission_events` already records them with timestamps, so the report
+  queries that rather than keeping a second tally that could disagree. `ProtectionLedger` buffers
+  increments in memory and writes on a 30-second timer and at quit, because `ActivityLog.record` runs
+  on the request path for every blocked request on every page and a database write there is exactly
+  the cost principle 1 refuses. Every line of the report carries the sentence saying where its figure
+  came from, and there is no "you saved 4 hours" — nothing here measures anybody's time, and one
+  invented number makes every real one beside it untrustworthy.
 - **A search box over SQLite must not re-score what SQLite already matched.** The command centre
   holds seven sources in memory and queries two — history and the page-text index — in the database,
   because both are unbounded. FTS5 stems, so "running" returns a page containing "run", and running

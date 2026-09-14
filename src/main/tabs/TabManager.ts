@@ -121,6 +121,14 @@ export interface TabManagerHooks {
   takeClosedTabAt?: (id: number) => ClosedTab | null
   /** Groups changed — written through so an arrangement survives a crash. */
   onGroupsChanged?: (groups: readonly TabGroup[]) => void
+  /**
+   * A tab was hibernated, and this many bytes were genuinely released.
+   *
+   * Null when the working set could not be read. The weekly report counts the
+   * tab either way and only adds the bytes when there are some — a projected
+   * figure here would turn the one measured number in the browser into a guess.
+   */
+  onHibernated?: (bytesFreed: number | null) => void
   /** The remembered zoom for a URL's host, or null at the default. */
   siteZoomFor?: (url: string) => number | null
   /** The user changed zoom on this host; remember it for next time. */
@@ -343,11 +351,12 @@ export class TabManager {
     return tab
   }
 
-  close(id: string): void {
+  /** True when a tab was found and closed; false when the id names nothing. */
+  close(id: string): boolean {
     const index = this.tabs.findIndex((t) => t.id === id)
-    if (index < 0) return
+    if (index < 0) return false
     const tab = this.tabs[index]
-    if (!tab) return
+    if (!tab) return false
 
     const snap = tab.snapshot
     const visibleIndex = this.visibleTabs.indexOf(tab)
@@ -411,6 +420,7 @@ export class TabManager {
     }
 
     this.scheduleEmit()
+    return true
   }
 
   activate(id: string): void {
@@ -803,6 +813,7 @@ export class TabManager {
     this.destroyView(tab)
     tab.patch({ status: 'hibernated', isFrozen: false, isLoading: false })
     this.scheduleEmit()
+    this.hooks.onHibernated?.(rssBeforeBytes)
     log.info(`hibernated ${id} (${rssBeforeBytes ?? 'unmeasured'} bytes)`)
     return true
   }

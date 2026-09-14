@@ -189,6 +189,21 @@ export type OverlayState = z.infer<typeof OverlayStateSchema>
 
 const TabIdSchema = z.object({ tabId: z.string() })
 
+/** One day of protection counters, exactly as the ledger holds them. */
+export const ProtectionDaySchema = z.object({
+  day: z.string(),
+  ads: z.number().int(),
+  trackers: z.number().int(),
+  popups: z.number().int(),
+  redirects: z.number().int(),
+  tabsHibernated: z.number().int(),
+  bytesFreed: z.number().int(),
+  duplicatesClosed: z.number().int(),
+  downloadsFlagged: z.number().int(),
+  sessionsRestored: z.number().int(),
+  tabsRestored: z.number().int()
+})
+
 export const HistoryQuerySchema = z.object({
   query: z.string().default(''),
   limit: z.number().int().min(1).max(500).default(100),
@@ -209,6 +224,7 @@ export const UiCommandSchema = z.object({
     'open-downloads',
     'open-settings',
     'open-performance',
+    'open-protection',
     'open-find',
     'open-permissions',
     'open-timemachine',
@@ -553,6 +569,21 @@ export const invokeContracts = {
   },
   'tabs:duplicate': { request: TabIdSchema, response: TabsSnapshotSchema },
   'tabs:reopenClosed': { request: z.void(), response: TabsSnapshotSchema },
+  /**
+   * Closes a set of tabs identified as duplicates, and counts them as such.
+   *
+   * One call rather than N `tabs:close` calls, for two reasons. The count the
+   * weekly report shows is the number of tabs a *tidy-up* closed, which main
+   * cannot infer from an ordinary close; and closing twelve tabs one message at
+   * a time emits twelve snapshots to every privileged view.
+   *
+   * It is still just closing tabs — each one lands in the recently-closed list
+   * exactly as if it had been closed by hand, so Ctrl+Shift+T undoes this.
+   */
+  'tabs:closeDuplicates': {
+    request: z.object({ tabIds: z.array(z.string()).max(200) }),
+    response: z.object({ closed: z.number().int() })
+  },
   'tabs:recentlyClosed': { request: z.void(), response: z.array(ClosedTabSchema) },
   'tabs:reopenClosedAt': {
     request: z.object({ id: z.number().int() }),
@@ -843,6 +874,22 @@ export const invokeContracts = {
    * for, and the figure it wants is the window's rather than one page's.
    */
   'blocking:sessionTotals': { request: z.void(), response: ShieldCountsSchema },
+  /**
+   * A week of what the browser actually did, for the protection report.
+   *
+   * Counts, never hosts. The table behind this holds no URL and no tab id — a
+   * record of which sites blocked what would be a second history of everywhere
+   * somebody has been, which is the thing the blocker exists to prevent.
+   */
+  'protection:week': {
+    request: z.void(),
+    response: z.object({
+      days: z.array(ProtectionDaySchema),
+      permissionsDenied: z.number().int()
+    })
+  },
+  /** Forgets the week's counts. The report is the only thing that reads them. */
+  'protection:clear': { request: z.void(), response: z.void() },
   /**
    * The last self-check of the page-world ad strip.
    *

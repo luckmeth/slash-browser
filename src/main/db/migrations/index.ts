@@ -892,6 +892,59 @@ const m026_rewards: Migration = {
   `
 }
 
+const m027_protection: Migration = {
+  version: 27,
+  name: 'protection',
+  sql: /* sql */ `
+    -- One row per day, holding what the browser actually did.
+    --
+    -- A weekly report needs a week of numbers, and the shield's counters live
+    -- in memory and reset every launch, so without this the honest answer to
+    -- "what did Slash save you this week" is "this session, and only if you
+    -- have not restarted". Nothing here is derived or projected: every column
+    -- is a count of events that happened, incremented where they happened.
+    --
+    -- Deliberately **not** a log. There is no host, no URL and no tab id — a
+    -- table recording which sites blocked what would be a second history of
+    -- everywhere somebody has been, which is exactly the thing the blocker
+    -- exists to prevent. Counts only, by day.
+    --
+    -- Permissions are not here either: \`permission_events\` already records
+    -- them with timestamps, so the report queries that rather than keeping a
+    -- second tally that could disagree with it.
+    CREATE TABLE protection_days (
+      -- Local calendar day, 'YYYY-MM-DD'. Local rather than UTC because the
+      -- report says "this week" to a person, and their week is the one their
+      -- clock is on.
+      day                 TEXT PRIMARY KEY,
+
+      -- Requests the shield cancelled, split the way the shield splits them.
+      ads                 INTEGER NOT NULL DEFAULT 0,
+      trackers            INTEGER NOT NULL DEFAULT 0,
+      popups              INTEGER NOT NULL DEFAULT 0,
+      redirects           INTEGER NOT NULL DEFAULT 0,
+
+      -- Tabs put to sleep, and the working set genuinely released. Measured at
+      -- the moment each renderer was destroyed, which is the only figure in
+      -- this browser that is a measurement rather than a projection.
+      tabs_hibernated     INTEGER NOT NULL DEFAULT 0,
+      bytes_freed         INTEGER NOT NULL DEFAULT 0,
+
+      -- Tidying the user asked for.
+      duplicates_closed   INTEGER NOT NULL DEFAULT 0,
+
+      -- Downloads that arrived with an extension Windows will execute, and were
+      -- shown a warning before they could be opened.
+      downloads_flagged   INTEGER NOT NULL DEFAULT 0,
+
+      -- Restore points and sessions brought back, and how many tabs came with
+      -- them.
+      sessions_restored   INTEGER NOT NULL DEFAULT 0,
+      tabs_restored       INTEGER NOT NULL DEFAULT 0
+    );
+  `
+}
+
 export const migrations: readonly Migration[] = [
   m001_init,
   m002_browsing,
@@ -918,7 +971,8 @@ export const migrations: readonly Migration[] = [
   m023_sponsor_placement,
   m024_engine_downloads,
   m025_download_queues,
-  m026_rewards
+  m026_rewards,
+  m027_protection
 ]
 
 export const LATEST_SCHEMA_VERSION: number = migrations.reduce(

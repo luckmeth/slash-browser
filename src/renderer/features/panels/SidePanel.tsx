@@ -15,6 +15,7 @@ import { AiHubPanel } from '../ai/AiHubPanel'
 import { DownloadsPanel } from './DownloadsPanel'
 import { WorkspaceEditor } from '../workspaces/WorkspaceEditor'
 import { PerformancePanel } from '../performance/PerformancePanel'
+import { ProtectionPanel } from '../protection/ProtectionPanel'
 import { PermissionsPanel } from '../permissions/PermissionsPanel'
 import { TimeMachinePanel } from '../timemachine/TimeMachinePanel'
 import { MemoryPanel } from '../memory/MemoryPanel'
@@ -28,6 +29,7 @@ const TITLES = {
   reading: 'Reading list',
   downloads: 'Downloads',
   performance: 'Performance',
+  protection: 'Protection report',
   permissions: 'Permissions',
   timemachine: 'Restore points',
   memory: 'Browsing memory',
@@ -117,6 +119,7 @@ export function SidePanel(): React.JSX.Element | null {
               </>
             )}
             {panel === 'performance' && <PerformancePanel />}
+            {panel === 'protection' && <ProtectionPanel />}
             {panel === 'permissions' && <PermissionsPanel />}
             {panel === 'timemachine' && (
               <>

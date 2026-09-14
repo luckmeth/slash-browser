@@ -692,6 +692,20 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(window.tabs.emitNow())
   })
 
+  ipc.handle('tabs:closeDuplicates', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    // Each close goes through the ordinary path, so every tab lands in the
+    // recently-closed list and Ctrl+Shift+T undoes this like anything else.
+    let closed = 0
+    for (const tabId of request.tabIds) {
+      if (window.tabs.close(tabId)) closed += 1
+    }
+    if (closed > 0) ctx.protection.add('duplicatesClosed', closed)
+    return ok({ closed })
+  })
+
   ipc.handle('tabs:recentlyClosed', (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')
@@ -1046,6 +1060,7 @@ export function registerHandlers(ctx: AppContext): void {
     // somebody who wanted to look first, and closing exactly what appeared is
     // the only honest way back.
     const restoredIds = window.tabs.restoreFromSnapshot(groups[0]!, { activateFirst: true })
+    let restored = restoredIds.length
 
     for (const group of groups.slice(1)) {
       const extra = ctx.createWindow()
@@ -1053,9 +1068,14 @@ export function registerHandlers(ctx: AppContext): void {
       // Only this window's ids are returned: closing a tab in a window the
       // caller does not own is not something an undo button should reach, and
       // the message says how many windows opened so that is not a surprise.
-      extra.tabs.restoreFromSnapshot(group, { activateFirst: true })
+      // The *count* still includes them, because they were restored.
+      restored += extra.tabs.restoreFromSnapshot(group, { activateFirst: true }).length
     }
 
+    if (restored > 0) {
+      ctx.protection.add('sessionsRestored')
+      ctx.protection.add('tabsRestored', restored)
+    }
     return ok({ restored: restoredIds.length, windows: groups.length, tabIds: restoredIds })
   })
 
@@ -2298,6 +2318,12 @@ export function registerHandlers(ctx: AppContext): void {
   })
 
   ipc.handle('blocking:sessionTotals', () => ok(ctx.blocker.activity.sessionCounts()))
+
+  ipc.handle('protection:week', () => ok(ctx.protection.week()))
+  ipc.handle('protection:clear', () => {
+    ctx.protection.clear()
+    return ok(undefined)
+  })
 
   ipc.handle('shield:verification', () => ok(ctx.shieldVerifier.current()))
 

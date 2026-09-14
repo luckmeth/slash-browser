@@ -74,10 +74,18 @@ export async function runNewTabCapture(
     }
   }
 
-  // Long enough for `animate-rise`, the sponsored batch and the rewards status
-  // to have landed. A capture taken before those arrive photographs a page
-  // missing exactly the sections worth looking at.
-  await new Promise((resolve) => setTimeout(resolve, 4000))
+  /*
+   * Long enough for `animate-rise`, the sponsored batch and the rewards status
+   * to have landed. A capture taken before those arrive photographs a page
+   * missing exactly the sections worth looking at.
+   *
+   * `SLASH_CAPTURE_SETTLE` extends it for anything that needs a page to have
+   * finished doing something — the protection report counts requests the shield
+   * cancelled, and a report read while the page is still loading correctly says
+   * nothing happened.
+   */
+  const settleMs = Number(process.env['SLASH_CAPTURE_SETTLE'] ?? '4000')
+  await new Promise((resolve) => setTimeout(resolve, settleMs))
 
   /*
    * Does typing on the start page actually reach the search box?

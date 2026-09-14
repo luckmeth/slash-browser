@@ -41,7 +41,21 @@ export class ActivityLog {
    */
   private session: ShieldCounts = { ...EMPTY_COUNTS }
 
+  /**
+   * Told about each block, so a week's worth can be counted.
+   *
+   * A hook rather than a dependency, and it must stay cheap: this runs on the
+   * request path for every blocked request on every page, so the ledger behind
+   * it buffers in memory and writes on a timer. Optional, so an ActivityLog can
+   * still be built without one.
+   */
+  private onCounted: ((category: ShieldCategory) => void) | null = null
+
   constructor(private readonly now: () => number = () => Date.now()) {}
+
+  countTo(onCounted: (category: ShieldCategory) => void): void {
+    this.onCounted = onCounted
+  }
 
   /**
    * Records one blocking decision.
@@ -57,6 +71,7 @@ export class ActivityLog {
 
     activity.counts = bump(activity.counts, category)
     this.session = bump(this.session, category)
+    this.onCounted?.(category)
     this.sequence += 1
     activity.entries.push({
       id: `sa-${this.sequence}`,

@@ -36,6 +36,13 @@ export interface DownloadHooks {
    * conservative — see the note there about second requests.
    */
   accelerate?: (url: string, filename: string, initiator: ElectronWebContents | null) => void
+  /**
+   * A download arrived carrying an extension Windows will run on a double-click.
+   *
+   * Counted for the weekly report. A caution, not a verdict — nothing here
+   * scans a file, and the report says so rather than implying a scan happened.
+   */
+  onDangerousDownload?: () => void
 }
 
 export class DownloadManager {
@@ -124,6 +131,8 @@ export class DownloadManager {
         startedAt: Date.now(),
         completedAt: null
       }
+
+      if (item.isDangerous) this.hooks.onDangerousDownload?.()
 
       this.live.set(id, electronItem)
       this.items.set(id, item)

@@ -14,6 +14,7 @@ export type PanelId =
   | 'downloads'
   | 'settings'
   | 'performance'
+  | 'protection'
   | 'permissions'
   | 'timemachine'
   | 'memory'

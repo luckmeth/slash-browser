@@ -242,6 +242,9 @@ export function App(): React.JSX.Element {
         case 'open-performance':
           togglePanel('performance')
           break
+        case 'open-protection':
+          togglePanel('protection')
+          break
         case 'open-find':
           openFind()
           break

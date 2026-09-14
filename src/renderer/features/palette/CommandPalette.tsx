@@ -234,6 +234,7 @@ export function CommandPalette(): React.JSX.Element {
       panel('open-downloads', 'download', 'Open downloads', 'Ctrl+J'),
       panel('open-reading', 'star', 'Open reading list'),
       panel('open-performance', 'activity', 'Open performance', 'Ctrl+Shift+P'),
+      panel('open-protection', 'shield', 'What Slash did this week', 'Protection report'),
       panel('open-memory', 'sparkle', 'Open browsing memory'),
       panel('open-permissions', 'lock', 'Open permissions'),
       panel('open-timemachine', 'clock', 'Open restore points'),

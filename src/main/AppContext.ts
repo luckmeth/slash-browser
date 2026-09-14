@@ -51,6 +51,8 @@ import { SponsorService } from './sponsor/SponsorService'
 import { PasswordVault } from './passwords/PasswordVault'
 import { LoginFiller } from './passwords/LoginFiller'
 import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
+import { ProtectionRepository } from './db/repositories/ProtectionRepository'
+import { ProtectionLedger } from './protection/ProtectionLedger'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
 import { VectorStore } from './db/repositories/VectorStore'
@@ -291,6 +293,8 @@ export class AppContext {
   readonly providers: ProviderRegistry
   readonly comparison = new AiComparisonService()
   readonly blocker: ContentBlocker
+  /** Counts of what the browser did, by day, for the weekly report. */
+  readonly protection: ProtectionLedger
   readonly popups: PopupGuard
   readonly redirects: RedirectGuard
   /**
@@ -574,6 +578,28 @@ export class AppContext {
     })
     this.snapshotRepository = new SnapshotRepository(this.db)
     this.closedTabs = new ClosedTabRepository(this.db)
+
+    /*
+     * The weekly report's counters.
+     *
+     * Wired to the activity log rather than counted again somewhere else, so
+     * the number the report shows is the same event the shield recorded. The
+     * ledger buffers in memory and writes on a timer — `record` runs on the
+     * request path for every blocked request on every page, and a database
+     * write there is exactly the cost principle 1 refuses.
+     */
+    this.protection = new ProtectionLedger(new ProtectionRepository(this.db))
+    this.blocker.activity.countTo((category) => {
+      if (category === 'ad') this.protection.add('ads')
+      else if (category === 'tracker' || category === 'malicious') this.protection.add('trackers')
+      else if (category === 'popup') this.protection.add('popups')
+      else if (category === 'redirect') this.protection.add('redirects')
+    })
+    // `start()` is deliberately *not* called here: it prunes, which queries, and
+    // the database is not open until `AppContext.start()`. Constructing is free;
+    // reading is not. The same trap the rewards comment below records, and it
+    // caught this one too — a crash at launch, found by a probe rather than by
+    // anything typecheck or 1,911 unit tests could see.
     this.tabGroups = new TabGroupRepository(this.db)
     this.readingList = new ReadingListRepository(this.db)
     this.extensions = new ExtensionManager(this.settings)
@@ -625,6 +651,7 @@ export class AppContext {
     })
     this.downloads = new DownloadManager(this.downloadRepository, this.settings, {
       onChanged: (items) => this.broadcastAll('downloads:changed', items),
+      onDangerousDownload: () => this.protection.add('downloadsFlagged'),
       // The engine has existed since Phase 6 and nothing outside our own UI ever
       // reached it. This is the wire that makes clicking a link on a page use
       // several connections instead of one.
@@ -697,6 +724,8 @@ export class AppContext {
     if (this.started) return
     this.db.open()
     this.settings.load()
+    // After `open()`, for the reason the comment below spells out at length.
+    this.protection.start()
 
     // **After `db.open()`, and that ordering is the whole of it.** Placing
     // these two lines at the top of this method shipped a browser that did not
@@ -1047,6 +1076,16 @@ export class AppContext {
         if (level === 0) delete siteZoom[host]
         else siteZoom[host] = level
         this.settings.update({ siteZoom })
+      },
+      onHibernated: (bytesFreed) => {
+        // The tab is counted either way; the bytes only when they were read.
+        // A projected figure here would turn the one measured number in this
+        // browser into a guess, which is the whole distinction the weekly
+        // report exists to keep.
+        this.protection.add('tabsHibernated')
+        if (bytesFreed !== null && bytesFreed > 0) {
+          this.protection.add('bytesFreed', bytesFreed)
+        }
       },
       onGroupsChanged: (groups) => {
         if (isPrivate) return
@@ -2145,6 +2184,9 @@ export class AppContext {
     this.windows.length = 0
     this.disposeContentSignals?.()
     this.disposeContentSignals = null
+    // Writes whatever is still buffered. A clean quit should lose no counts,
+    // and the timer that would have caught them is unref'd.
+    this.protection.stop()
     // Settles every pending prompt as denied; an unresolved permission promise
     // would leave the page's callback hanging.
     this.permissions.stop()

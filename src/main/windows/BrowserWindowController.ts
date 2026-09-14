@@ -99,6 +99,8 @@ export interface WindowDeps {
   takeClosedTabAt: (id: number) => ClosedTabEntry | null
   /** Tab groups changed — persisted so an arrangement survives a restart. */
   onGroupsChanged?: (groups: readonly TabGroup[]) => void
+  /** A tab was hibernated, with the bytes actually released, or null. */
+  onHibernated?: (bytesFreed: number | null) => void
   /** Remembered zoom for a URL's host, or null at the default. */
   siteZoomFor?: (url: string) => number | null
   /** The user changed zoom on this host; remember it for next time. */
@@ -377,6 +379,7 @@ export class BrowserWindowController {
         takeClosedTab: () => this.deps.takeClosedTab(),
         listClosedTabs: () => this.deps.listClosedTabs(),
         takeClosedTabAt: (id) => this.deps.takeClosedTabAt(id),
+        onHibernated: (bytesFreed) => this.deps.onHibernated?.(bytesFreed),
         onGroupsChanged: (groups) => this.deps.onGroupsChanged?.(groups),
         siteZoomFor: (url) => this.deps.siteZoomFor?.(url) ?? null,
         onSiteZoomChanged: (url, level) => this.deps.onSiteZoomChanged?.(url, level),
