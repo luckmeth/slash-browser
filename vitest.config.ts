@@ -17,6 +17,24 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    /*
+     * Raised from vitest's 5s default because the suite outgrew it on CI, not
+     * because anything here is slow.
+     *
+     * `PermissionManager > denies when no window can show the prompt` timed out
+     * at 5187ms on a GitHub Windows runner while passing in single-digit
+     * milliseconds locally, every time. Its whole path is synchronous —
+     * `showPrompt` returns false, `settle` looks up a map, calls a hook and
+     * resolves — with no timer, no IO and nothing awaited, so a five-second
+     * duration cannot be the code waiting for something. It is a worker starved
+     * of CPU on a two-core runner now sharing it with 2,000 tests.
+     *
+     * This weakens no assertion: a promise that never resolves, or resolves
+     * wrongly, still fails. It only stops a slow machine being reported as a
+     * broken browser.
+     */
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     coverage: {
       provider: 'v8',
       include: ['src/main/**/*.ts', 'src/shared/**/*.ts']
