@@ -51,6 +51,52 @@ export async function runNewTabCapture(
   // missing exactly the sections worth looking at.
   await new Promise((resolve) => setTimeout(resolve, 4000))
 
+  /*
+   * Does typing on the start page actually reach the search box?
+   *
+   * `sendInputEvent` is the right tool here and the wrong one elsewhere: it
+   * injects into a view's *renderer*, which is below the layer where window
+   * hit-testing and drag regions are decided — so it proves nothing about where
+   * a real pointer lands, and everything about whether a keystroke reaches a
+   * field. Typing is entirely a renderer concern.
+   */
+  if (process.env['SLASH_TYPEAHEAD_CHECK'] === '1') {
+    // Click the page background first, so focus is *not* already in the input.
+    // Checking that it works when it was already focused would prove nothing.
+    await chrome.executeJavaScript(
+      `(() => { const el = document.querySelector('.glass-page'); el && el.focus && el.focus();
+                document.body.focus(); return document.activeElement?.tagName ?? ''; })()`
+    )
+
+    chrome.focus()
+    for (const ch of 'hello') {
+      chrome.sendInputEvent({ type: 'keyDown', keyCode: ch })
+      chrome.sendInputEvent({ type: 'char', keyCode: ch })
+      chrome.sendInputEvent({ type: 'keyUp', keyCode: ch })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    const typed = (await chrome.executeJavaScript(
+      `(() => {
+         const input = document.querySelector('input[aria-label="Search or enter address"]');
+         return JSON.stringify({
+           value: input ? input.value : null,
+           focused: document.activeElement === input
+         });
+       })()`
+    )) as string
+
+    const state = JSON.parse(typed) as { value: string | null; focused: boolean }
+    log.info(`type-ahead: value=${JSON.stringify(state.value)} focused=${state.focused}`)
+    if (state.value === 'hello' && state.focused) {
+      log.info('RESULT: type-ahead PASS — typing reached the search box without a click')
+    } else if (state.value === null) {
+      log.info('RESULT: type-ahead INCONCLUSIVE — no search box on the page to type into')
+    } else {
+      log.info('RESULT: type-ahead FAIL — the keystrokes did not land')
+    }
+  }
+
   try {
     await fsp.mkdir(dirname(target), { recursive: true })
     const shot = await chrome.capturePage()

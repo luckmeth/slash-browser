@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { HistoryEntry } from '@shared/types/browsing'
 import { isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
@@ -14,6 +14,8 @@ import { SponsoredBanner } from './SponsoredBanner'
 import { SponsoredRail } from './SponsoredRail'
 import { PublisherNotice } from './PublisherNotice'
 import { backgroundCss } from './backgrounds'
+import { droppedInput } from '@shared/dropInput'
+import { shouldStartTyping } from '@shared/typeAhead'
 
 /**
  * The start page.
@@ -52,6 +54,66 @@ export function NewTabPage(): React.JSX.Element {
   const [sponsoredBanner, setSponsoredBanner] = useState<SponsoredCreative | null>(null)
   const [sponsoredRails, setSponsoredRails] = useState<SponsoredCreative[]>([])
   const [backgroundDismissed, setBackgroundDismissed] = useState(false)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  const [dropping, setDropping] = useState(false)
+
+  const go = useCallback(
+    (input: string): void => {
+      if (!activeTabId || input.trim() === '') return
+      // The same channel the omnibox uses, so this page and the address bar
+      // agree about what resolves to a search and what resolves to a site.
+      void window.browser.invoke('nav:navigate', { tabId: activeTabId, input })
+    },
+    [activeTabId]
+  )
+
+  /*
+   * Focus the search field when the page appears.
+   *
+   * A new tab that needs a click before it will accept a character is the one
+   * piece of friction on the most-visited screen in the browser. Safe here in a
+   * way it would not be on a web page: an internal page has no page view
+   * attached, so the chrome document genuinely holds focus and nothing is being
+   * taken from anybody.
+   */
+  useEffect(() => {
+    searchRef.current?.focus()
+  }, [])
+
+  /*
+   * And if focus has wandered, start typing anyway.
+   *
+   * Focusing once is not enough — clicking a tile, dismissing a card or simply
+   * clicking the background all move focus, and the next keystroke would be
+   * lost. `shouldStartTyping` decides what counts, and it refuses every
+   * shortcut: eating Ctrl+T would be far worse than missing a character.
+   *
+   * The event is *not* consumed. Focus moves and the browser's own default
+   * inserts the character, so there is no second copy of the key and no
+   * guessing about which characters a layout produces.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      if (
+        !shouldStartTyping({
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          targetTag: target?.tagName ?? '',
+          targetEditable: target?.isContentEditable ?? false
+        })
+      ) {
+        return
+      }
+      if (document.activeElement === searchRef.current) return
+      searchRef.current?.focus()
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     void window.browser
@@ -103,7 +165,53 @@ export function NewTabPage(): React.JSX.Element {
   const showSponsoredBackground = sponsoredBackground !== null && !backgroundDismissed
 
   return (
-    <div className="glass-page relative h-full overflow-y-auto">
+    <div
+      className="glass-page relative h-full overflow-y-auto"
+      /*
+       * Drop a link to open it, drop a sentence to search for it.
+       *
+       * The drop target is this page rather than the omnibox, and that is the
+       * architecture rather than a preference: the address bar lives in the
+       * chrome view and a web page in a separate native view, and a drag is a
+       * native session belonging to one surface. It does not cross between two
+       * of them. The start page *is* the chrome document, so a drag from
+       * another application — a link from another browser, text from an editor
+       * — lands here and can be read.
+       */
+      onDragOver={(event) => {
+        // Without preventDefault the drop never fires; the cursor also stays a
+        // "no entry" sign, which reads as the feature not existing.
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+        if (!dropping) setDropping(true)
+      }}
+      onDragLeave={(event) => {
+        // Only when the pointer has genuinely left this element. Dragging over
+        // a child fires dragleave for the parent, which would flicker the hint
+        // on every tile crossed.
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        setDropping(false)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        setDropping(false)
+        const input = droppedInput({
+          uriList: event.dataTransfer.getData('text/uri-list'),
+          text: event.dataTransfer.getData('text/plain')
+        })
+        if (input !== null) go(input)
+      }}
+    >
+      {dropping && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--color-accent)]/70 bg-[var(--color-accent)]/[0.06]"
+        >
+          <span className="glass-float rounded-xl px-4 py-2 text-[13px] font-medium">
+            Drop to open or search
+          </span>
+        </div>
+      )}
       {/* Backdrop. CSS gradients rather than bundled photographs — an image set
           worth looking at would add tens of megabytes to the installer, and
           fetching one would make opening a tab an outbound request. */}
@@ -179,16 +287,15 @@ export function NewTabPage(): React.JSX.Element {
           onSubmit={(event) => {
             event.preventDefault()
             const query = draft.trim()
-            if (query === '' || !activeTabId) return
+            if (query === '') return
             setDraft('')
-            // The same channel the omnibox uses for typed text, so the two
-            // agree about what "wiki" or "example.com/x" resolves to.
-            void window.browser.invoke('nav:navigate', { tabId: activeTabId, input: query })
+            go(query)
           }}
           className="glass-raised animate-rise mt-8 flex w-full max-w-xl items-center gap-3 rounded-2xl px-4 py-3 transition focus-within:border-[var(--glass-edge-strong)]"
         >
           <Icon name="search" size={16} className="shrink-0 text-[var(--color-text-muted)]" />
           <input
+            ref={searchRef}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Search or enter address"
