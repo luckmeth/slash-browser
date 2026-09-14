@@ -159,7 +159,7 @@ if (!app.requestSingleInstanceLock()) {
         for (const [index, group] of groups.entries()) {
           const target = index === 0 ? window : context.createWindow()
           if (index > 0) target.tabs.loadGroups(context.tabGroups.list())
-          restored += target.tabs.restoreFromSnapshot(group, { activateFirst: true })
+          restored += target.tabs.restoreFromSnapshot(group, { activateFirst: true }).length
         }
         log.info(
           `startup: restored ${restored} tab(s) across ${groups.length} window(s) ` +

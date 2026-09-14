@@ -17,7 +17,17 @@ export function TimeMachinePanel(): React.JSX.Element {
   const [detail, setDetail] = useState<SnapshotDetail | null>(null)
   const [naming, setNaming] = useState(false)
   const [label, setLabel] = useState('')
-  const [notice, setNotice] = useState<string | null>(null)
+  /**
+   * The last thing that happened, and how to take it back.
+   *
+   * Restoring is additive — nothing is destroyed — so undoing it is exactly
+   * "close the tabs that arrived". A button promising more than that would be
+   * describing a restore that never happened.
+   */
+  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
+  /** Which snapshot is being renamed, and to what. */
+  const [renaming, setRenaming] = useState<number | null>(null)
+  const [newLabel, setNewLabel] = useState('')
 
   const refresh = (): void => {
     void window.browser.invoke('snapshots:list', undefined).then((result) => {
@@ -44,6 +54,23 @@ export function TimeMachinePanel(): React.JSX.Element {
       if (result.ok) setSnapshots(result.value)
       setLabel('')
       setNaming(false)
+    })
+  }
+
+  /**
+   * Names a restore point, which also keeps it.
+   *
+   * The repository promotes a renamed snapshot to `manual`, because otherwise
+   * `pruneAutomatic` would delete the thing somebody had just said they wanted
+   * — the copy says so rather than leaving that as a surprise a fortnight later.
+   */
+  const renamePoint = (id: number): void => {
+    const trimmed = newLabel.trim()
+    if (trimmed === '') return
+    void window.browser.invoke('snapshots:rename', { id, label: trimmed }).then((result) => {
+      if (result.ok) setSnapshots(result.value)
+      setRenaming(null)
+      setNotice({ text: 'Renamed. Named restore points are kept until you delete them.' })
     })
   }
 
@@ -91,7 +118,20 @@ export function TimeMachinePanel(): React.JSX.Element {
         if a login expired while the browser was closed, that tab will open at a sign-in page.
       </p>
 
-      {notice && <p className="text-xs text-[var(--color-good)]">{notice}</p>}
+      {notice && (
+        <p role="status" className="flex items-center gap-2 text-xs text-[var(--color-good)]">
+          {notice.text}
+          {notice.undo && (
+            <button
+              type="button"
+              onClick={notice.undo}
+              className="cursor-default underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-primary)]"
+            >
+              Undo
+            </button>
+          )}
+        </p>
+      )}
 
       {snapshots.length === 0 ? (
         <p className="text-sm text-[var(--color-text-muted)]">
@@ -135,6 +175,24 @@ export function TimeMachinePanel(): React.JSX.Element {
                     </span>
                   </button>
 
+                  {renaming === snapshot.id && (
+                    <div className="flex gap-2 border-t border-[var(--color-border-subtle)] px-3 py-2">
+                      <input
+                        autoFocus
+                        value={newLabel}
+                        onChange={(event) => setNewLabel(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') renamePoint(snapshot.id)
+                          if (event.key === 'Escape') setRenaming(null)
+                        }}
+                        aria-label="Rename this restore point"
+                        className="min-w-0 flex-1 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]"
+                      />
+                      <Action label="Save" onClick={() => renamePoint(snapshot.id)} />
+                      <Action label="Cancel" onClick={() => setRenaming(null)} />
+                    </div>
+                  )}
+
                   {expanded === snapshot.id && detail && (
                     <div className="border-t border-[var(--color-border-subtle)] px-3 py-2">
                       <ul className="mb-2 max-h-52 space-y-0.5 overflow-y-auto">
@@ -151,7 +209,22 @@ export function TimeMachinePanel(): React.JSX.Element {
                                     id: snapshot.id,
                                     tabIndex: index
                                   })
-                                  .then(() => setNotice('Tab reopened in this workspace.'))
+                                  .then((result) => {
+                                    if (!result.ok) return
+                                    const { tabIds } = result.value
+                                    setNotice({
+                                      text: 'Tab reopened in this workspace.',
+                                      undo:
+                                        tabIds.length > 0
+                                          ? () => {
+                                              for (const tabId of tabIds) {
+                                                void window.browser.invoke('tabs:close', { tabId })
+                                              }
+                                              setNotice(null)
+                                            }
+                                          : undefined
+                                    })
+                                  })
                               }}
                               className="shrink-0 cursor-default rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                             >
@@ -171,9 +244,8 @@ export function TimeMachinePanel(): React.JSX.Element {
                                 intoNewWorkspace: false
                               })
                               .then((result) => {
-                                if (result.ok) {
-                                  setNotice(`Reopened ${result.value.restored} tabs.`)
-                                }
+                                if (!result.ok) return
+                                setNotice(restoreNotice(result.value, setNotice))
                               })
                           }}
                         />
@@ -186,12 +258,16 @@ export function TimeMachinePanel(): React.JSX.Element {
                                 intoNewWorkspace: true
                               })
                               .then((result) => {
-                                if (result.ok) {
-                                  setNotice(
-                                    `Reopened ${result.value.restored} tabs in a new workspace.`
-                                  )
-                                }
+                                if (!result.ok) return
+                                setNotice(restoreNotice(result.value, setNotice, true))
                               })
+                          }}
+                        />
+                        <Action
+                          label="Rename"
+                          onClick={() => {
+                            setRenaming(snapshot.id)
+                            setNewLabel(snapshot.label)
                           }}
                         />
                         <Action
@@ -217,6 +293,42 @@ export function TimeMachinePanel(): React.JSX.Element {
       )}
     </div>
   )
+}
+
+/**
+ * What to say after a restore, and how to take it back.
+ *
+ * One builder for both restore buttons, because the undo is the part that has
+ * to be right and two copies of it is two chances to close the wrong tabs.
+ * Only this window's tabs come back in `tabIds`, so a restore that opened
+ * extra windows says so rather than offering an undo that half works.
+ */
+function restoreNotice(
+  value: { restored: number; windows: number; tabIds: string[] },
+  setNotice: (notice: Notice | null) => void,
+  intoNewWorkspace = false
+): Notice {
+  const { restored, windows, tabIds } = value
+  return {
+    text:
+      `Reopened ${restored} ${restored === 1 ? 'tab' : 'tabs'}` +
+      (intoNewWorkspace ? ' in a new workspace' : '') +
+      (windows > 1 ? ` across ${windows} windows.` : '.'),
+    undo:
+      tabIds.length > 0 && windows === 1
+        ? () => {
+            for (const tabId of tabIds) {
+              void window.browser.invoke('tabs:close', { tabId })
+            }
+            setNotice(null)
+          }
+        : undefined
+  }
+}
+
+interface Notice {
+  text: string
+  undo?: () => void
 }
 
 function Action({

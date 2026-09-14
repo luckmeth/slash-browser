@@ -554,8 +554,12 @@ export class TabManager {
       activeEntryIndex: number
     }[],
     options: { activateFirst: boolean }
-  ): number {
-    let restored = 0
+  ): string[] {
+    // The ids rather than a count, so a caller can offer an undo. Restoring is
+    // additive — nothing is destroyed — but it can put twenty tabs in front of
+    // somebody who meant to look before they leapt, and the only honest way
+    // back is to close exactly the tabs that arrived.
+    const restoredIds: string[] = []
     let firstId: string | null = null
 
     for (const snapshotTab of snapshotTabs) {
@@ -579,10 +583,10 @@ export class TabManager {
 
       this.tabs.push(tab)
       if (!firstId) firstId = tab.id
-      restored += 1
+      restoredIds.push(tab.id)
     }
 
-    if (restored > 0) {
+    if (restoredIds.length > 0) {
       // Pinned tabs form a block at the start, the same invariant setPinned
       // maintains. A stable sort keeps the snapshot's relative order inside
       // each block.
@@ -602,9 +606,9 @@ export class TabManager {
 
       if (options.activateFirst && firstId) this.activate(firstId)
       else this.scheduleEmit()
-      log.info(`restored ${restored} tab(s) from snapshot`)
+      log.info(`restored ${restoredIds.length} tab(s) from snapshot`)
     }
-    return restored
+    return restoredIds
   }
 
   /** Closes every other tab in this workspace, keeping pinned ones. */

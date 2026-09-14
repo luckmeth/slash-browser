@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon'
 import type { SponsoredTile as SponsoredCreative } from '@shared/types/sponsor'
 import { SponsoredTile } from './SponsoredTile'
 import { PitchCards } from './PitchCards'
+import { ResumeWork } from './ResumeWork'
 import { DefaultBrowserCard } from './DefaultBrowserCard'
 import { SponsoredBackground } from './SponsoredBackground'
 import { SponsoredBanner } from './SponsoredBanner'
@@ -322,6 +323,14 @@ export function NewTabPage(): React.JSX.Element {
           which are the sites you actually visit and the tab you just closed.
           The dashboard still exists behind the panels for anyone who wants it.
         */}
+        {/*
+          Above the sites grid, because "carry on with what you were doing" is a
+          stronger answer to an empty tab than "here is somewhere you often go".
+          It renders nothing at all when there is no history to offer, so a
+          first launch is unchanged.
+        */}
+        <ResumeWork />
+
         {topSites.length > 0 && (
           <section className="animate-rise mt-10 w-full">
             <h2 className="mb-3 text-[11px] font-medium tracking-[0.12em] text-[var(--color-text-muted)] uppercase">

@@ -144,6 +144,20 @@ export class SnapshotRepository {
     return row ? this.detail(row.id) : null
   }
 
+  /**
+   * Renames a restore point, and promotes it to a kept one.
+   *
+   * The kind changes to `manual` because that is what the word means here:
+   * `pruneAutomatic` deletes automatic snapshots past the retention window, so
+   * naming one and leaving it automatic would let the browser quietly throw
+   * away the thing somebody had just said they wanted to keep.
+   */
+  rename(id: number, label: string): void {
+    this.db.connection
+      .prepare(`UPDATE snapshots SET label = ?, kind = 'manual' WHERE id = ?`)
+      .run(label, id)
+  }
+
   delete(id: number): void {
     // snapshot_tabs cascades.
     this.db.connection.prepare('DELETE FROM snapshots WHERE id = ?').run(id)

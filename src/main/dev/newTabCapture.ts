@@ -1,5 +1,6 @@
 import { promises as fsp } from 'node:fs'
 import { dirname } from 'node:path'
+import { NEW_TAB_URL, isInternalUrl } from '@shared/types/tab'
 import type { BrowserWindowController } from '../windows/BrowserWindowController'
 import { createLogger } from '../logger'
 
@@ -43,7 +44,23 @@ export async function runNewTabCapture(
     // view and patches the snapshot, and the chrome did not re-render it in
     // time to be photographed; creating the tab is the path every other probe
     // uses and it activates as well.
-    window.tabs.create({ url: targetUrl, background: false })
+    const background = process.env['SLASH_CAPTURE_BACKGROUND'] === '1'
+    window.tabs.create({ url: targetUrl, background })
+
+    /*
+     * Then come back to the start page.
+     *
+     * `background: true` is not enough on a fresh profile: the created tab is
+     * the window's first, so it activates whatever was asked for. Some of what
+     * is worth photographing on the start page — Resume your work — only
+     * appears once there are real tabs to resume, so the probe has to both open
+     * one and then look away from it.
+     */
+    if (background) {
+      const internal = window.tabs.allTabs().find((tab) => isInternalUrl(tab.snapshot.url))
+      if (internal) window.tabs.activate(internal.id)
+      else window.tabs.create({ url: NEW_TAB_URL, background: false })
+    }
   }
 
   // Long enough for `animate-rise`, the sponsored batch and the rewards status

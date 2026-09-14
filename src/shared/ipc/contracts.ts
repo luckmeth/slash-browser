@@ -729,13 +729,36 @@ export const invokeContracts = {
     response: z.object({
       restored: z.number().int(),
       /** How many windows were opened, so the UI can say so rather than surprise. */
-      windows: z.number().int()
+      windows: z.number().int(),
+      /**
+       * The tabs that arrived, so the caller can offer an undo.
+       *
+       * Restoring destroys nothing — it adds — but it can put twenty tabs in
+       * front of somebody who meant to look before they leapt, and closing
+       * exactly what appeared is the only honest way back. Only this window's
+       * ids: an undo button should not reach into a window it does not own.
+       */
+      tabIds: z.array(z.string()).default([])
     })
   },
   /** Restore a single tab out of a snapshot, by its index within it. */
   'snapshots:restoreTab': {
     request: z.object({ id: z.number().int(), tabIndex: z.number().int().min(0) }),
-    response: z.object({ restored: z.number().int() })
+    response: z.object({
+      restored: z.number().int(),
+      tabIds: z.array(z.string()).default([])
+    })
+  },
+  /**
+   * Renames a restore point.
+   *
+   * Automatic snapshots are named after the moment they were taken, and a name
+   * is what turns one of those into something worth keeping. Renaming changes
+   * nothing about what it holds.
+   */
+  'snapshots:rename': {
+    request: z.object({ id: z.number().int(), label: z.string().min(1).max(120) }),
+    response: z.array(SnapshotSchema)
   },
   'snapshots:delete': {
     request: z.object({ id: z.number().int() }),

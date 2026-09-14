@@ -1039,17 +1039,24 @@ export function registerHandlers(ctx: AppContext): void {
     // loses the arrangement while appearing to have worked, because every page
     // is still there.
     const groups = groupByWindow(tabs)
-    if (groups.length === 0) return ok({ restored: 0, windows: 0 })
+    if (groups.length === 0) return ok({ restored: 0, windows: 0, tabIds: [] })
 
-    let restored = window.tabs.restoreFromSnapshot(groups[0]!, { activateFirst: true })
+    // The ids of everything that arrived, so the renderer can offer an undo.
+    // Restoring never destroys anything, but it can put twenty tabs in front of
+    // somebody who wanted to look first, and closing exactly what appeared is
+    // the only honest way back.
+    const restoredIds = window.tabs.restoreFromSnapshot(groups[0]!, { activateFirst: true })
 
     for (const group of groups.slice(1)) {
       const extra = ctx.createWindow()
       extra.tabs.loadGroups(ctx.tabGroups.list())
-      restored += extra.tabs.restoreFromSnapshot(group, { activateFirst: true })
+      // Only this window's ids are returned: closing a tab in a window the
+      // caller does not own is not something an undo button should reach, and
+      // the message says how many windows opened so that is not a surprise.
+      extra.tabs.restoreFromSnapshot(group, { activateFirst: true })
     }
 
-    return ok({ restored, windows: groups.length })
+    return ok({ restored: restoredIds.length, windows: groups.length, tabIds: restoredIds })
   })
 
   ipc.handle('snapshots:restoreTab', (request, context) => {
@@ -1062,11 +1069,16 @@ export function registerHandlers(ctx: AppContext): void {
     // Into the current workspace: restoring one tab is a "bring this back here"
     // action, and sending it to a workspace the user is not looking at would
     // make it appear to have done nothing.
-    const restored = window.tabs.restoreFromSnapshot(
+    const restoredIds = window.tabs.restoreFromSnapshot(
       [{ ...tab, workspaceId: window.tabs.currentWorkspaceId }],
       { activateFirst: true }
     )
-    return ok({ restored })
+    return ok({ restored: restoredIds.length, tabIds: restoredIds })
+  })
+
+  ipc.handle('snapshots:rename', (request) => {
+    ctx.snapshotRepository.rename(request.id, request.label.trim())
+    return ok(ctx.snapshotRepository.list())
   })
 
   ipc.handle('snapshots:delete', (request) => {
