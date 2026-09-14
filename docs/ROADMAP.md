@@ -27,6 +27,31 @@ Download Guardian · Cleanup Mode · Page Insight · Redirect X-Ray · Tab Brain
 
 Added most recently:
 
+- **Resume your work** — the last session, live workspaces and named restore points on the start
+  page, with an undo that closes exactly the tabs a restore opened. Restore points can be renamed,
+  which also keeps them: renaming promotes a snapshot to `manual`, because `pruneAutomatic` would
+  otherwise delete the thing somebody just said they wanted.
+- **Tab Health** — five counts at the top of the performance panel, with *measured* bytes released
+  and *estimated* opportunity reported as two separate sentences that are never added together.
+- **Smart duplicate detection** — `findDuplicateGroups` reaches past exact addresses to campaign
+  parameters, `www`, http-against-https and a shared title on one host. Pinned and protected copies
+  are never offered for closing. One implementation, shared by the recommendation engine, Tab Health
+  and the command centre.
+- **Protection report** — a week of what the browser actually did, counted by local day in
+  `protection_days`. Counts only: no host, no URL, no tab id, because a record of which sites
+  blocked what would be a second history of everywhere you have been. Every line names its source.
+- **Site Trust** — the shield, Redirect X-Ray, the permission store and the download list unified
+  into one view per site. Deliberately no score, and it never says a site is safe.
+- **Compare pages** — two to four open pages side by side, read from JSON-LD, product meta tags and
+  two-column tables. A cell is a value the page stated or "Not detected"; nothing is inferred from
+  prose and no model is consulted.
+- **Archive a workspace** — keeps the name and notes, writes the tabs into a restore point and
+  closes them. Reopening brings the pages back with scroll position and back-history, because it is
+  the snapshot system rather than a second store.
+- **Tab relationships** — a tree of what is open, grouped by site and the site's own sections.
+  Addresses only; nothing is inferred about what a page is about.
+- **Drop a link on the tab strip** to open it, using the same `droppedInput` rule as the start page.
+
 - **Split view** — two panes, one active tab, capped at two deliberately.
 - **Tab groups** — coloured runs, persisted, collapse ≠ sleep.
 - **Reading list** — a queue, separate from bookmarks.
