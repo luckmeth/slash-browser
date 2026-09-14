@@ -7,6 +7,7 @@ import { BookmarksPanel } from './BookmarksPanel'
 import { DownloadsCenter } from '../downloads/DownloadsCenter'
 import { GuardianPanel } from '../downloads/GuardianPanel'
 import { TabBrainPanel } from '../tabbrain/TabBrainPanel'
+import { TabRelations } from '../tabbrain/TabRelations'
 import { PageInsightPanel } from '../insight/PageInsightPanel'
 import { RedirectXRayPanel } from '../shield/RedirectXRayPanel'
 import { WatchPanel } from '../watch/WatchPanel'
@@ -139,7 +140,14 @@ export function SidePanel(): React.JSX.Element | null {
               </>
             )}
             {panel === 'memory' && <MemoryPanel />}
-            {panel === 'tabbrain' && <TabBrainPanel />}
+            {panel === 'tabbrain' && (
+              <>
+                {/* The structure Slash found, then the shape of what is open.
+                    Both read the same tabs; one suggests, the other navigates. */}
+                <TabBrainPanel />
+                <TabRelations />
+              </>
+            )}
             {panel === 'insight' && <PageInsightPanel />}
             {panel === 'redirects' && <RedirectXRayPanel />}
             {panel === 'mission' && <MissionPanel />}
