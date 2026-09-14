@@ -31,9 +31,16 @@ Added most recently:
 - **Tab groups** — coloured runs, persisted, collapse ≠ sleep.
 - **Reading list** — a queue, separate from bookmarks.
 - **Password vault + autofill** — DPAPI-encrypted; no channel returns a password.
-- **Start page** — backdrops, honest stats, recently closed, sponsored slot.
+- **Start page** — backdrops, honest stats, sponsored slot. (Recently closed moved off it: the
+  capability lives on Ctrl+Shift+T, in the tab menu, and now in the command centre.)
 - **First-run onboarding** — four screens, and it cannot switch anything on.
-- **Command palette** (Ctrl+K) and **shortcut sheet** (Ctrl+/, generated from the live menu).
+- **Command centre** (Ctrl+K) and **shortcut sheet** (Ctrl+/, generated from the live menu). The
+  palette searches ten sources — open tabs, recently closed tabs, commands, bookmarks, the reading
+  list, workspaces (names *and* notes), snapshots, history, downloads, and indexed page text where
+  that is switched on — with `tabs:`/`history:`/`bm:`/`ws:`/`snapshots:`/`closed:`/`downloads:`/
+  `page:`/`cmd:`/`reading:` filters and the matched characters marked. Ranking lives in
+  `shared/commandSearch.ts`, pure and tested: an open tab outranks everything, because the answer to
+  "I want github" when github is open in tab three is to switch to it rather than open a fourth copy.
 - **Per-site zoom · custom search engines by keyword · a custom engine as the *default* ·
   configurable toolbar · settings search.**
 - **Slash Coin** (2026-08-30) — pre-launch rewards. Opt-in, Google sign-in through the *system*

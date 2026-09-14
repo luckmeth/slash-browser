@@ -335,6 +335,24 @@ These are not aspirations; they constrain the code.
   a CDN answering 200 with an error page produces a download that completes and a file that will
   not play. Four separate faults were found this way, three of them ours, none visible to
   typecheck, lint or 865 unit tests.
+- **A search box over SQLite must not re-score what SQLite already matched.** The command centre
+  holds seven sources in memory and queries two — history and the page-text index — in the database,
+  because both are unbounded. FTS5 stems, so "running" returns a page containing "run", and running
+  those rows back through the palette's own matcher dropped results the search genuinely found: the
+  list showed fewer rows than were returned, silently, which reads as the search being broken rather
+  than as a deliberate filter. `SearchableEntry.alreadyMatched` keeps them, ranked last among equals
+  because a stem-only hit is a weaker claim to being the answer than a title somebody can see the
+  words in. The matched characters are marked from `splitOnMatches`, which derives them from the same
+  rules that scored the row — so a mark cannot point somewhere the matcher never looked, and an
+  `alreadyMatched` row renders plain rather than with something invented.
+- **`capturePage()` on the chrome view photographs whatever the overlay is covering.** The command
+  palette, the permission prompt and every other modal live in a *separate* `WebContentsView`
+  composited above the chrome document, so the obvious capture reported success and produced a
+  picture of the page underneath the thing being looked at. `SLASH_CAPTURE_OVERLAY` captures
+  `window.overlay.webContents` instead; the result has a transparent backdrop, which is honest —
+  compositing two captures would be a picture the browser never drew. `SLASH_CAPTURE_ENTER` then
+  presses Enter on the top row, because a palette row runs IPC no unit test reaches and a row whose
+  handler is wrong does not fail, it does nothing.
 - **Anything that reaches a page's fields goes through `insertText`, never script.** Passwords and
   addresses both: `preload/content.ts` reports which *kinds* of field exist and holds the element
   references, main asks it to focus one, then types the value through Chromium's own input pipeline.
