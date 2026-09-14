@@ -194,6 +194,39 @@ export async function runNewTabCapture(
    * document, so the probe exercises the actual UI path rather than calling the
    * service behind it and photographing a screen nobody could have produced.
    */
+  /*
+   * The same, but in the overlay document.
+   *
+   * Surfaces that float over the page — the download chip, the palette, the
+   * permission prompt — live in a different document from the chrome, so a
+   * script aimed at them has to be evaluated there.
+   */
+  const overlayScript = process.env['SLASH_CAPTURE_OVERLAY_CLICK']
+  if (overlayScript) {
+    const overlay = window.overlay.webContents
+    if (!overlay || overlay.isDestroyed()) {
+      log.warn('no overlay to run the script in')
+    } else {
+      try {
+        const started: unknown = await overlay.executeJavaScript(overlayScript)
+        log.info(`overlay script returned ${JSON.stringify(started)}`)
+      } catch (error) {
+        log.warn(`overlay script failed — ${String(error)}`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2500))
+      try {
+        const result = await overlay.executeJavaScript(
+          'JSON.stringify(window.__slashProbeResult ?? null)'
+        )
+        if (typeof result === 'string' && result !== 'null') {
+          log.info(`RESULT: overlay script — ${result}`)
+        }
+      } catch (error) {
+        log.warn(`could not read the overlay script's result — ${String(error)}`)
+      }
+    }
+  }
+
   const clickScript = process.env['SLASH_CAPTURE_CLICK']
   if (clickScript) {
     try {

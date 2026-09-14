@@ -1920,6 +1920,13 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(undefined)
   })
 
+  ipc.handle('media:moveOffer', (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+    window.moveMediaOffer(request.dx, request.dy, request.final)
+    return ok(undefined)
+  })
+
   ipc.handle('media:offer', (_req, context) => {
     const window = windowOf(context.sender)
     if (!window) return err('NOT_FOUND', 'No window for this view')

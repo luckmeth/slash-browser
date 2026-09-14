@@ -335,6 +335,7 @@ export const INVOKE_CHANNELS = [
   'media:detected',
   /** What the floating chip over the page should say. */
   'media:offer',
+  'media:moveOffer',
   /** Puts the chip away for this page. */
   'media:dismissOffer',
   /** Opens the picker: everything this page can be downloaded as. */

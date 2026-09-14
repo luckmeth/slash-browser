@@ -10,6 +10,7 @@ import {
 } from '@shared/constants'
 import { appIconPath } from './appIcon'
 import { NEW_TAB_URL } from '@shared/types/tab'
+import { chipPosition, clampChip, toSavedOffset } from '@shared/chipPosition'
 
 /** The one file the floating chip offers. Mirrors the media:offer response. */
 export type MediaOffer = NonNullable<InvokeResponse<'media:offer'>>
@@ -1072,23 +1073,64 @@ export class BrowserWindowController {
     this.mediaOffer = wanted
     if (unchanged) return
 
-    const { width, height } = this.window.getContentBounds()
-    const page = this.layout.compute(width, height).page
-    const chipWidth = Math.min(340, Math.max(240, page.width - 32))
-    const chipHeight = 96
+    const size = this.mediaChipSize()
+    // Re-read from settings each time it is shown, and drop any live drag
+    // position: the window may have been resized since, and `chipPosition`
+    // clamps a stored offset back into view where a stale one would not be.
+    this.mediaChipAt = null
+    const at = chipPosition(this.deps.settings.getAll().mediaChipOffset, this.pageRect(), size)
 
     const state = this.overlay.show(
       'media-offer',
-      {
-        // Top-right of the page area, where a player's own controls are not.
-        x: Math.max(page.x, page.x + page.width - chipWidth - 16),
-        y: page.y + 16,
-        width: chipWidth,
-        height: chipHeight
-      },
+      { x: at.x, y: at.y, width: size.width, height: size.height },
       { modal: false, takeFocus: false }
     )
     this.deps.ipc.broadcast('overlay:stateChanged', state, this.privilegedContents())
+  }
+
+  /**
+   * Where the chip is right now, while it is being dragged.
+   *
+   * Held in memory so a drag does not write to disk on every frame; null means
+   * "wherever settings say", which is the state after every show.
+   */
+  private mediaChipAt: { x: number; y: number } | null = null
+
+  /** The page area, which is what the chip is positioned within. */
+  private pageRect(): { x: number; y: number; width: number; height: number } {
+    const { width, height } = this.window.getContentBounds()
+    return this.layout.compute(width, height).page
+  }
+
+  private mediaChipSize(): { width: number; height: number } {
+    const page = this.pageRect()
+    return { width: Math.min(340, Math.max(240, page.width - 32)), height: 96 }
+  }
+
+  /**
+   * Drags the chip by a screen-space delta, and remembers where it ended up.
+   *
+   * Clamped into the page on every move, so a drag towards the edge stops at
+   * the edge rather than carrying the chip off it — and the stored offset is
+   * relative to the page, so the position survives the toolbar auto-hiding and
+   * the window being resized.
+   */
+  moveMediaOffer(dx: number, dy: number, final: boolean): void {
+    if (this.overlay.current.surface !== 'media-offer') return
+
+    const page = this.pageRect()
+    const size = this.mediaChipSize()
+    const current =
+      this.mediaChipAt ?? chipPosition(this.deps.settings.getAll().mediaChipOffset, page, size)
+    const next = clampChip({ x: current.x + dx, y: current.y + dy }, page, size)
+
+    this.mediaChipAt = next
+    this.overlay.moveTo({ x: next.x, y: next.y, width: size.width, height: size.height })
+    log.debug(`media chip moved to ${next.x},${next.y}${final ? ' (saved)' : ''}`)
+
+    // Written once, when the pointer comes up. A disk write per animation frame
+    // for the length of a drag is precisely the cost principle 1 refuses.
+    if (final) this.deps.settings.update({ mediaChipOffset: toSavedOffset(next, page) })
   }
 
   /** What `media:offer` answers with. */

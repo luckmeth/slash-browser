@@ -156,6 +156,22 @@ export class OverlayController {
   }
 
   /**
+   * Moves a visible **non-modal** surface without re-showing it.
+   *
+   * `show` would work and is wrong here: it re-attaches the view, reorders it
+   * to topmost and can take focus, which on a chip being dragged over a playing
+   * video would pull focus off the player on every pointer move. This is the
+   * cheap half — one `setBounds` on a view that is already up.
+   *
+   * Refused for a modal surface, whose bounds are the window's and are owned by
+   * `relayout`.
+   */
+  moveTo(bounds: Rectangle): void {
+    if (!this.view || !this.state.visible || this.modal) return
+    this.view.setBounds(bounds)
+  }
+
+  /**
    * Keeps a visible **modal** overlay matched to the window as it resizes.
    *
    * A bounded surface is skipped: stretching the omnibox dropdown to the full

@@ -1682,6 +1682,34 @@ export const invokeContracts = {
    * panel, and a menu floating over the page they are watching is worse than
    * the button they wanted.
    */
+  /**
+   * Moves the floating download chip by a screen-space delta.
+   *
+   * Deltas rather than an absolute position, because the chip is a native view
+   * that moves *under the cursor* as it is dragged: a position measured inside
+   * the view would be relative to a view that has already moved, and the chip
+   * would run away from the pointer. Screen coordinates do not care where the
+   * view is, so successive deltas compose correctly.
+   *
+   * Main clamps the result into the page area and stores it, so a chip dragged
+   * to the corner of a large monitor is still reachable on a small one.
+   */
+  'media:moveOffer': {
+    request: z.object({
+      dx: z.number().min(-4000).max(4000),
+      dy: z.number().min(-4000).max(4000),
+      /**
+       * The pointer came up.
+       *
+       * Only then is the position written to settings. Persisting on every
+       * delta would be a disk write per animation frame for the length of a
+       * drag, which is exactly the cost principle 1 refuses — the live position
+       * is held in memory until the gesture ends.
+       */
+      final: z.boolean().default(false)
+    }),
+    response: z.void()
+  },
   'media:offer': {
     request: z.void(),
     response: z

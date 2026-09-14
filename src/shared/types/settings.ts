@@ -502,6 +502,18 @@ export const SettingsSchema = z.object({
    * reference one already carry the id, so a queue disappearing strands
    * nothing (`selectStartable` falls back to the first).
    */
+  /**
+   * Where the floating download chip was last dragged to.
+   *
+   * Stored as an offset from the **page area**, not the window, because the
+   * toolbar auto-hides — saving screen coordinates would move the chip
+   * whenever the chrome changed height. Null means the default corner, and
+   * `clampChip` brings any saved position back into view on a smaller window.
+   */
+  mediaChipOffset: z
+    .object({ x: z.number(), y: z.number() })
+    .nullable()
+    .default(null),
   downloadQueues: z
     .array(
       z.object({
