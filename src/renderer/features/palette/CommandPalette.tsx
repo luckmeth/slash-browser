@@ -1,39 +1,69 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Tab } from '@shared/types/tab'
-import type { Bookmark } from '@shared/types/browsing'
+import type { Bookmark, HistoryEntry, DownloadItem } from '@shared/types/browsing'
+import type { ReadingItem } from '@shared/types/readingList'
+import type { Workspace } from '@shared/types/workspace'
 import type { UiCommand } from '@shared/ipc/contracts'
 import { isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
+import {
+  rankEntries,
+  groupRanked,
+  parseCommandQuery,
+  GROUP_LABEL,
+  SOURCE_FILTERS,
+  type SearchableEntry
+} from '@shared/commandSearch'
 import { Icon, type IconName } from '../../components/Icon'
 
 /**
  * One place to reach anything, on Ctrl+K.
  *
- * Distinct from tab search, which finds *tabs*. This also runs commands, so it
- * is the answer to "I know Slash does this and I cannot remember where it
- * lives" — the discoverability problem a browser with this many features has by
- * construction, and the reason the roadmap called it the biggest power-user win.
+ * Distinct from tab search, which finds *tabs*. This searches everything the
+ * browser holds — open tabs, commands, bookmarks, the reading list, workspaces,
+ * history and downloads — so it is the answer to "I know it is in here
+ * somewhere", which is the discoverability problem a browser with this many
+ * features has by construction.
  *
  * Everything here already existed behind a menu item or a panel; nothing new is
  * reachable through it. That is deliberate — a palette that is the only route to
  * something has made the product harder to use, not easier.
+ *
+ * The ranking is not in this file. `shared/commandSearch.ts` is pure and tested,
+ * because the ordering across seven sources is a decision somebody made rather
+ * than whatever order they happened to load in, and a decision like that is
+ * worth being able to assert.
  */
 
-interface Entry {
-  id: string
+interface Entry extends SearchableEntry {
   icon: IconName
-  label: string
-  detail?: string
-  group: 'Command' | 'Tab' | 'Bookmark'
+  /** The shortcut or hint shown at the end of the row, where there is one. */
+  hint?: string
   run: () => void
 }
+
+/**
+ * How long to wait before asking main for history.
+ *
+ * History is the one source that is *not* held in memory here: it is unbounded,
+ * so it is searched in SQLite rather than shipped to the overlay and filtered.
+ * That means a round trip per keystroke without this, which principle 1 does not
+ * allow on a box somebody is typing into.
+ */
+const HISTORY_DEBOUNCE_MS = 110
 
 export function CommandPalette(): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const [tabs, setTabs] = useState<Tab[]>([])
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [reading, setReading] = useState<ReadingItem[]>([])
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState('')
+  const [downloads, setDownloads] = useState<DownloadItem[]>([])
+  const [history, setHistory] = useState<HistoryEntry[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const close = useCallback((): void => {
     void window.browser.invoke('overlay:setState', { visible: false, surface: 'none' })
@@ -47,7 +77,51 @@ export function CommandPalette(): React.JSX.Element {
     void window.browser.invoke('bookmarks:list', undefined).then((result) => {
       if (result.ok) setBookmarks(result.value.filter((b) => !b.isFolder).slice(0, 200))
     })
+    void window.browser.invoke('reading:list', undefined).then((result) => {
+      if (result.ok) setReading(result.value)
+    })
+    void window.browser.invoke('workspaces:list', undefined).then((result) => {
+      if (result.ok) {
+        setWorkspaces(result.value.workspaces)
+        setActiveWorkspaceId(result.value.activeWorkspaceId)
+      }
+    })
+    void window.browser.invoke('downloads:list', undefined).then((result) => {
+      if (result.ok) setDownloads(result.value.slice(0, 100))
+    })
   }, [])
+
+  /*
+   * History, searched where it lives.
+   *
+   * Two guards, and both matter. The debounce keeps a keystroke from costing a
+   * query; the sequence number keeps a slow reply for "gi" from landing after a
+   * fast one for "github" and replacing the right answer with a stale one —
+   * which looks exactly like the ranking being wrong.
+   */
+  const historySeq = useRef(0)
+  useEffect(() => {
+    const { kind, terms } = parseCommandQuery(query)
+    // Below two characters every history row matches, which is noise rather
+    // than an answer. `history:` on its own is a deliberate ask for the list,
+    // so that one is honoured with no terms at all.
+    if (kind !== 'history' && terms.length < 2) {
+      setHistory([])
+      return
+    }
+
+    const seq = ++historySeq.current
+    const timer = setTimeout(() => {
+      void window.browser
+        .invoke('history:search', { query: terms, limit: 40, offset: 0 })
+        .then((result) => {
+          if (seq !== historySeq.current) return
+          if (result.ok) setHistory(result.value)
+        })
+    }, HISTORY_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [query])
 
   const entries = useMemo<Entry[]>(() => {
     const commands: Entry[] = [
@@ -59,7 +133,7 @@ export function CommandPalette(): React.JSX.Element {
       panel('open-history', 'clock', 'Open history', 'Ctrl+H'),
       panel('open-bookmarks', 'bookmarks', 'Open bookmarks', 'Ctrl+Shift+O'),
       panel('open-downloads', 'download', 'Open downloads', 'Ctrl+J'),
-      panel('open-reading', 'star', 'Open reading list', 'Ctrl+Shift+D saves'),
+      panel('open-reading', 'star', 'Open reading list'),
       panel('open-performance', 'activity', 'Open performance', 'Ctrl+Shift+P'),
       panel('open-memory', 'sparkle', 'Open browsing memory'),
       panel('open-permissions', 'lock', 'Open permissions'),
@@ -72,42 +146,104 @@ export function CommandPalette(): React.JSX.Element {
       )
     ]
 
+    const workspaceName = new Map(workspaces.map((w) => [w.id, w.name]))
+
     const tabEntries: Entry[] = tabs.map((tab) => ({
       id: `tab-${tab.id}`,
+      kind: 'tab',
       icon: 'globe',
       label: tab.title || hostOf(tab.url) || 'Untitled',
-      detail: isInternalUrl(tab.url) ? 'New tab' : hostOf(tab.url),
-      group: 'Tab',
+      // A tab in another workspace is still reachable — activating it switches
+      // workspace — so say which one, or arriving somewhere else is a surprise.
+      detail:
+        (isInternalUrl(tab.url) ? 'New tab' : hostOf(tab.url)) +
+        (tab.workspaceId !== activeWorkspaceId
+          ? ` · in ${workspaceName.get(tab.workspaceId) ?? 'another workspace'}`
+          : ''),
       run: () => void window.browser.invoke('tabs:activate', { tabId: tab.id })
     }))
 
     const bookmarkEntries: Entry[] = bookmarks.map((bookmark) => ({
       id: `bm-${bookmark.id}`,
+      kind: 'bookmark',
       icon: 'bookmarks',
       label: bookmark.title || hostOf(bookmark.url ?? ''),
       detail: hostOf(bookmark.url ?? ''),
-      group: 'Bookmark',
-      run: () =>
-        void window.browser.invoke('tabs:create', {
-          url: bookmark.url ?? '',
-          background: false
-        })
+      run: () => openUrl(bookmark.url ?? '')
     }))
 
-    return [...commands, ...tabEntries, ...bookmarkEntries]
-  }, [tabs, bookmarks])
+    const readingEntries: Entry[] = reading.map((item) => ({
+      id: `read-${item.id}`,
+      kind: 'reading',
+      icon: 'star',
+      label: item.title || hostOf(item.url),
+      detail: hostOf(item.url),
+      hint: item.readAt === null ? undefined : 'Read',
+      run: () => openUrl(item.url)
+    }))
 
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (q === '') return entries.slice(0, 12)
-    return entries
-      .filter((entry) => `${entry.label} ${entry.detail ?? ''}`.toLowerCase().includes(q))
-      .slice(0, 12)
-  }, [entries, query])
+    const workspaceEntries: Entry[] = workspaces.map((workspace) => ({
+      id: `ws-${workspace.id}`,
+      kind: 'workspace',
+      icon: workspace.icon,
+      label: workspace.name,
+      detail: workspace.isolated ? 'Isolated workspace' : 'Workspace',
+      hint: workspace.id === activeWorkspaceId ? 'Current' : undefined,
+      run: () => void window.browser.invoke('workspaces:activate', { id: workspace.id })
+    }))
+
+    const downloadEntries: Entry[] = downloads.map((item) => ({
+      id: `dl-${item.id}`,
+      kind: 'download',
+      icon: 'download',
+      label: item.filename,
+      detail: hostOf(item.url),
+      hint: item.state === 'completed' ? undefined : item.state,
+      // A finished file opens. Anything else has no file to open yet, so the
+      // honest outcome is the panel that shows what it is waiting on rather
+      // than a click that appears to do nothing.
+      run: () =>
+        void (item.state === 'completed'
+          ? window.browser.invoke('downloads:openFile', { id: item.id })
+          : window.browser.invoke('ui:run', { command: 'open-downloads' }))
+    }))
+
+    const historyEntries: Entry[] = history.map((item) => ({
+      id: `hist-${item.id}`,
+      kind: 'history',
+      icon: 'clock',
+      label: item.title || hostOf(item.url),
+      // The address rather than the host: main matched on the whole URL, so a
+      // row found by its path would otherwise be dropped again here, and the
+      // palette would silently show fewer results than the search returned.
+      detail: withoutScheme(item.url),
+      run: () => openUrl(item.url)
+    }))
+
+    return [
+      ...commands,
+      ...tabEntries,
+      ...bookmarkEntries,
+      ...readingEntries,
+      ...workspaceEntries,
+      ...downloadEntries,
+      ...historyEntries
+    ]
+  }, [tabs, bookmarks, reading, workspaces, activeWorkspaceId, downloads, history])
+
+  const matches = useMemo(() => rankEntries(entries, query, 40), [entries, query])
+  const groups = useMemo(() => groupRanked(matches), [matches])
 
   // Clamped rather than reset: the highlight should stay put while the list
   // shrinks under it, not jump back to the top on every keystroke.
   const active = Math.min(selected, Math.max(0, matches.length - 1))
+
+  // With seven sources the list is long enough to scroll, so moving the
+  // highlight below the fold has to bring it into view or the arrow keys appear
+  // to stop working.
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-row="${active}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [active])
 
   const accept = (entry: Entry | undefined): void => {
     if (!entry) return
@@ -115,8 +251,13 @@ export function CommandPalette(): React.JSX.Element {
     close()
   }
 
+  let row = -1
+
   return (
-    <div className="fixed inset-0 flex items-start justify-center bg-black/40 p-6 pt-[14vh]" onClick={close}>
+    <div
+      className="fixed inset-0 flex items-start justify-center bg-black/40 p-6 pt-[14vh]"
+      onClick={close}
+    >
       <div
         className="glass-float animate-rise w-full max-w-xl overflow-hidden rounded-2xl"
         onClick={(event) => event.stopPropagation()}
@@ -145,7 +286,7 @@ export function CommandPalette(): React.JSX.Element {
                 accept(matches[active])
               }
             }}
-            placeholder="Search commands, tabs and bookmarks"
+            placeholder="Search tabs, history, bookmarks, downloads and commands"
             aria-label="Command palette"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
           />
@@ -159,51 +300,100 @@ export function CommandPalette(): React.JSX.Element {
             Nothing matches “{query.trim()}”.
           </p>
         ) : (
-          <ul className="max-h-80 overflow-y-auto py-1.5">
-            {matches.map((entry, index) => (
-              <li key={entry.id}>
-                <button
-                  type="button"
-                  onMouseEnter={() => setSelected(index)}
-                  onClick={() => accept(entry)}
-                  className={`flex w-full cursor-default items-center gap-3 px-4 py-2 text-left transition ${
-                    index === active ? 'bg-[var(--glass-high)]' : 'hover:bg-white/[0.06]'
-                  }`}
-                >
-                  <Icon
-                    name={entry.icon}
-                    size={14}
-                    className="shrink-0 text-[var(--color-text-muted)]"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px]">{entry.label}</span>
-                    {entry.detail && (
-                      <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
-                        {entry.detail}
-                      </span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-[10px] tracking-wide text-[var(--color-text-muted)] uppercase">
-                    {entry.group}
-                  </span>
-                </button>
-              </li>
+          <div ref={listRef} className="max-h-[22rem] overflow-y-auto py-1.5">
+            {groups.map((group) => (
+              <section key={group.kind}>
+                <h2 className="px-4 pt-2 pb-1 text-[10px] font-medium tracking-wide text-[var(--color-text-muted)] uppercase">
+                  {GROUP_LABEL[group.kind]}
+                </h2>
+                <ul>
+                  {group.entries.map((entry) => {
+                    row += 1
+                    const index = row
+                    return (
+                      <li key={entry.id}>
+                        <button
+                          type="button"
+                          data-row={index}
+                          onMouseEnter={() => setSelected(index)}
+                          onClick={() => accept(entry)}
+                          className={`flex w-full cursor-default items-center gap-3 px-4 py-2 text-left transition ${
+                            index === active ? 'bg-[var(--glass-high)]' : 'hover:bg-white/[0.06]'
+                          }`}
+                        >
+                          <Icon
+                            name={entry.icon}
+                            size={14}
+                            className="shrink-0 text-[var(--color-text-muted)]"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px]">{entry.label}</span>
+                            {entry.detail && (
+                              <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
+                                {entry.detail}
+                              </span>
+                            )}
+                          </span>
+                          {entry.hint && (
+                            <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
+                              {entry.hint}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )}
+
+        {/*
+          The filters, where somebody will see them. They are the difference
+          between a box that finds the wrong kind of thing and one that can be
+          aimed, and nobody discovers a prefix syntax by guessing at it.
+        */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--glass-edge)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]">
+          <span>Narrow with</span>
+          {SOURCE_FILTERS.map((filter) => (
+            <button
+              key={filter.prefix}
+              type="button"
+              onClick={() => {
+                setQuery(filter.prefix)
+                setSelected(0)
+                inputRef.current?.focus()
+              }}
+              className="cursor-default rounded border border-[var(--glass-edge)] px-1.5 py-0.5 transition hover:bg-white/[0.08]"
+            >
+              {filter.prefix}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
+}
+
+function openUrl(url: string): void {
+  if (url === '') return
+  void window.browser.invoke('tabs:create', { url, background: false })
+}
+
+/** What a history row reads as. The scheme is noise in a list of addresses. */
+function withoutScheme(url: string): string {
+  return url.replace(/^https?:\/\//, '')
 }
 
 function cmd(
   id: string,
   icon: IconName,
   label: string,
-  detail: string | undefined,
+  hint: string | undefined,
   run: () => unknown
 ): Entry {
-  return { id, icon, label, detail, group: 'Command', run: () => void run() }
+  return { id, kind: 'command', icon, label, hint, run: () => void run() }
 }
 
 /**
@@ -219,14 +409,14 @@ function panel(
   command: UiCommand['command'],
   icon: IconName,
   label: string,
-  detail?: string
+  hint?: string
 ): Entry {
   return {
     id: `panel-${command}`,
+    kind: 'command',
     icon,
     label,
-    detail,
-    group: 'Command',
+    hint,
     run: () => void window.browser.invoke('ui:run', { command })
   }
 }

@@ -97,9 +97,80 @@ export async function runNewTabCapture(
     }
   }
 
+  /*
+   * Or photograph the overlay instead.
+   *
+   * The command palette is not in the chrome document — it is a separate
+   * `WebContentsView` composited above everything, so `chrome.capturePage()`
+   * photographs the page *underneath* it and reports success. Capturing the
+   * right view is the whole of the difference between looking at the feature
+   * and looking past it.
+   *
+   * The overlay is transparent, so what comes back is the palette over its own
+   * `bg-black/40` scrim with nothing behind it. That is enough to judge the
+   * layout, and the honest alternative — compositing two captures — would be a
+   * picture the browser never actually drew.
+   */
+  let shotContents = chrome
+  const overlaySurface = process.env['SLASH_CAPTURE_OVERLAY']
+  if (overlaySurface === 'command-palette') {
+    window.showCommandPalette()
+    // Long enough for the overlay document to mount and for its five source
+    // fetches to have come back. A capture before those land photographs an
+    // empty list, which is indistinguishable from a broken one.
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+
+    const overlay = window.overlay.webContents
+    if (!overlay || overlay.isDestroyed()) {
+      log.warn('overlay has no web contents to capture')
+    } else {
+      const typed = process.env['SLASH_CAPTURE_QUERY']
+      if (typed) {
+        overlay.focus()
+        for (const ch of typed) {
+          overlay.sendInputEvent({ type: 'keyDown', keyCode: ch })
+          overlay.sendInputEvent({ type: 'char', keyCode: ch })
+          overlay.sendInputEvent({ type: 'keyUp', keyCode: ch })
+        }
+        // Past the history debounce, which is the slowest source by design.
+        await new Promise((resolve) => setTimeout(resolve, 900))
+      }
+
+      // Report what it found as well as photographing it, so a run says
+      // something even when nobody opens the picture.
+      const found = (await overlay.executeJavaScript(
+        `(() => {
+           const input = document.querySelector('input[aria-label="Command palette"]');
+           const groups = [...document.querySelectorAll('section h2')].map((h) => {
+             const list = h.parentElement?.querySelector('ul');
+             return h.textContent + '=' + (list ? list.children.length : 0);
+           });
+           return JSON.stringify({ query: input ? input.value : null, groups });
+         })()`
+      )) as string
+
+      const state = JSON.parse(found) as { query: string | null; groups: string[] }
+      if (state.query === null) {
+        log.warn('RESULT: palette INCONCLUSIVE — no command palette on the overlay')
+      } else {
+        log.info(`palette: query=${JSON.stringify(state.query)} ${state.groups.join(' ')}`)
+        log.info(
+          state.groups.length > 0
+            ? `RESULT: palette PASS — ${state.groups.length} source(s) answered`
+            : 'RESULT: palette FAIL — nothing matched'
+        )
+      }
+      shotContents = overlay
+    }
+  } else if (overlaySurface) {
+    // Naming a surface nobody wired up should say so rather than quietly
+    // capturing the chrome and looking like the surface rendered nothing.
+    log.warn(`SLASH_CAPTURE_OVERLAY=${overlaySurface} is not wired up; capturing the chrome`)
+  }
+
   try {
     await fsp.mkdir(dirname(target), { recursive: true })
-    const shot = await chrome.capturePage()
+    const shot = await shotContents.capturePage()
     const png = shot.toPNG()
     if (png.length === 0) {
       log.warn('captured 0 bytes')
