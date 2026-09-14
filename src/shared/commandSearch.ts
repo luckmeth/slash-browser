@@ -18,7 +18,10 @@ export type SourceKind =
   | 'bookmark'
   | 'reading'
   | 'workspace'
+  | 'snapshot'
   | 'download'
+  /** A page matched on its indexed *text*, not its title. Opt-in, and off by default. */
+  | 'memory'
 
 export interface SearchableEntry {
   readonly id: string
@@ -27,6 +30,19 @@ export interface SearchableEntry {
   readonly label: string
   /** The second line: a host, a workspace, a filename. */
   readonly detail?: string
+  /**
+   * This row came back from a search that has already decided it matches.
+   *
+   * History and the page-text index are queried in SQLite, and SQLite is not
+   * matching the same way this module does — FTS5 stems, so a query for
+   * "running" returns a page containing "run". Re-scoring those here would drop
+   * rows the search genuinely found, and the palette would quietly show fewer
+   * results than were returned, which reads as the search being broken.
+   *
+   * They still *rank* last among equals, because a stem-only hit is a weaker
+   * claim to being the answer than a title somebody can see the words in.
+   */
+  readonly alreadyMatched?: boolean
 }
 
 export interface ParsedQuery {
@@ -55,11 +71,17 @@ const FILTERS: Record<string, SourceKind> = {
   workspace: 'workspace',
   workspaces: 'workspace',
   ws: 'workspace',
+  snapshot: 'snapshot',
+  snapshots: 'snapshot',
+  snap: 'snapshot',
   download: 'download',
   downloads: 'download',
   command: 'command',
   commands: 'command',
-  cmd: 'command'
+  cmd: 'command',
+  memory: 'memory',
+  page: 'memory',
+  text: 'memory'
 }
 
 export function parseCommandQuery(raw: string): ParsedQuery {
@@ -115,9 +137,13 @@ const KIND_BONUS: Record<SourceKind, number> = {
   command: 30,
   bookmark: 20,
   workspace: 15,
+  snapshot: 12,
   reading: 10,
   history: 5,
-  download: 0
+  download: 2,
+  // Last, and deliberately. A memory row matched somewhere in a page's *body*,
+  // which is a far weaker claim to being the answer than a matching title.
+  memory: 0
 }
 
 /**
@@ -148,7 +174,7 @@ export function scoreEntry(entry: SearchableEntry, terms: string): number | null
   const fuzzy = subsequenceScore(label, needle)
   if (fuzzy !== null) return fuzzy + bonus
 
-  return null
+  return entry.alreadyMatched === true ? bonus : null
 }
 
 function escapeRegExp(value: string): string {
@@ -191,6 +217,77 @@ export function rankEntries<T extends SearchableEntry>(
   return ranked.slice(0, limit)
 }
 
+/** A half-open `[start, end)` slice of a label that the query matched. */
+export type MatchRange = readonly [number, number]
+
+/**
+ * Which characters of a label the query actually hit.
+ *
+ * Derived from the same rules `scoreEntry` uses rather than re-matched some
+ * other way, so the highlight cannot disagree with the ranking — a row marked
+ * up in a place the matcher did not look is worse than no highlight, because it
+ * teaches the user a rule that is not true.
+ */
+export function matchRanges(text: string, terms: string): MatchRange[] {
+  if (terms === '') return []
+
+  const haystack = text.toLowerCase()
+  const needle = terms.toLowerCase()
+
+  // Every occurrence, not only the first: a title repeating the word looks
+  // wrong with one of them marked and the others plain.
+  if (haystack.includes(needle)) {
+    const ranges: MatchRange[] = []
+    let from = 0
+    for (;;) {
+      const at = haystack.indexOf(needle, from)
+      if (at === -1) break
+      ranges.push([at, at + needle.length])
+      from = at + needle.length
+    }
+    return ranges
+  }
+
+  // Otherwise it was a subsequence, so mark the characters it landed on —
+  // merged where they are adjacent, or "ChatGPT" for `chgpt` renders as four
+  // separate marks where it should read as two.
+  const ranges: MatchRange[] = []
+  let index = 0
+  for (const character of needle) {
+    const at = haystack.indexOf(character, index)
+    if (at === -1) return []
+    const last = ranges[ranges.length - 1]
+    if (last && last[1] === at) ranges[ranges.length - 1] = [last[0], at + 1]
+    else ranges.push([at, at + 1])
+    index = at + 1
+  }
+  return ranges
+}
+
+/**
+ * A label cut into its matched and unmatched pieces, in order.
+ *
+ * Returned rather than marked up here, because this module is shared and knows
+ * nothing about how anything is rendered.
+ */
+export function splitOnMatches(
+  text: string,
+  terms: string
+): { text: string; matched: boolean }[] {
+  const ranges = matchRanges(text, terms)
+  if (ranges.length === 0) return [{ text, matched: false }]
+
+  const parts: { text: string; matched: boolean }[] = []
+  let at = 0
+  for (const [start, end] of ranges) {
+    if (start > at) parts.push({ text: text.slice(at, start), matched: false })
+    parts.push({ text: text.slice(start, end), matched: true })
+    at = end
+  }
+  if (at < text.length) parts.push({ text: text.slice(at), matched: false })
+  return parts
+}
+
 /**
  * The filter to *show* for each source, and the order to show them in.
  *
@@ -204,8 +301,10 @@ export const SOURCE_FILTERS: readonly { prefix: string; kind: SourceKind }[] = [
   { prefix: 'bm:', kind: 'bookmark' },
   { prefix: 'reading:', kind: 'reading' },
   { prefix: 'ws:', kind: 'workspace' },
+  { prefix: 'snapshots:', kind: 'snapshot' },
   { prefix: 'history:', kind: 'history' },
-  { prefix: 'downloads:', kind: 'download' }
+  { prefix: 'downloads:', kind: 'download' },
+  { prefix: 'page:', kind: 'memory' }
 ]
 
 /** The heading each kind appears under. */
@@ -215,8 +314,10 @@ export const GROUP_LABEL: Record<SourceKind, string> = {
   bookmark: 'Bookmarks',
   reading: 'Reading list',
   workspace: 'Workspaces',
+  snapshot: 'Snapshots',
   history: 'History',
-  download: 'Downloads'
+  download: 'Downloads',
+  memory: 'Page text'
 }
 
 /**

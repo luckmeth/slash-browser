@@ -4,6 +4,8 @@ import {
   rankEntries,
   scoreEntry,
   groupRanked,
+  matchRanges,
+  splitOnMatches,
   GROUP_LABEL,
   SOURCE_FILTERS,
   type SearchableEntry
@@ -110,6 +112,22 @@ describe('scoreEntry', () => {
     expect(scoreEntry(row, 'c++')).not.toBeNull()
   })
 
+  it('keeps a row a search upstream already matched', () => {
+    // SQLite's FTS5 stems, so a query for "running" returns a page holding
+    // "run". Dropping it here would show fewer results than the search found.
+    const row = entry({ id: 'a', label: 'How to run fast', alreadyMatched: true })
+    expect(scoreEntry(row, 'running')).not.toBeNull()
+  })
+
+  it('ranks an upstream match below anything matched here', () => {
+    const upstream = scoreEntry(
+      entry({ id: 'a', kind: 'history', label: 'How to run fast', alreadyMatched: true }),
+      'running'
+    )!
+    const local = scoreEntry(entry({ id: 'b', kind: 'memory', label: 'Running' }), 'running')!
+    expect(local).toBeGreaterThan(upstream)
+  })
+
   it('matches the host when the title does not', () => {
     const row = entry({ id: 'a', label: 'Home', detail: 'github.com' })
     expect(scoreEntry(row, 'github')).not.toBeNull()
@@ -188,6 +206,84 @@ describe('rankEntries', () => {
       ''
     )
     expect(ranked.map((r) => r.id)).toEqual(['t', 'd'])
+  })
+})
+
+describe('matchRanges', () => {
+  it('marks a substring', () => {
+    expect(matchRanges('React Router', 'react')).toEqual([[0, 5]])
+  })
+
+  it('marks every occurrence', () => {
+    // One marked and the others plain reads as a rendering fault.
+    expect(matchRanges('docs about docs', 'docs')).toEqual([
+      [0, 4],
+      [11, 15]
+    ])
+  })
+
+  it('is case insensitive but keeps the original offsets', () => {
+    expect(matchRanges('Slash Release', 'RELEASE')).toEqual([[6, 13]])
+  })
+
+  it('marks the characters a subsequence landed on, merging runs', () => {
+    // "ChatGPT" for `chgpt` should read as two marks, not four.
+    expect(matchRanges('ChatGPT', 'chgpt')).toEqual([
+      [0, 2],
+      [4, 7]
+    ])
+  })
+
+  it('marks nothing when nothing matched', () => {
+    expect(matchRanges('Hacker News', 'zzz')).toEqual([])
+  })
+
+  it('marks nothing for an empty query', () => {
+    expect(matchRanges('Hacker News', '')).toEqual([])
+  })
+
+  it('agrees with the matcher on every row it ranks', () => {
+    // For rows matched here, the highlight must never mark one the ranking did
+    // not match, nor leave a matched one unmarked — a mark in a place the
+    // matcher did not look teaches the user a rule that is not true. An
+    // `alreadyMatched` row is the one deliberate exception, and it renders with
+    // nothing marked rather than with something invented.
+    const rows = [
+      entry({ id: 'a', label: 'React Router' }),
+      entry({ id: 'b', label: 'ChatGPT' }),
+      entry({ id: 'c', label: 'Slash Browser' }),
+      entry({ id: 'd', label: 'Hacker News' })
+    ]
+    for (const terms of ['react', 'chgpt', 'slbr', 'e', 'zzz']) {
+      for (const row of rows) {
+        const scored = scoreEntry(row, terms) !== null
+        expect(matchRanges(row.label, terms).length > 0).toBe(scored)
+      }
+    }
+  })
+})
+
+describe('splitOnMatches', () => {
+  it('cuts a label into its pieces, in order', () => {
+    expect(splitOnMatches('React Router', 'react')).toEqual([
+      { text: 'React', matched: true },
+      { text: ' Router', matched: false }
+    ])
+  })
+
+  it('returns the whole label unmatched when nothing hit', () => {
+    expect(splitOnMatches('Hacker News', 'zzz')).toEqual([
+      { text: 'Hacker News', matched: false }
+    ])
+  })
+
+  it('loses nothing', () => {
+    // The pieces are rendered in place of the label, so anything dropped here
+    // is a title that silently comes out wrong.
+    for (const terms of ['react', 'rr', 'out', '']) {
+      const parts = splitOnMatches('React Router', terms)
+      expect(parts.map((p) => p.text).join('')).toBe('React Router')
+    }
   })
 })
 

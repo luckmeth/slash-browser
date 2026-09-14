@@ -3,6 +3,8 @@ import type { Tab } from '@shared/types/tab'
 import type { Bookmark, HistoryEntry, DownloadItem } from '@shared/types/browsing'
 import type { ReadingItem } from '@shared/types/readingList'
 import type { Workspace } from '@shared/types/workspace'
+import type { Snapshot } from '@shared/types/snapshot'
+import type { MemoryResult } from '@shared/types/memory'
 import type { UiCommand } from '@shared/ipc/contracts'
 import { isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
@@ -10,6 +12,7 @@ import {
   rankEntries,
   groupRanked,
   parseCommandQuery,
+  splitOnMatches,
   GROUP_LABEL,
   SOURCE_FILTERS,
   type SearchableEntry
@@ -61,7 +64,18 @@ export function CommandPalette(): React.JSX.Element {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('')
   const [downloads, setDownloads] = useState<DownloadItem[]>([])
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [pages, setPages] = useState<MemoryResult[]>([])
+  /**
+   * Whether anything has been indexed to search.
+   *
+   * Both gates default off and CLAUDE.md is explicit that nothing indexes page
+   * content without an opt-in already recorded in settings. Asking before
+   * querying keeps the palette from reaching for an index the user never turned
+   * on, and keeps an empty group from appearing as though the feature failed.
+   */
+  const [memoryEnabled, setMemoryEnabled] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -88,6 +102,12 @@ export function CommandPalette(): React.JSX.Element {
     })
     void window.browser.invoke('downloads:list', undefined).then((result) => {
       if (result.ok) setDownloads(result.value.slice(0, 100))
+    })
+    void window.browser.invoke('snapshots:list', undefined).then((result) => {
+      if (result.ok) setSnapshots(result.value)
+    })
+    void window.browser.invoke('settings:getAll', undefined).then((result) => {
+      if (result.ok) setMemoryEnabled(result.value.indexHistory || result.value.indexPageContent)
     })
   }, [])
 
@@ -122,6 +142,32 @@ export function CommandPalette(): React.JSX.Element {
 
     return () => clearTimeout(timer)
   }, [query])
+
+  /*
+   * The page-text index, on the same terms as history and for the same reasons.
+   *
+   * Local throughout: `memory:search` is FTS5 over text this browser extracted
+   * and stored, plus the bundled embedding model when semantic search is on.
+   * Nothing about the query or the result leaves the machine.
+   */
+  const memorySeq = useRef(0)
+  useEffect(() => {
+    const { kind, terms } = parseCommandQuery(query)
+    if (!memoryEnabled || (kind !== 'memory' && terms.length < 3)) {
+      setPages([])
+      return
+    }
+
+    const seq = ++memorySeq.current
+    const timer = setTimeout(() => {
+      void window.browser.invoke('memory:search', { query: terms, limit: 12 }).then((result) => {
+        if (seq !== memorySeq.current) return
+        if (result.ok) setPages(result.value.results)
+      })
+    }, HISTORY_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [query, memoryEnabled])
 
   const entries = useMemo<Entry[]>(() => {
     const commands: Entry[] = [
@@ -160,6 +206,10 @@ export function CommandPalette(): React.JSX.Element {
         (tab.workspaceId !== activeWorkspaceId
           ? ` · in ${workspaceName.get(tab.workspaceId) ?? 'another workspace'}`
           : ''),
+      // Says what Enter will do, and that it will not open a second copy of a
+      // page that is already open — the one thing a search box over tabs and
+      // history has to get right.
+      hint: 'Switch to tab',
       run: () => void window.browser.invoke('tabs:activate', { tabId: tab.id })
     }))
 
@@ -187,7 +237,14 @@ export function CommandPalette(): React.JSX.Element {
       kind: 'workspace',
       icon: workspace.icon,
       label: workspace.name,
-      detail: workspace.isolated ? 'Isolated workspace' : 'Workspace',
+      // The notes when there are any, so a workspace can be found by what it is
+      // for rather than only by what it was called.
+      detail:
+        workspace.notes.trim() !== ''
+          ? workspace.notes.trim().replace(/\s+/g, ' ').slice(0, 120)
+          : workspace.isolated
+            ? 'Isolated workspace'
+            : 'Workspace',
       hint: workspace.id === activeWorkspaceId ? 'Current' : undefined,
       run: () => void window.browser.invoke('workspaces:activate', { id: workspace.id })
     }))
@@ -208,16 +265,41 @@ export function CommandPalette(): React.JSX.Element {
           : window.browser.invoke('ui:run', { command: 'open-downloads' }))
     }))
 
+    const snapshotEntries: Entry[] = snapshots.map((snapshot) => ({
+      id: `snap-${snapshot.id}`,
+      kind: 'snapshot',
+      icon: 'clock',
+      label: snapshot.label,
+      detail: `${snapshot.tabCount} tab${snapshot.tabCount === 1 ? '' : 's'} · ${dateOf(snapshot.createdAt)}`,
+      // Opens the restore-points screen rather than restoring from here.
+      // Restoring a snapshot reopens a whole session, which is not something a
+      // list of search results should do on one keystroke with no preview.
+      hint: 'Open restore points',
+      run: () => void window.browser.invoke('ui:run', { command: 'open-timemachine' })
+    }))
+
     const historyEntries: Entry[] = history.map((item) => ({
       id: `hist-${item.id}`,
       kind: 'history',
       icon: 'clock',
       label: item.title || hostOf(item.url),
       // The address rather than the host: main matched on the whole URL, so a
-      // row found by its path would otherwise be dropped again here, and the
-      // palette would silently show fewer results than the search returned.
+      // row found by its path reads as a match here too rather than looking
+      // like a result that arrived for no reason.
       detail: withoutScheme(item.url),
+      alreadyMatched: true,
       run: () => openUrl(item.url)
+    }))
+
+    const pageEntries: Entry[] = pages.map((page) => ({
+      id: `mem-${page.pageId}`,
+      kind: 'memory',
+      icon: 'sparkle',
+      label: page.title || hostOf(page.url),
+      // The passage that matched, which is the only reason this row is here.
+      detail: page.snippet.replace(/\s+/g, ' ').slice(0, 140),
+      alreadyMatched: true,
+      run: () => openUrl(page.url)
     }))
 
     return [
@@ -226,13 +308,28 @@ export function CommandPalette(): React.JSX.Element {
       ...bookmarkEntries,
       ...readingEntries,
       ...workspaceEntries,
+      ...snapshotEntries,
       ...downloadEntries,
-      ...historyEntries
+      ...historyEntries,
+      ...pageEntries
     ]
-  }, [tabs, bookmarks, reading, workspaces, activeWorkspaceId, downloads, history])
+  }, [
+    tabs,
+    bookmarks,
+    reading,
+    workspaces,
+    activeWorkspaceId,
+    snapshots,
+    downloads,
+    history,
+    pages
+  ])
 
   const matches = useMemo(() => rankEntries(entries, query, 40), [entries, query])
   const groups = useMemo(() => groupRanked(matches), [matches])
+  // What to mark up in each row: the terms with any filter prefix removed, or
+  // `history:` would be highlighted in every history row it just selected.
+  const terms = useMemo(() => parseCommandQuery(query).terms, [query])
 
   // Clamped rather than reset: the highlight should stay put while the list
   // shrinks under it, not jump back to the top on every keystroke.
@@ -327,10 +424,12 @@ export function CommandPalette(): React.JSX.Element {
                             className="shrink-0 text-[var(--color-text-muted)]"
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[13px]">{entry.label}</span>
+                            <span className="block truncate text-[13px]">
+                              <Highlight text={entry.label} terms={terms} />
+                            </span>
                             {entry.detail && (
                               <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
-                                {entry.detail}
+                                <Highlight text={entry.detail} terms={terms} />
                               </span>
                             )}
                           </span>
@@ -374,6 +473,39 @@ export function CommandPalette(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+/**
+ * A label with the matched characters marked.
+ *
+ * The pieces come from `splitOnMatches`, which derives them from the same rules
+ * the ranking used — so the marks cannot point somewhere the matcher never
+ * looked, and a row that ranked for a reason this module cannot show (a stemmed
+ * FTS hit) renders plain rather than with something invented.
+ */
+function Highlight({ text, terms }: { text: string; terms: string }): React.JSX.Element {
+  const parts = useMemo(() => splitOnMatches(text, terms), [text, terms])
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.matched ? (
+          <mark
+            key={index}
+            className="bg-transparent font-semibold text-[var(--color-accent)]"
+          >
+            {part.text}
+          </mark>
+        ) : (
+          <span key={index}>{part.text}</span>
+        )
+      )}
+    </>
+  )
+}
+
+/** A snapshot's date, in the browser's own locale rather than a fixed format. */
+function dateOf(at: number): string {
+  return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function openUrl(url: string): void {
