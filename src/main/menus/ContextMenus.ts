@@ -339,6 +339,25 @@ export function showTabContextMenu(tabId: string, deps: ContextMenuDeps): void {
               click: () => deps.tabs.setSplit(tabId)
             }
           ]),
+    /*
+     * The rest of the split controls, and only while a split is actually up.
+     *
+     * Offering "Swap panes" on a window with one pane is a menu item that
+     * cannot do what it says — the same objection that greys out the entry
+     * above for an internal page.
+     */
+    ...(deps.tabs.splitId !== null
+      ? [
+          {
+            label: 'Swap the two panes',
+            click: () => deps.tabs.swapSplit()
+          },
+          {
+            label: 'Close split view',
+            click: () => deps.tabs.setSplit(null)
+          }
+        ]
+      : []),
     separator,
     {
       label: 'Bookmark this tab',

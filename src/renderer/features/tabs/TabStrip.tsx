@@ -3,6 +3,7 @@ import type { Tab } from '@shared/types/tab'
 import type { TabGroup } from '@shared/types/tabGroup'
 import { internalPageTitle, isInternalUrl } from '@shared/types/tab'
 import { hostOf } from '@shared/url'
+import { droppedInput } from '@shared/dropInput'
 import { useBrowserStore } from '../../stores/browserStore'
 import { Icon } from '../../components/Icon'
 import { COLOR_CLASSES } from '../workspaces/workspaceColors'
@@ -128,6 +129,61 @@ export function TabStrip({
     setDropIndex(null)
   }
 
+  /*
+   * A link dropped on the strip opens as a tab.
+   *
+   * The architecture's limit is unchanged and is about the other direction: a
+   * drag *out of a Slash page view* cannot reach the chrome, because the page
+   * is a separate native surface and a drag session belongs to one of them. A
+   * drag from **another application** — a link from another browser, a file
+   * from Explorer, a selection from an editor — lands on the chrome document,
+   * which is what the tab strip is, so it can be read.
+   *
+   * `droppedInput` is the same rule the start page uses, so the two surfaces
+   * cannot disagree about what is a search and what is a site: text/uri-list
+   * wins over text/plain, because a link reading "click here" would otherwise
+   * become a web search for those words.
+   */
+  const [externalDrop, setExternalDrop] = useState(false)
+
+  function acceptExternal(event: React.DragEvent): boolean {
+    // An internal tab drag carries our own type; that path is `handleDrop` and
+    // must not be treated as an external link.
+    return !event.dataTransfer.types.includes('text/tab-id')
+  }
+
+  async function onExternalDrop(event: React.DragEvent): Promise<void> {
+    setExternalDrop(false)
+    if (!acceptExternal(event)) return
+
+    const input = droppedInput({
+      uriList: event.dataTransfer.getData('text/uri-list'),
+      text: event.dataTransfer.getData('text/plain')
+    })
+    if (input === null) return
+    event.preventDefault()
+
+    /*
+     * Open a tab, then navigate it through the omnibox's own resolver.
+     *
+     * Two calls rather than `tabs:create({ url })`, because the dropped text may
+     * be a phrase rather than an address and only `nav:navigate` decides which.
+     * Resolving it here would be a second rule that could disagree with the
+     * address bar about what "wiki" means.
+     *
+     * Files are deliberately not handled. Reading a dropped file's path needs
+     * `webUtils.getPathForFile` exposed through the preload, which is a new
+     * privileged surface for a rare gesture — and a file drop that silently
+     * does nothing is worse than one that was never offered.
+     */
+    const created = await window.browser.invoke('tabs:create', {
+      url: undefined,
+      background: false
+    })
+    if (!created.ok || !created.value.activeTabId) return
+    await window.browser.invoke('nav:navigate', { tabId: created.value.activeTabId, input })
+  }
+
   const vertical = orientation === 'vertical'
 
   return (
@@ -135,7 +191,7 @@ export function TabStrip({
       ref={measureStrip}
       className={
         vertical
-          ? 'flex min-h-0 flex-1 flex-col items-stretch gap-0.5 overflow-y-auto px-1.5 py-1.5'
+          ? 'relative flex min-h-0 flex-1 flex-col items-stretch gap-0.5 overflow-y-auto px-1.5 py-1.5'
           : // Centred while the tabs fit, and left-aligned the moment they do
             // not. `justify-center` on a scrolling flex row is a trap: the
             // overflow spills equally both ways, so the first tab ends up at a
@@ -145,13 +201,36 @@ export function TabStrip({
             // preference; being able to reach a tab is not, so the failure mode
             // when the measurement is wrong has to be "scrolls" rather than
             // "clipped and gone".
-            `flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto overflow-y-hidden px-2 pt-1.5 ${
+            `relative flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto overflow-y-hidden px-2 pt-1.5 ${
               overflowing ? 'tab-strip-faded justify-start' : 'justify-center'
             }`
       }
       role="tablist"
       aria-label="Tabs"
+      onDragOver={(event) => {
+        if (!acceptExternal(event)) return
+        // Without preventDefault the drop never fires and the cursor stays a
+        // "no entry" sign, which reads as the feature not existing.
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+        if (!externalDrop) setExternalDrop(true)
+      }}
+      onDragLeave={(event) => {
+        // Only when the pointer has genuinely left the strip. Crossing a child
+        // fires dragleave on the parent, which would flicker the hint on every
+        // tab passed over.
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        setExternalDrop(false)
+      }}
+      onDrop={(event) => void onExternalDrop(event)}
+      data-external-drop={externalDrop ? 'true' : undefined}
     >
+      {externalDrop && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--color-accent)]"
+        />
+      )}
       {tabs.map((tab, index) => {
         const group = tab.groupId ? groups.find((g) => g.id === tab.groupId) : undefined
         // The chip is drawn before the first tab of each run. Membership implies

@@ -62,6 +62,9 @@ export function CommandPalette(): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const [tabs, setTabs] = useState<Tab[]>([])
+  /** Split state, so the split commands appear only when they can act. */
+  const [splitTabId, setSplitTabId] = useState<string | null>(null)
+  const [splitOrientation, setSplitOrientation] = useState<'vertical' | 'horizontal'>('vertical')
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [reading, setReading] = useState<ReadingItem[]>([])
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -90,7 +93,11 @@ export function CommandPalette(): React.JSX.Element {
   useEffect(() => {
     inputRef.current?.focus()
     void window.browser.invoke('tabs:listAll', undefined).then((result) => {
-      if (result.ok) setTabs(result.value.tabs)
+      if (result.ok) {
+        setTabs(result.value.tabs)
+        setSplitTabId(result.value.splitTabId)
+        setSplitOrientation(result.value.splitOrientation)
+      }
     })
     void window.browser.invoke('bookmarks:list', undefined).then((result) => {
       if (result.ok) setBookmarks(result.value.filter((b) => !b.isFolder).slice(0, 200))
@@ -206,6 +213,24 @@ export function CommandPalette(): React.JSX.Element {
         window.browser.invoke('tabs:create', { url: undefined, background: false })
       ),
       cmd('split', 'wsFolder', 'Toggle split view', 'Ctrl+Shift+S', toggleSplit),
+      // Only while a split is up: a command that cannot do what it says is the
+      // same problem as a greyed menu item, and worse in a search box where
+      // there is nothing to grey.
+      ...(splitTabId
+        ? [
+            cmd('swap-split', 'expand', 'Swap the two panes', undefined, () =>
+              window.browser.invoke('tabs:swapSplit', undefined)
+            ),
+            cmd('close-split', 'close', 'Close split view', undefined, () =>
+              window.browser.invoke('tabs:setSplit', { tabId: null })
+            ),
+            cmd('split-orientation', 'expand', 'Stack the panes instead', 'Or side by side', () =>
+              window.browser.invoke('tabs:setSplitOrientation', {
+                orientation: splitOrientation === 'vertical' ? 'horizontal' : 'vertical'
+              })
+            )
+          ]
+        : []),
       cmd('reopen-closed', 'reload', 'Reopen the last closed tab', 'Ctrl+Shift+T', () =>
         window.browser.invoke('tabs:reopenClosed', undefined)
       ),
@@ -401,6 +426,8 @@ export function CommandPalette(): React.JSX.Element {
     ]
   }, [
     duplicates,
+    splitTabId,
+    splitOrientation,
     tabs,
     bookmarks,
     reading,
