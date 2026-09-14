@@ -189,6 +189,18 @@ export type OverlayState = z.infer<typeof OverlayStateSchema>
 
 const TabIdSchema = z.object({ tabId: z.string() })
 
+/** What one page stated about itself. `alignFacts` turns several into a table. */
+export const PageFactsSchema = z.object({
+  tabId: z.string(),
+  url: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  siteName: z.string().nullable(),
+  fields: z.record(z.string(), z.string()),
+  headings: z.array(z.string()),
+  wordCount: z.number().int()
+})
+
 /** The raw signals behind the Site Trust view. `buildTrustReport` reads these. */
 export const TrustSignalsSchema = z.object({
   url: z.string(),
@@ -250,6 +262,7 @@ export const UiCommandSchema = z.object({
     'open-performance',
     'open-protection',
     'open-trust',
+    'open-compare',
     'open-find',
     'open-permissions',
     'open-timemachine',
@@ -910,6 +923,24 @@ export const invokeContracts = {
   'trust:report': {
     request: z.object({ tabId: z.string() }),
     response: TrustSignalsSchema
+  },
+  /**
+   * Reads what several open pages say about themselves, so they can be compared.
+   *
+   * Runs a script in each page's own world, on this click only — nothing is
+   * read on load or on a timer, nothing is fetched, and no model is consulted.
+   * A tab that cannot be read comes back in `unreadable` with the reason rather
+   * than being silently dropped, because a comparison missing a column somebody
+   * selected looks like a fault.
+   */
+  'compare:tabs': {
+    request: z.object({ tabIds: z.array(z.string()).min(2).max(4) }),
+    response: z.object({
+      facts: z.array(PageFactsSchema),
+      unreadable: z.array(
+        z.object({ tabId: z.string(), title: z.string(), reason: z.string() })
+      )
+    })
   },
   /**
    * A week of what the browser actually did, for the protection report.

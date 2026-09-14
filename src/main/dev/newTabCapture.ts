@@ -67,6 +67,11 @@ export async function runNewTabCapture(
       window.tabs.create({ url: targetUrl, background: true })
     }
 
+    // A second, different page — for anything that needs two real documents to
+    // look at rather than two copies of one. Compare Tabs is the reason.
+    const second = process.env['SLASH_CAPTURE_URL_2']
+    if (second) window.tabs.create({ url: second, background: true })
+
     if (background) {
       const internal = window.tabs.allTabs().find((tab) => isInternalUrl(tab.snapshot.url))
       if (internal) window.tabs.activate(internal.id)
@@ -178,6 +183,27 @@ export async function runNewTabCapture(
     // Long enough for the panel's own fetches — a performance snapshot is
     // sampled rather than held, so capturing early photographs "Measuring…".
     await new Promise((resolve) => setTimeout(resolve, 2500))
+  }
+
+  /*
+   * Drive the chrome document before photographing it.
+   *
+   * Some panels only show their real output after somebody has chosen
+   * something — Compare pages is empty until two tabs are ticked and the button
+   * pressed. `SLASH_CAPTURE_CLICK` is an expression evaluated in the chrome
+   * document, so the probe exercises the actual UI path rather than calling the
+   * service behind it and photographing a screen nobody could have produced.
+   */
+  const clickScript = process.env['SLASH_CAPTURE_CLICK']
+  if (clickScript) {
+    try {
+      const clicked: unknown = await chrome.executeJavaScript(clickScript)
+      log.info(`click script returned ${JSON.stringify(clicked)}`)
+    } catch (error) {
+      log.warn(`click script failed — ${String(error)}`)
+    }
+    // Long enough for whatever it started to have come back.
+    await new Promise((resolve) => setTimeout(resolve, 3000))
   }
 
   let shotContents = chrome

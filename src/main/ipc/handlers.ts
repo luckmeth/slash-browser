@@ -2317,6 +2317,30 @@ export function registerHandlers(ctx: AppContext): void {
     return ok(ctx.readingList.list())
   })
 
+  ipc.handle('compare:tabs', async (request, context) => {
+    const window = windowOf(context.sender)
+    if (!window) return err('NOT_FOUND', 'No window for this view')
+
+    const tabs = request.tabIds.map((tabId) => {
+      const tab = window.tabs.findById(tabId)
+      const contents = tab?.contents ?? null
+      return {
+        id: tabId,
+        url: tab?.snapshot.url ?? '',
+        title: tab?.snapshot.title ?? 'Tab',
+        // A hibernated or internal tab has no renderer. Reported as unreadable
+        // rather than woken: waking one to read a table would reload a page
+        // somebody deliberately put to sleep.
+        execute:
+          contents && !contents.isDestroyed()
+            ? (script: string) => contents.executeJavaScript(script, true)
+            : null
+      }
+    })
+
+    return ok(await ctx.tabCompare.read(tabs))
+  })
+
   ipc.handle('blocking:sessionTotals', () => ok(ctx.blocker.activity.sessionCounts()))
 
   /*

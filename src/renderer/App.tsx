@@ -248,6 +248,9 @@ export function App(): React.JSX.Element {
         case 'open-trust':
           togglePanel('trust')
           break
+        case 'open-compare':
+          togglePanel('compare')
+          break
         case 'open-find':
           openFind()
           break

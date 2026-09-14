@@ -53,6 +53,7 @@ import { LoginFiller } from './passwords/LoginFiller'
 import { ClosedTabRepository } from './db/repositories/ClosedTabRepository'
 import { ProtectionRepository } from './db/repositories/ProtectionRepository'
 import { ProtectionLedger } from './protection/ProtectionLedger'
+import { TabCompareService } from './compare/TabCompareService'
 import { SessionSnapshotManager } from './snapshots/SessionSnapshotManager'
 import { MemoryRepository } from './db/repositories/MemoryRepository'
 import { VectorStore } from './db/repositories/VectorStore'
@@ -295,6 +296,8 @@ export class AppContext {
   readonly blocker: ContentBlocker
   /** Counts of what the browser did, by day, for the weekly report. */
   readonly protection: ProtectionLedger
+  /** Reads what open pages state about themselves, for Compare Tabs. */
+  readonly tabCompare = new TabCompareService()
   readonly popups: PopupGuard
   readonly redirects: RedirectGuard
   /**

@@ -145,6 +145,7 @@ export const INVOKE_CHANNELS = [
   'blocking:setSiteAllowed',
   'blocking:sessionTotals',
   'trust:report',
+  'compare:tabs',
   'protection:week',
   'protection:clear',
   'shield:releasePopup',

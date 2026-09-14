@@ -236,6 +236,7 @@ export function CommandPalette(): React.JSX.Element {
       panel('open-performance', 'activity', 'Open performance', 'Ctrl+Shift+P'),
       panel('open-protection', 'shield', 'What Slash did this week', 'Protection report'),
       panel('open-trust', 'lock', 'Site trust for this page', 'What Slash knows about it'),
+      panel('open-compare', 'expand', 'Compare open pages', 'Side by side, read locally'),
       panel('open-memory', 'sparkle', 'Open browsing memory'),
       panel('open-permissions', 'lock', 'Open permissions'),
       panel('open-timemachine', 'clock', 'Open restore points'),

@@ -17,6 +17,7 @@ import { WorkspaceEditor } from '../workspaces/WorkspaceEditor'
 import { PerformancePanel } from '../performance/PerformancePanel'
 import { ProtectionPanel } from '../protection/ProtectionPanel'
 import { SiteTrustPanel } from '../trust/SiteTrustPanel'
+import { CompareTabsPanel } from '../compare/CompareTabsPanel'
 import { PermissionsPanel } from '../permissions/PermissionsPanel'
 import { TimeMachinePanel } from '../timemachine/TimeMachinePanel'
 import { MemoryPanel } from '../memory/MemoryPanel'
@@ -32,6 +33,7 @@ const TITLES = {
   performance: 'Performance',
   protection: 'Protection report',
   trust: 'Site trust',
+  compare: 'Compare pages',
   permissions: 'Permissions',
   timemachine: 'Restore points',
   memory: 'Browsing memory',
@@ -123,6 +125,7 @@ export function SidePanel(): React.JSX.Element | null {
             {panel === 'performance' && <PerformancePanel />}
             {panel === 'protection' && <ProtectionPanel />}
             {panel === 'trust' && <SiteTrustPanel />}
+            {panel === 'compare' && <CompareTabsPanel />}
             {panel === 'permissions' && <PermissionsPanel />}
             {panel === 'timemachine' && (
               <>
